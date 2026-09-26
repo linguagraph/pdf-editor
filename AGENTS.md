@@ -30,6 +30,8 @@ uv run ruff check . && uv run ruff format .
 uv run lint-imports                    # architecture contracts
 uv run mypy
 uv run python -m pdfeditor [file.pdf]  # launch the app
+uv run python -m pdfeditor --self-test # end-to-end smoke test (no window)
+uv pip install -e ".[build]" && uv run python scripts/build_exe.py --test  # dist/pdfeditor.exe
 ```
 
 Before calling a task done, run: `ruff check`, `ruff format --check`, `lint-imports`, `mypy`,
@@ -65,6 +67,24 @@ pdfeditor.model     pure-Python dataclasses: geometry, text, annotations, outlin
    access off the GUI thread. Mutations bump the page revision so cached tiles are invalidated.
 7. **Safe saving.** Write to a temp file, verify by reopening, then atomically replace. Use
    incremental save when the document has signatures. Never silently flatten forms/signatures.
+
+## Self-contained executable (required)
+
+The product ships as one `pdfeditor.exe` (PyInstaller one-file, `packaging/pdfeditor.spec`).
+No feature may need Python, an installer or an external tool at runtime.
+
+- Bundled files go in `src/pdfeditor/data/` and are read only through
+  `pdfeditor.bundle.data_path()`. Never use paths relative to the source tree or tools on PATH.
+- A new runtime dependency must work frozen. Check that its imports are found (add
+  `hiddenimports` for lazy or dynamic imports), that its data files are collected, and that
+  nothing under `DEV_EXCLUDES` is needed. If you start using a package excluded there (such as
+  numpy), remove it from the list.
+- Extend `pdfeditor/selftest.py` when you add a subsystem that could break only when frozen
+  (new native library, bundled data, plugin).
+- `uv run python scripts/build_exe.py --test` builds the exe and runs `--self-test`. CI does the
+  same on every PR (size budget: 150 MB).
+- External programs (LibreOffice, Ghostscript, veraPDF) may only power optional extras, detected
+  at runtime, with a clear message when they're missing.
 
 ## Coding conventions
 

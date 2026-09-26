@@ -83,7 +83,24 @@ def install_excepthook() -> None:
     sys.excepthook = _excepthook
 
 
+def _option_value(argv: list[str], name: str) -> str | None:
+    """Value of ``--name=value`` or ``--name value``."""
+    for i, arg in enumerate(argv):
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+        if arg == name and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
 def run(argv: list[str]) -> int:
+    if "--self-test" in argv:
+        from pdfeditor.selftest import run_self_test
+
+        setup_logging(logging.WARNING)
+        report = _option_value(argv, "--self-test-report")
+        return run_self_test(Path(report) if report else None)
+
     setup_logging()
     install_excepthook()
     log.info("Starting %s %s", APP_NAME, __version__)
@@ -100,6 +117,11 @@ def run(argv: list[str]) -> int:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
     app.setApplicationVersion(__version__)
+    from PySide6.QtGui import QIcon
+
+    from pdfeditor.bundle import data_path
+
+    app.setWindowIcon(QIcon(str(data_path("icon.png"))))
 
     if not new_instance and send_to_running_instance(files):
         log.info("handed %d file(s) to the running instance", len(files))

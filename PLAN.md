@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: P (Self-contained executable), then 4.**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 4 (Session, undo/redo, persistence).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -122,13 +122,13 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Rendering golden tests (perceptual tolerance), plus a benchmark for first paint of page 1 and scrolling a 1000-page doc (`tests/benchmarks`; open 0.5 ms, first paint ~120 ms, cold full-text search ~1 s)
 
 ### Phase P: Self-contained executable, early (S–M), done next, before Phase 4
-- [ ] `resources.py`: one helper to find bundled data (`importlib.resources` / `sys._MEIPASS`); no feature reads files relative to the source tree or relies on PATH tools
-- [ ] `--self-test` CLI mode: open a bundled sample PDF, render a page, extract text, save a copy to a temp dir, exit 0/1. It's used by CI and by users reporting problems
-- [ ] PyInstaller spec (`packaging/pdfeditor.spec`): one-file `pdfeditor.exe` (windowed), app icon, version info, trimmed Qt (only needed modules and plugins, no QtWebEngine/Qt3D/QML), excluding test and dev packages
-- [ ] Build script `scripts/build_exe.py` (clean build, reports size) and a size budget (target < 150 MB for the one-file exe)
-- [ ] CI job on windows-latest: build the exe, run `pdfeditor.exe --self-test`, upload it as a workflow artifact
-- [ ] Startup check of the one-file build (unpack + first window); if it's over ~3 s, evaluate Nuitka or a one-folder portable zip as an alternative deliverable
-- [ ] AGENTS.md rule: each new dependency or data file must work in the frozen build (added to the spec and covered by `--self-test` where practical)
+- [x] `resources.py`: one helper to find bundled data (`importlib.resources` / `sys._MEIPASS`); no feature reads files relative to the source tree or relies on PATH tools
+- [x] `--self-test` CLI mode: open a bundled sample PDF, render a page, extract text, save a copy to a temp dir, exit 0/1. It's used by CI and by users reporting problems
+- [x] PyInstaller spec (`packaging/pdfeditor.spec`): one-file `pdfeditor.exe` (windowed), app icon, version info, trimmed Qt (only needed modules and plugins, no QtWebEngine/Qt3D/QML), excluding test and dev packages
+- [x] Build script `scripts/build_exe.py` (clean build, reports size) and a size budget (target < 150 MB for the one-file exe)
+- [x] CI job on windows-latest: build the exe, run `pdfeditor.exe --self-test`, upload it as a workflow artifact
+- [x] Startup check of the one-file build (unpack + first window); if it's over ~3 s, evaluate Nuitka or a one-folder portable zip as an alternative deliverable _(measured: 80 MB exe, window shown ~1.1 s after launch, so no fallback needed)_
+- [x] AGENTS.md rule: each new dependency or data file must work in the frozen build (added to the spec and covered by `--self-test` where practical)
 
 ### Phase 4: Session, undo/redo, persistence (M)
 - [ ] `DocumentSession`: dirty tracking, title asterisk, save prompts on close
