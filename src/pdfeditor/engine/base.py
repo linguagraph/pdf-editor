@@ -130,7 +130,11 @@ class Page(Protocol):
 
     @property
     def revision(self) -> int:
-        """Increments on every mutation of this page; used to invalidate render caches."""
+        """Changes on every mutation of this page; used to invalidate render caches.
+
+        Must be pure bookkeeping (no engine calls): the GUI thread reads it without the session
+        lock while a worker may be rendering.
+        """
         ...
 
     def render(self, request: RenderRequest) -> RenderResult: ...
@@ -157,7 +161,10 @@ class Document(Protocol):
     @property
     def is_dirty(self) -> bool: ...
 
-    def page(self, index: int) -> Page: ...
+    def page(self, index: int) -> Page:
+        """Page handle. Like ``page_count`` and ``Page.revision``, this must not call into the
+        engine, so it's safe without the session lock; every other method needs the lock."""
+        ...
 
     def info(self) -> DocumentInfo: ...
 

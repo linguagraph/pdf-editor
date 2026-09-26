@@ -430,3 +430,21 @@ def test_coordinates_match_rendering_on_rotated_pages(
     hit = page.search(needle)[0].rect
     assert hit.intersects(word_bbox)
     doc.close()
+
+
+def test_page_handles_are_lock_free_bookkeeping(engine: Engine, fixture_pdf, monkeypatch) -> None:
+    """page(), page_count and revision must not call into the engine (used without the lock)."""
+    doc = engine.open(fixture_pdf("text_multipage"))
+    fz = getattr(doc, "fz", None)
+    if fz is None:
+        pytest.skip("backend exposes no native handle to guard")
+
+    class Guard:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"engine touched: {name}")
+
+    monkeypatch.setattr(type(doc), "fz", property(lambda self: Guard()))
+    assert doc.page_count == 5
+    assert isinstance(doc.page(4).revision, int)
+    monkeypatch.undo()
+    doc.close()

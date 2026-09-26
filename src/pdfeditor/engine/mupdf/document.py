@@ -107,6 +107,8 @@ class MuDocument:
         self._pages: dict[int, MuPage] = {}
         self._revisions: dict[int, int] = {}
         self._generation = 0  # bumped whenever the whole document is reloaded
+        # Cached so page()/revision never call into MuPDF (they're used without the lock).
+        self._page_count = int(fz.page_count)
         self._backing_tmp: Path | None = None  # set when a failed save left us on a temp file
         self._force_dirty = False
 
@@ -124,8 +126,13 @@ class MuDocument:
         if page is not None:
             page.invalidate()
 
+    def structure_changed(self) -> None:
+        """Call after pages were inserted, deleted or moved: resync counts and drop caches."""
+        self._reset_pages()
+
     def _reset_pages(self) -> None:
         self._generation += 1
+        self._page_count = int(self._fz.page_count)
         for page in self._pages.values():
             page.invalidate()
         self._pages.clear()
@@ -141,7 +148,7 @@ class MuDocument:
 
     @property
     def page_count(self) -> int:
-        return int(self._fz.page_count)
+        return self._page_count
 
     @property
     def is_dirty(self) -> bool:

@@ -191,7 +191,8 @@ class MuPage:
                 target = int(ln["page"])
                 dest = Destination(
                     page_index=target,
-                    point=self._dest_point(target, to),
+                    # MuPDF already reports link targets in the target page's visible space.
+                    point=cv.point(to) if to is not None else None,
                     zoom=float(ln["zoom"]) if ln.get("zoom") else None,
                 )
             out.append(
@@ -205,12 +206,6 @@ class MuPage:
                 )
             )
         return out
-
-    def _dest_point(self, target: int, to: Any) -> Point | None:
-        if to is None or not 0 <= target < self._doc.page_count:
-            return None
-        target_page = self._doc.page(target)
-        return target_page._vpoint(to, target_page._vis_matrix())
 
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]
