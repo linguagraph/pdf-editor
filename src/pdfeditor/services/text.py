@@ -58,8 +58,9 @@ class PageTextIndex:
     # -- hit testing ----------------------------------------------------------------------
     def hit_test(self, p: Point, tolerance: float = 4.0) -> int | None:
         """Caret index at ``p`` if ``p`` is on (or within ``tolerance`` of) a text line."""
-        near = [(_distance(r, p), i) for i, r in enumerate(self.line_rects)]
-        near = [(d, i) for d, i in near if d <= tolerance]
+        # Unweighted box distance: the tolerance applies equally in x and y (line gaps).
+        near = [(_box_gap(r, p), _distance(r, p), i) for i, r in enumerate(self.line_rects)]
+        near = [(w, i) for gap, w, i in near if gap <= tolerance]
         if not near:
             return None
         return self._nearest_on_line(min(near)[1], p)
@@ -128,6 +129,10 @@ class PageTextIndex:
 
     def extract(self, start: int, end: int) -> str:
         return self.text[max(0, start) : max(0, end)]
+
+
+def _box_gap(r: Rect, p: Point) -> float:
+    return max(r.x0 - p.x, 0.0, p.x - r.x1, r.y0 - p.y, p.y - r.y1)
 
 
 def _distance(r: Rect, p: Point) -> float:

@@ -47,6 +47,8 @@ def test_hit_test_and_word_line_ranges(cache: TextIndexCache) -> None:
     assert caret is not None and h + 3 <= caret <= h + 4
     assert index.extract(*index.word_range(h + 3)) == "heading"
     assert index.extract(*index.line_range(h)) == "Page 1 heading"
+    # just below the heading line (inside the tolerance) still hits it
+    assert index.hit_test(Point(heading.center.x, heading.y1 + 3)) is not None
     # far outside any text
     assert index.hit_test(Point(5, 5)) is None
     # left of a line snaps to its start; nearest() never gives up
