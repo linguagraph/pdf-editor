@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
-import os
 import sys
 import traceback
 from datetime import datetime
@@ -12,18 +11,9 @@ from pathlib import Path
 from types import TracebackType
 
 from pdfeditor import __version__
+from pdfeditor.core.paths import APP_NAME, data_dir
 
-APP_NAME = "pdfeditor"
 log = logging.getLogger(APP_NAME)
-
-
-def data_dir() -> Path:
-    """Per-user writable directory for logs, crash reports and recovery files."""
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_STATE_HOME")
-    root = Path(base) if base else Path.home() / ".local" / "state"
-    path = root / APP_NAME
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 
 def setup_logging(level: int = logging.INFO, log_dir: Path | None = None) -> Path:
@@ -133,6 +123,7 @@ def run(argv: list[str]) -> int:
         server.listen()
     server.files_received.connect(window.open_forwarded)
     window.show()
+    window.offer_recovery()
     for path in files:
         window.open_path(Path(path))
     return app.exec()

@@ -58,6 +58,21 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"expected 3 hits, got {len(hits)}")
         return "3 hits"
 
+    def undo_redo() -> str:
+        from pdfeditor.core.commands import SetMetadataCommand
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        meta = session.document.metadata()
+        meta.subject = "self-test edit"
+        session.execute(SetMetadataCommand(meta))
+        if not session.is_dirty or not session.undo():
+            raise AssertionError("undo failed")
+        if session.document.metadata().subject == "self-test edit" or session.is_dirty:
+            raise AssertionError("undo didn't restore the document")
+        session.redo()
+        return "edit, undo, redo"
+
     def save_copy() -> str:
         session = state["session"]
         assert isinstance(session, DocumentSession)
@@ -108,6 +123,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("open bundled sample", open_sample),
         ("render", render),
         ("text + search", text_and_search),
+        ("undo + redo", undo_redo),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),

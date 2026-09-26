@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -37,14 +37,18 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor import __version__
+from pdfeditor.core.autosave import Autosaver, RecoveryStore
 from pdfeditor.core.layout import LayoutMode
+from pdfeditor.core.paths import recovery_dir
 from pdfeditor.core.render_cache import RenderCache
-from pdfeditor.core.session import DocumentSession
-from pdfeditor.engine.base import OpenError, PasswordRequired
+from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
+from pdfeditor.engine.base import OpenError, PasswordRequired, SaveError
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.ui.dialogs.password import password_prompt
+from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.dialogs.print_dialog import PrintDialog
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
+from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.panels.bookmarks import BookmarksPanel
@@ -52,6 +56,7 @@ from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
 from pdfeditor.ui.ribbon import Ribbon
+from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.theme import Theme, apply_theme
 from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.hand import HandTool
@@ -172,7 +177,13 @@ class MainWindow(QMainWindow):
         self.resize(1280, 860)
         self.setAcceptDrops(True)
         self.settings = QSettings()
-        self.renderer = TileRenderer(RenderCache[QImage](384 * 1024 * 1024), self)
+        self.prefs = AppSettings(self.settings)
+        cache = RenderCache[QImage](self.prefs.cache_mb * 1024 * 1024)
+        self.renderer = TileRenderer(cache, self)
+        self.recovery = RecoveryStore(recovery_dir())
+        self.autosaver = Autosaver(self.recovery)
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.timeout.connect(self.autosave_now)
 
         self.tabs = QTabWidget(self)
         self.tabs.setDocumentMode(True)
@@ -226,6 +237,7 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_ribbon()
         self._restore_settings()
+        self._apply_prefs()
         self._update_ui()
 
     # -- actions --------------------------------------------------------------------------
@@ -270,6 +282,12 @@ class MainWindow(QMainWindow):
         self.act_properties = a(
             "Document &Properties…", self.show_properties, "Ctrl+D", sp.SP_FileDialogInfoView
         )
+        self.act_save = a("&Save", self.save, QKeySequence.StandardKey.Save, sp.SP_DialogSaveButton)
+        self.act_save_as = a("Save &As…", self.save_as, QKeySequence.StandardKey.SaveAs)
+        self.act_undo = a("&Undo", self.undo, QKeySequence.StandardKey.Undo, sp.SP_ArrowBack)
+        self.act_redo = a("&Redo", self.redo, QKeySequence.StandardKey.Redo, sp.SP_ArrowForward)
+        self.act_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.act_prefs = a("Pre&ferences…", self.show_preferences, "Ctrl+K", None, False)
         self.act_print = a(
             "&Print…", self.print_document, QKeySequence.StandardKey.Print, sp.SP_FileIcon
         )
@@ -310,8 +328,8 @@ class MainWindow(QMainWindow):
             self.tabs.addAction(act)
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
-        self.tool_actions["select"].setChecked(True)
-        self.current_tool = "select"
+        self.current_tool = self.prefs.default_tool
+        self.tool_actions[self.current_tool].setChecked(True)
         self.act_quit = a("E&xit", self.close, QKeySequence.StandardKey.Quit, None, False)
         self.act_zoom_in = a(
             "Zoom &In",
@@ -402,6 +420,8 @@ class MainWindow(QMainWindow):
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         file_menu.addAction(self.act_close)
+        file_menu.addAction(self.act_save)
+        file_menu.addAction(self.act_save_as)
         file_menu.addSeparator()
         file_menu.addAction(self.act_properties)
         file_menu.addAction(self.act_print)
@@ -409,6 +429,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_quit)
 
         edit_menu = mb.addMenu("&Edit")
+        edit_menu.addAction(self.act_undo)
+        edit_menu.addAction(self.act_redo)
+        edit_menu.addSeparator()
         edit_menu.addAction(self.act_copy)
         edit_menu.addAction(self.act_select_all)
         edit_menu.addSeparator()
@@ -418,6 +441,8 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         for act in self.tool_actions.values():
             edit_menu.addAction(act)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.act_prefs)
 
         view_menu = mb.addMenu("&View")
         for act in (
@@ -456,7 +481,8 @@ class MainWindow(QMainWindow):
 
     def _create_ribbon(self) -> None:
         home = self.ribbon.add_tab("Home")
-        home.add_group(self.act_open, self.act_print, self.act_properties)
+        home.add_group(self.act_open, self.act_save, self.act_print, self.act_properties)
+        home.add_group(self.act_undo, self.act_redo)
         home.add_group(*self.tool_actions.values())
         home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
@@ -510,6 +536,10 @@ class MainWindow(QMainWindow):
             self._forget_recent(path)
             return None
         self._add_recent(path)
+        return self._add_session(session)
+
+    def _add_session(self, session: DocumentSession) -> DocumentView:
+        session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
         view = DocumentView(session, self.renderer)
         view.current_page_changed.connect(lambda _p: self._update_ui())
         view.zoom_changed.connect(
@@ -519,25 +549,172 @@ class MainWindow(QMainWindow):
         view.link_activated.connect(self.open_external_link)
         view.selection_changed.connect(self._update_ui)
         view.set_tool(self._make_tool(self.current_tool))
+        session.subscribe(lambda event: self._on_session_event(view, event))
         index = self.tabs.addTab(view, session.display_name)
-        self.tabs.setTabToolTip(index, str(path))
+        target = session.save_target()
+        self.tabs.setTabToolTip(index, str(target) if target else session.display_name)
         self.tabs.setCurrentIndex(index)
+        zoom = self.prefs.default_zoom
+        if zoom == "fit_page":
+            view.fit_page()
+        elif zoom == "100":
+            view.set_zoom(1.0)
+        self._update_tab_title(view)
         view.setFocus()
         return view
 
-    def close_tab(self, index: int) -> None:
+    def _on_session_event(self, view: DocumentView, event: SessionEvent) -> None:
+        if event.kind in (EventKind.DIRTY, EventKind.SAVED):
+            self._update_tab_title(view)
+            if view is self.current_view():
+                self._update_ui()
+        if event.kind is EventKind.SAVED:
+            self.autosaver.forget(view.session)
+
+    def _update_tab_title(self, view: DocumentView) -> None:
+        index = self.tabs.indexOf(view)
+        if index >= 0:
+            mark = "*" if view.session.is_dirty else ""
+            self.tabs.setTabText(index, view.session.display_name + mark)
+
+    def close_tab(self, index: int, ask: bool = True) -> bool:
+        """Close a tab; with unsaved changes, ask first. Returns False if the user cancelled."""
         view = self.tabs.widget(index)
         if not isinstance(view, DocumentView):
-            return
+            return True
+        if ask and not self._confirm_discard(view):
+            return False
         self.tabs.removeTab(index)
+        self.autosaver.forget(view.session)  # saved or deliberately discarded
         view.close_view()
         view.session.close()
         view.deleteLater()
         self._update_ui()
+        return True
 
     def close_current(self) -> None:
         if self.tabs.currentIndex() >= 0:
             self.close_tab(self.tabs.currentIndex())
+
+    def ask_save_changes(self, session: DocumentSession) -> QMessageBox.StandardButton:
+        """Save / Discard / Cancel prompt (separate so tests can answer it)."""
+        return QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            f"Save changes to “{session.display_name}” before closing?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+
+    def _confirm_discard(self, view: DocumentView) -> bool:
+        if not view.session.is_dirty:
+            return True
+        self.tabs.setCurrentWidget(view)
+        answer = self.ask_save_changes(view.session)
+        if answer == QMessageBox.StandardButton.Save:
+            return self.save(view)
+        return answer == QMessageBox.StandardButton.Discard
+
+    # -- saving & undo --------------------------------------------------------------------
+    def save(self, view: DocumentView | None = None) -> bool:
+        view = view or self.current_view()
+        if view is None:
+            return False
+        if view.session.save_target() is None:
+            return self.save_as(view)
+        return self._save_to(view, None)
+
+    def save_as(self, view: DocumentView | None = None) -> bool:
+        view = view or self.current_view()
+        if view is None:
+            return False
+        target = view.session.save_target()
+        start = str(target) if target else view.session.display_name + ".pdf"
+        chosen = self.choose_save_path(start)
+        if chosen is None:
+            return False
+        return self._save_to(view, chosen)
+
+    def choose_save_path(self, start: str) -> Path | None:
+        """Save-as file dialog (separate so tests can answer it)."""
+        chosen, _ = QFileDialog.getSaveFileName(self, "Save As", start, PDF_FILTER)
+        if not chosen:
+            return None
+        path = Path(chosen)
+        return path if path.suffix.lower() == ".pdf" else path.with_suffix(".pdf")
+
+    def _save_to(self, view: DocumentView, path: Path | None) -> bool:
+        try:
+            saved = view.session.save(path)
+        except (SaveError, OSError) as exc:
+            QMessageBox.warning(
+                self, "Save", f"Couldn't save “{view.session.display_name}”:\n\n{exc}"
+            )
+            return False
+        self._add_recent(saved)
+        index = self.tabs.indexOf(view)
+        self.tabs.setTabToolTip(index, str(saved))
+        self._update_tab_title(view)
+        self._update_ui()
+        self.statusBar().showMessage(f"Saved {saved.name}", 3000)
+        return True
+
+    def undo(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.session.undo()
+            self._update_ui()
+
+    def redo(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.session.redo()
+            self._update_ui()
+
+    # -- autosave & recovery --------------------------------------------------------------
+    def autosave_now(self) -> int:
+        return self.autosaver.tick([v.session for v in self.views()])
+
+    def _apply_prefs(self) -> None:
+        minutes = self.prefs.autosave_minutes
+        if minutes:
+            self.autosave_timer.start(minutes * 60 * 1000)
+        else:
+            self.autosave_timer.stop()
+        for view in self.views():
+            view.session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
+
+    def show_preferences(self) -> None:
+        if PreferencesDialog(self.prefs, self).exec():
+            self._apply_prefs()
+
+    def offer_recovery(self, dialog: RecoveryDialog | None = None) -> int:
+        """After a crash, offer the recovery copies left behind. Returns documents reopened."""
+        entries = self.recovery.entries()
+        if not entries:
+            return 0
+        dialog = dialog or RecoveryDialog(entries, self)
+        if dialog.result() == 0 and not dialog.isVisible():
+            dialog.exec()
+        reopened = 0
+        for entry in dialog.selected:
+            name = entry.display_name
+            try:
+                session = DocumentSession.open(entry.pdf.read_bytes(), password_prompt(self, name))
+            except (OpenError, OSError) as exc:
+                QMessageBox.warning(self, "Recover", f"Couldn't recover “{name}”:\n\n{exc}")
+                continue
+            session.save_path_hint = entry.original_path
+            session.undo_stack.mark_dirty()
+            self._add_session(session)
+            self.recovery.discard(entry.uid)
+            reopened += 1
+        if dialog.discard_rest:
+            for entry in entries:
+                self.recovery.discard(entry.uid)
+        return reopened
 
     def _cycle_tab(self, delta: int) -> None:
         if self.tabs.count():
@@ -559,7 +736,13 @@ class MainWindow(QMainWindow):
                 action.setEnabled(has_doc)
         self.navigator.update_state(view)
         if view is not None:
-            self.setWindowTitle(f"{view.session.display_name} — pdfeditor")
+            dirty = view.session.is_dirty
+            self.setWindowTitle(f"{view.session.display_name}{'*' if dirty else ''} — pdfeditor")
+            stack = view.session.undo_stack
+            self.act_undo.setEnabled(stack.can_undo)
+            self.act_undo.setText(f"&Undo {stack.undo_label}".rstrip())
+            self.act_redo.setEnabled(stack.can_redo)
+            self.act_redo.setText(f"&Redo {stack.redo_label}".rstrip())
             self.zoom_box.show_zoom(view.zoom)
             self.act_back.setEnabled(view.can_go_back)
             self.act_forward.setEnabled(view.can_go_forward)
@@ -661,6 +844,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         if view is not None:
             PropertiesDialog(view.session, self).exec()
+            self._update_ui()
 
     def show_about(self) -> None:
         engine_version = ""
@@ -759,9 +943,14 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        for view in self.views():
+            if not self._confirm_discard(view):
+                event.ignore()
+                return
         self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
         self.settings.setValue(SETTINGS_STATE, self.saveState())
+        self.autosave_timer.stop()
         while self.tabs.count():
-            self.close_tab(0)
+            self.close_tab(0, ask=False)
         self.renderer.wait_idle(2000)
         super().closeEvent(event)

@@ -412,6 +412,23 @@ class MuDocument:
             with contextlib.suppress(OSError):
                 old_backing.unlink()
 
+    def can_save_incrementally(self) -> bool:
+        return (
+            self._path is not None
+            and self._backing_tmp is None
+            and bool(self._fz.name)
+            and bool(self._fz.can_save_incrementally())
+        )
+
+    def load_state(self, data: bytes) -> None:
+        new = _open_fz(data)
+        if new.needs_pass and not new.authenticate(self._password or ""):
+            new.close()
+            raise OpenError("snapshot can't be decrypted with the document's password")
+        self._fz.close()
+        self._fz = new
+        self._reset_pages()
+
     def to_bytes(self, options: SaveOptions | None = None) -> bytes:
         options = options or SaveOptions()
         return bytes(self._fz.tobytes(**self._save_kwargs(options)))
