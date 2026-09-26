@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
+from pdfeditor.core.commands import ChangeKind
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.outline import Link, LinkKind, OutlineItem
 from pdfeditor.ui.panels.base import ViewPanel
@@ -15,6 +16,7 @@ ITEM_ROLE = Qt.ItemDataRole.UserRole
 
 class BookmarksPanel(ViewPanel):
     title = "Bookmarks"
+    rebuild_on = frozenset({ChangeKind.STRUCTURE, ChangeKind.OUTLINE})
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

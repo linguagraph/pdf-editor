@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.core.commands import ChangeKind
 from pdfeditor.core.layout import (
     PAGE_GAP,
     LayoutMode,
@@ -33,7 +34,7 @@ from pdfeditor.core.layout import (
     view_matrix,
 )
 from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
-from pdfeditor.core.session import DocumentSession
+from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.model.text import SearchHit
@@ -76,6 +77,7 @@ class DocumentView(QGraphicsView):
     content_changed = Signal()  # page pixels changed (layers, edits): thumbnails must refresh
     link_activated = Signal(object)  # Link that isn't an internal jump (URI, launch, ...)
     selection_changed = Signal()
+    document_changed = Signal(object)  # tuple[Change, ...] after the view has updated itself
 
     def __init__(
         self, session: DocumentSession, renderer: TileRenderer, parent: QWidget | None = None
@@ -119,6 +121,7 @@ class DocumentView(QGraphicsView):
 
         renderer.tile_ready.connect(self._on_tile_ready)
         self.verticalScrollBar().valueChanged.connect(self._update_current_page)
+        self._unsubscribe = session.subscribe(self._on_session_event)
         self.reload()
 
     # -- document -------------------------------------------------------------------------
@@ -142,7 +145,31 @@ class DocumentView(QGraphicsView):
         self._current = min(self._current, max(0, len(self._items) - 1))
         self._relayout()
 
+    def _on_session_event(self, event: SessionEvent) -> None:
+        if event.kind is not EventKind.CHANGED:
+            return
+        kinds = {c.kind for c in event.changes}
+        if ChangeKind.STRUCTURE in kinds:
+            page, location = self._current, self.location()
+            self.reload()
+            if self.page_count:
+                self._current = min(page, self.page_count - 1)
+                self.go_to_page(min(location.page_index, self.page_count - 1), record=False)
+        else:
+            pages: set[int] = set()
+            for change in event.changes:
+                if change.kind in (ChangeKind.CONTENT, ChangeKind.ANNOTATIONS):
+                    pages |= change.pages
+            if pages:
+                self._links.clear()
+                for page in pages:
+                    if 0 <= page < len(self._items):
+                        self._items[page].update()
+                self.content_changed.emit()
+        self.document_changed.emit(tuple(event.changes))
+
     def close_view(self) -> None:
+        self._unsubscribe()
         self.renderer.tile_ready.disconnect(self._on_tile_ready)
         self.renderer.unregister(self.session)
 

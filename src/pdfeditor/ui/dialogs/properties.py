@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -16,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.core.commands import SetMetadataCommand
 from pdfeditor.core.session import DocumentSession
 from pdfeditor.model.metadata import EncryptionMethod
 from pdfeditor.ui.panels.attachments import human_size
@@ -35,6 +39,7 @@ def _selectable(text: str) -> QLabel:
 class PropertiesDialog(QDialog):
     def __init__(self, session: DocumentSession, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.session = session
         self.setWindowTitle(f"Document Properties — {session.display_name}")
         self.resize(560, 480)
         with session.lock:
@@ -49,10 +54,19 @@ class PropertiesDialog(QDialog):
         description = QWidget()
         form = QFormLayout(description)
         form.addRow("File:", _selectable(str(path) if path else "(not saved)"))
-        form.addRow("Title:", _selectable(meta.title))
-        form.addRow("Author:", _selectable(meta.author))
-        form.addRow("Subject:", _selectable(meta.subject))
-        form.addRow("Keywords:", _selectable(meta.keywords))
+        self.original = meta
+        self.fields: dict[str, QLineEdit] = {}
+        editable = session.engine.capabilities.metadata_write
+        for key, label in (
+            ("title", "Title:"),
+            ("author", "Author:"),
+            ("subject", "Subject:"),
+            ("keywords", "Keywords:"),
+        ):
+            edit = QLineEdit(getattr(meta, key))
+            edit.setReadOnly(not editable)
+            self.fields[key] = edit
+            form.addRow(label, edit)
         form.addRow("Created:", _selectable(meta.creation_date))
         form.addRow("Modified:", _selectable(meta.mod_date))
         form.addRow("Application:", _selectable(meta.creator))
@@ -101,9 +115,21 @@ class PropertiesDialog(QDialog):
         self.fonts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         tabs.addTab(self.fonts_table, f"Fonts ({len(fonts)})")
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        )
+        buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addWidget(tabs)
         layout.addWidget(buttons)
         self.tabs = tabs
+
+    def accept(self) -> None:
+        """Apply description edits as one undoable command (nothing if unchanged)."""
+        meta = copy.copy(self.original)
+        for key, edit in self.fields.items():
+            setattr(meta, key, edit.text())
+        if meta != self.original:
+            self.session.execute(SetMetadataCommand(meta))
+        super().accept()

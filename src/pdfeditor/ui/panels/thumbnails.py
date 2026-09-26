@@ -74,6 +74,7 @@ class ThumbnailModel(QAbstractListModel):
 
 class ThumbnailsPanel(ViewPanel):
     title = "Pages"
+    rebuild_on = frozenset()  # follows layout_changed/content_changed instead
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

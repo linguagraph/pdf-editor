@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,7 +21,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """Generate the fixture corpus once if it is missing."""
+    """Generate the fixture corpus once if it is missing; isolate the user data folder."""
+    # Logs, crash reports and recovery copies must never touch the real profile.
+    os.environ["PDFEDITOR_DATA_DIR"] = tempfile.mkdtemp(prefix="pdfeditor-test-data-")
     if not (FIXTURES / "text_multipage.pdf").exists():
         subprocess.run([sys.executable, str(ROOT / "scripts" / "make_fixtures.py")], check=True)
 

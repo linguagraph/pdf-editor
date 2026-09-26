@@ -205,6 +205,18 @@ class Document(Protocol):
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes: ...
 
+    def can_save_incrementally(self) -> bool:
+        """True if ``save(options=SaveOptions(incremental=True))`` to ``path`` can work."""
+        ...
+
+    def load_state(self, data: bytes) -> None:
+        """Replace the whole document with a snapshot made by :meth:`to_bytes` (used by undo).
+
+        Keeps ``path`` and the password. Afterwards the document may no longer be backed by its
+        file, so incremental save may become unavailable.
+        """
+        ...
+
     def close(self) -> None: ...
 
 

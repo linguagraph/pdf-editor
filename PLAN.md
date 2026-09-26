@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 4 (Session, undo/redo, persistence).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 5 (Annotations and comments).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -131,10 +131,10 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] AGENTS.md rule: each new dependency or data file must work in the frozen build (added to the spec and covered by `--self-test` where practical)
 
 ### Phase 4: Session, undo/redo, persistence (M)
-- [ ] `DocumentSession`: dirty tracking, title asterisk, save prompts on close
-- [ ] Command framework: `Command.do/undo/merge_with`, `UndoStack` wrapping `QUndoStack`, disk-backed `SnapshotCommand`
-- [ ] Autosave recovery files every N minutes, and a restore dialog on startup after a crash
-- [ ] Settings via `QSettings`: default zoom, tool prefs, author name for annotations, cache sizes
+- [x] `DocumentSession`: dirty tracking, title asterisk, save prompts on close
+- [x] Command framework: `Command.do/undo/merge_with`, `UndoStack` (pure Python, not `QUndoStack`, so `core/` stays Qt-free), disk-backed `SnapshotCommand`
+- [x] Autosave recovery files every N minutes, and a restore dialog on startup after a crash
+- [x] Settings via `QSettings`: default zoom, tool prefs, author name for annotations, cache sizes (Preferences dialog, Ctrl+K)
 
 ### Phase 5: Annotations and comments (L)
 - [ ] Text markup: highlight, underline, strikeout, squiggly (built from text-selection quads)
