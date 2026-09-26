@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
+from pdfeditor.engine.mupdf import annots
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
 from pdfeditor.model.color import Color
-from pdfeditor.model.geometry import Point, Quad, Rect
+from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 from pdfeditor.model.outline import Destination, Link, LinkKind
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TextPage
 
@@ -207,6 +209,30 @@ class MuPage:
             )
         return out
 
+    @property
+    def pdf_matrix(self) -> Matrix:
+        fz = self.fz
+        m = fz.derotation_matrix * ~fz.transformation_matrix
+        return Matrix(m.a, m.b, m.c, m.d, m.e, m.f)
+
+    def add_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        return annots.add(self, model)
+
+    def update_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        return annots.update(self, model)
+
+    def delete_annotation(self, annot_id: int | None, name: str = "") -> None:
+        annots.delete(self, annot_id, name)
+
+    def annotation_order(self) -> list[int]:
+        return annots.order(self)
+
+    def set_annotation_order(self, ids: Sequence[int]) -> None:
+        annots.set_order(self, ids)
+
+    def flatten_annotations(self, ids: Sequence[int] | None = None) -> int:
+        return annots.flatten(self, ids)
+
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]
 
@@ -229,7 +255,7 @@ class MuPage:
             vertices = [self._vpoint(v, m) for v in raw]
         state_key = self._doc.fz.xref_get_key(annot.xref, "State")
         state = ReviewState.NONE
-        if state_key[0] == "name":
+        if state_key[0] in ("name", "string"):  # spec says text string; some writers use names
             try:
                 state = ReviewState(state_key[1].lstrip("/"))
             except ValueError:
@@ -238,6 +264,13 @@ class MuPage:
         text_color = None
         if atype is AnnotationType.FREE_TEXT:
             text_color = _freetext_color(self._doc.fz.xref_get_key(annot.xref, "DA")[1])
+        file_name, file_data = "", None
+        if atype is AnnotationType.FILE_ATTACHMENT:
+            try:
+                file_name = str(annot.file_info.get("filename") or "")
+                file_data = bytes(annot.get_file())
+            except Exception:  # damaged attachment: keep the annotation readable
+                file_name, file_data = "", None
         return AnnotationModel(
             type=atype,
             page_index=self._index,
@@ -266,6 +299,8 @@ class MuPage:
             state=state,
             flags=int(annot.flags),
             locked=bool(annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED),
+            file_name=file_name,
+            file_data=file_data,
         )
 
 

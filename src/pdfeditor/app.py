@@ -93,6 +93,9 @@ def run(argv: list[str]) -> int:
 
     setup_logging()
     install_excepthook()
+    from pdfeditor.core.engine_lock import install_manual_gc
+
+    install_manual_gc()
     log.info("Starting %s %s", APP_NAME, __version__)
 
     from PySide6.QtWidgets import QApplication

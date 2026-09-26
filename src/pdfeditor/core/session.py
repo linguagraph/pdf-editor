@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 import logging
-import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from pdfeditor.core.commands.base import Change, Command, UndoStack
 from pdfeditor.core.commands.snapshot import SnapshotStore
+from pdfeditor.core.engine_lock import ENGINE_LOCK
 from pdfeditor.engine.base import Document, Engine, PasswordCallback, SaveError, SaveOptions
 from pdfeditor.engine.registry import DEFAULT_ENGINE, get_engine
 
@@ -39,9 +39,10 @@ Listener = Callable[[SessionEvent], None]
 class DocumentSession:
     """Owns a :class:`Document` and the lock that serializes all engine access to it.
 
-    MuPDF documents aren't thread-safe: code touching ``document`` off the GUI thread (render
-    workers, background jobs) must hold ``lock``. Every mutation goes through :meth:`execute` so
-    it's undoable and listeners (views, panels) learn what changed.
+    MuPDF isn't thread-safe: code touching ``document`` (render workers, background jobs, and the
+    GUI thread) must hold ``lock``, which is the process-wide ``ENGINE_LOCK``. Every mutation
+    goes through :meth:`execute` so it's undoable and listeners (views, panels) learn what
+    changed.
     """
 
     def __init__(self, document: Document, engine: Engine) -> None:
@@ -49,7 +50,8 @@ class DocumentSession:
         self.uid = uuid.uuid4().hex  # stable name for recovery files
         self.document = document
         self.engine = engine
-        self.lock = threading.RLock()
+        # One lock for the whole process, not per document: see core/engine_lock.py.
+        self.lock = ENGINE_LOCK
         self.closed = False
         self.undo_stack = UndoStack()
         self.undo_stack.on_change(lambda: self._emit(SessionEvent(EventKind.DIRTY)))

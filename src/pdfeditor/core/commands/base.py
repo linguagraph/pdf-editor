@@ -59,6 +59,44 @@ class Command(ABC):
         """Release resources when the command leaves the stack for good."""
 
 
+class MacroCommand(Command):
+    """Several commands as one undo step (e.g. importing many comments)."""
+
+    def __init__(self, label: str, commands: list[Command]) -> None:
+        self.label = label
+        self.commands = commands
+
+    def do(self, doc: Document) -> None:
+        done: list[Command] = []
+        try:
+            for command in self.commands:
+                command.do(doc)
+                done.append(command)
+        except Exception:
+            for command in reversed(done):
+                command.undo(doc)
+            raise
+
+    def undo(self, doc: Document) -> None:
+        for command in reversed(self.commands):
+            command.undo(doc)
+
+    def redo(self, doc: Document) -> None:
+        for command in self.commands:
+            command.redo(doc)
+
+    def changes(self) -> list[Change]:
+        return [change for command in self.commands for change in command.changes()]
+
+    @property
+    def disk_bytes(self) -> int:
+        return sum(c.disk_bytes for c in self.commands)
+
+    def discard(self) -> None:
+        for command in self.commands:
+            command.discard()
+
+
 class UndoStack:
     """Linear undo/redo history with a clean marker for dirty tracking."""
 

@@ -63,8 +63,12 @@ pdfeditor.model     pure-Python dataclasses: geometry, text, annotations, outlin
 5. **Every mutation goes through a Command** (`core/commands/`) so it's undoable. Reversible
    ops implement a real inverse; destructive ops (content edit, redaction, OCR, optimize) use
    the disk-backed `SnapshotCommand`.
-6. **Thread safety.** A MuPDF document isn't thread-safe: hold the session lock for any engine
-   access off the GUI thread. Mutations bump the page revision so cached tiles are invalidated.
+6. **Thread safety.** MuPDF isn't thread-safe, not even across documents. Every engine call
+   holds `session.lock`, which is the process-wide `ENGINE_LOCK` (`core/engine_lock.py`).
+   Automatic cyclic GC is disabled; `engine_lock.collect()` runs it under the lock (a window
+   timer, and after each test). Never keep PyMuPDF objects outside the engine package, since
+   freeing one outside the lock can corrupt MuPDF's heap. Mutations bump the page revision so
+   cached tiles are invalidated.
 7. **Safe saving.** Write to a temp file, verify by reopening, then atomically replace. Use
    incremental save when the document has signatures. Never silently flatten forms/signatures.
 
@@ -126,6 +130,9 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
 - When the phase's checks pass: commit, push, open a PR against `main`, review it, then merge
   (squash) and delete the branch. Commit messages and PR bodies follow the repo's attribution
   settings.
+- After each phase is merged, build the executable from the updated `main`:
+  `uv run python scripts/build_exe.py --test` (writes `dist/pdfeditor.exe`, must end with
+  `RESULT: OK`), and report the size and self-test result.
 - GitHub doesn't let a PR's author approve it. When the reviewer is the same account, post the
   review with `gh pr review --comment` (verdict, findings, follow-ups), fix findings on the
   branch, wait for green CI, then merge.

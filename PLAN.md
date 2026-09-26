@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 5 (Annotations and comments).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 6 (Page organization and document assembly).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -137,14 +137,14 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Settings via `QSettings`: default zoom, tool prefs, author name for annotations, cache sizes (Preferences dialog, Ctrl+K)
 
 ### Phase 5: Annotations and comments (L)
-- [ ] Text markup: highlight, underline, strikeout, squiggly (built from text-selection quads)
-- [ ] Sticky note, FreeText (typewriter and callout), Ink (pressure-agnostic smoothing), Line/Arrow, Rectangle, Ellipse, Polygon/Polyline, Stamp (standard plus custom image stamps), File attachment
-- [ ] SelectObject tool: select, move, resize handles, multi-select, delete, z-order, copy/paste between pages and docs
-- [ ] Properties inspector: color, fill, opacity, border width/style, font for FreeText, author, subject, lock
-- [ ] Comments panel: list and filter by type/author/page, replies (IRT), review status, jump-to, summary export (PDF/CSV)
-- [ ] Appearance streams regenerated on every change, so other viewers show edits correctly
-- [ ] Flatten annotations (selected or all); import/export XFDF (own writer/reader in `services/`)
-- [ ] Round-trip tests: create → save → reopen (and check it opens in pdfium via `pypdfium2` in tests) → compare models
+- [x] Text markup: highlight, underline, strikeout, squiggly (built from text-selection quads)
+- [ ] Sticky note, FreeText (typewriter and callout), Ink (pressure-agnostic smoothing), Line/Arrow, Rectangle, Ellipse, Polygon/Polyline, Stamp (standard plus custom image stamps), File attachment _(partial: all done except FreeText callouts and custom image stamps; ink is smoothed with RDP simplification)_
+- [x] SelectObject tool: select, move, resize handles, multi-select, delete, z-order, copy/paste between pages and docs
+- [x] Properties inspector: color, fill, opacity, border width/style, font for FreeText, author, subject, lock (dash style is kept but not editable yet)
+- [x] Comments panel: list and filter by type/author/page, replies (IRT), review status, jump-to, summary export (PDF/CSV), XFDF import/export
+- [x] Appearance streams regenerated on every change, so other viewers show edits correctly
+- [x] Flatten annotations (selected or all); import/export XFDF (own writer/reader in `services/`)
+- [x] Round-trip tests: create → save → reopen (and check it opens in pdfium via `pypdfium2` in tests) → compare models
 
 ### Phase 6: Page organization and document assembly (L)
 - [ ] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert

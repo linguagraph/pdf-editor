@@ -196,3 +196,25 @@ class Matrix:
 
     def as_tuple(self) -> tuple[float, float, float, float, float, float]:
         return (self.a, self.b, self.c, self.d, self.e, self.f)
+
+
+def simplify(points: list[Point], epsilon: float) -> list[Point]:
+    """Ramer-Douglas-Peucker polyline simplification (keeps endpoints)."""
+    if len(points) < 3:
+        return list(points)
+    a, b = points[0], points[-1]
+    dx, dy = b.x - a.x, b.y - a.y
+    length = math.hypot(dx, dy)
+    best, index = -1.0, 0
+    for i in range(1, len(points) - 1):
+        p = points[i]
+        if length == 0:
+            d = math.hypot(p.x - a.x, p.y - a.y)
+        else:
+            d = abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / length
+        if d > best:
+            best, index = d, i
+    if best <= epsilon:
+        return [a, b]
+    left = simplify(points[: index + 1], epsilon)
+    return left[:-1] + simplify(points[index:], epsilon)

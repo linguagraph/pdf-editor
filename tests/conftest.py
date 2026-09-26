@@ -24,6 +24,10 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     """Generate the fixture corpus once if it is missing; isolate the user data folder."""
     # Logs, crash reports and recovery copies must never touch the real profile.
     os.environ["PDFEDITOR_DATA_DIR"] = tempfile.mkdtemp(prefix="pdfeditor-test-data-")
+    # Same GC policy as the app: never collect MuPDF objects outside the engine lock.
+    from pdfeditor.core.engine_lock import install_manual_gc
+
+    install_manual_gc()
     if not (FIXTURES / "text_multipage.pdf").exists():
         subprocess.run([sys.executable, str(ROOT / "scripts" / "make_fixtures.py")], check=True)
 
@@ -43,3 +47,11 @@ def fixture_pdf(fixtures_dir: Path):
         return path
 
     return get
+
+
+@pytest.fixture(autouse=True)
+def _collect_garbage_under_engine_lock():
+    yield
+    from pdfeditor.core.engine_lock import collect
+
+    collect()
