@@ -81,7 +81,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 3 (Text selection, search, print).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 4 (Session, undo/redo, persistence).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -115,10 +115,10 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Document properties dialog (metadata, fonts list, PDF version, security summary)
 
 ### Phase 3: Text selection, search, print (M)
-- [ ] SelectText tool: glyph-accurate selection across lines/columns, double-click word, triple-click line, copy as plain text
-- [ ] Search panel: whole doc, case/whole-word/regex, result list with context, highlight overlays, F3 next/prev, runs incrementally as a background job
-- [ ] Print: QPrinter with page range, fit/actual size, render at printer DPI, annotations toggle, print preview
-- [ ] Rendering golden tests (perceptual tolerance), plus a benchmark for first paint of page 1 and scrolling a 1000-page doc
+- [x] SelectText tool: glyph-accurate selection across lines/columns, double-click word, triple-click line, copy as plain text
+- [x] Search panel: whole doc, case/whole-word/regex, result list with context, highlight overlays, F3 next/prev, runs incrementally as a background job
+- [x] Print: QPrinter with page range, fit/actual size, render at printer DPI, annotations toggle, print preview (pages print as 300 dpi images; vector printing is a Phase 16 follow-up)
+- [x] Rendering golden tests (perceptual tolerance), plus a benchmark for first paint of page 1 and scrolling a 1000-page doc (`tests/benchmarks`; open 0.5 ms, first paint ~120 ms, cold full-text search ~1 s)
 
 ### Phase 4: Session, undo/redo, persistence (M)
 - [ ] `DocumentSession`: dirty tracking, title asterisk, save prompts on close

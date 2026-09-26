@@ -8,7 +8,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
-from pdfeditor.core.layout import rotated_size
+from pdfeditor.core.layout import rotated_size, view_matrix
 from pdfeditor.model.geometry import Rect
 from pdfeditor.ui.view import tiles
 
@@ -70,6 +70,16 @@ class PageItem(QGraphicsItem):
                     painter.drawImage(
                         QRectF(target.x0, target.y0, image.width() / s, image.height() / s), image
                     )
+
+        overlays = view.overlays(self.index)
+        if overlays:
+            m = view_matrix(self.page_rect, view.rotation, 1.0)
+            painter.save()
+            # Multiply keeps the glyphs under a highlight dark and readable.
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Multiply)
+            for rect, color in overlays:
+                painter.fillRect(qrect(rect.transform(m).inflated(0.5)), color)
+            painter.restore()
 
         pen = QPen(QColor(0, 0, 0, 70))
         pen.setCosmetic(True)
