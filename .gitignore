@@ -17,3 +17,4 @@ tests/golden/_actual/
 htmlcov/
 .idea/
 .vscode/
+dist/

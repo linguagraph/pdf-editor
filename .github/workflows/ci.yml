@@ -29,3 +29,20 @@ jobs:
       - run: uv run mypy
       - run: uv run python scripts/make_fixtures.py
       - run: uv run pytest
+
+  build-exe:
+    # The product is a self-contained executable: build it on every PR and smoke-test it frozen.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv venv && uv pip install -e ".[build]"
+      - run: uv run python scripts/build_exe.py --test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfeditor-exe-${{ github.sha }}
+          path: dist/pdfeditor.exe
+          retention-days: 14
