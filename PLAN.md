@@ -10,6 +10,7 @@ The goal is an Acrobat-style desktop PDF editor written in Python, built from sc
 - **Engine:** an abstract engine layer, implemented first with PyMuPDF (AGPL). No `pymupdf` import is allowed outside the backend package, so a permissive backend (pypdfium2 + pikepdf) can be added later.
 - **App type:** a desktop app with PySide6 (Qt 6, LGPL), packaged for Windows.
 - **In scope:** core view/annotate/pages, content editing, and the advanced/pro features.
+- **Distribution: a self-contained executable** (decided after Phase 3). Users run one `pdfeditor.exe` with no Python, no installer and no separately installed tools. Everything every in-scope feature needs is bundled: Qt, MuPDF, qpdf/pikepdf, fonts, ICC profiles and OCR language data. External programs (LibreOffice, Ghostscript, veraPDF) may only add optional extras, never a core feature. The frozen build is built and smoke-tested in CI from Phase P on, so packaging problems show up early rather than at release.
 - **Out of scope for now:** creating form fields and digital signatures. Existing forms and signatures must still render and be kept intact on save (no flattening, and incremental save where signatures exist).
 
 ---
@@ -74,14 +75,14 @@ pdf-editor/
 4. **Threading.** A MuPDF `Document` is not thread-safe. Each session has one lock, and rendering runs on worker threads with cached per-page display lists. Every mutation bumps `page.revision`, which invalidates cached tiles. Long jobs (OCR, compare, export) run as `Job`s that report progress and can be cancelled.
 5. **Saving.** The editor uses incremental save when the file is signed or when the user chooses it, and a full rewrite (garbage collection and deflate) otherwise. It never overwrites the source file until the temp file has been written and verified, then swaps them atomically.
 
-**Core dependencies:** `pymupdf`, `PySide6`, `pikepdf` (linearize, low-level repair, struct tree), `fontTools` (glyph coverage, subsetting), `Pillow`, `numpy`. Optional: `pytesseract` with a Tesseract binary, `opencv-python-headless` (deskew), `pdf2docx`, `openpyxl`, `ocrmypdf`/Ghostscript (PDF/A), and veraPDF (external validator).
+**Core dependencies:** `pymupdf`, `PySide6`, `pikepdf` (linearize, low-level repair, struct tree), `fontTools` (glyph coverage, subsetting), `Pillow`, `numpy`. Bundled in the executable as well: `pdf2docx`, `openpyxl`, `opencv-python-headless` (deskew), Tesseract language data (`tessdata`; MuPDF has the Tesseract engine built in, so no Tesseract install is needed), and an sRGB ICC profile. Optional external tools that are used only if found and never required: LibreOffice (Office import), Ghostscript and veraPDF (extra PDF/A validation). **Build:** PyInstaller one-file (evaluate Nuitka for startup time).
 **Dev dependencies:** `pytest`, `pytest-qt`, `pytest-benchmark`, `hypothesis`, `ruff`, `mypy`, `import-linter`, `pre-commit`, `pyinstaller`.
 
 ---
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 4 (Session, undo/redo, persistence).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: P (Self-contained executable), then 4.**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -119,6 +120,15 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Search panel: whole doc, case/whole-word/regex, result list with context, highlight overlays, F3 next/prev, runs incrementally as a background job
 - [x] Print: QPrinter with page range, fit/actual size, render at printer DPI, annotations toggle, print preview (pages print as 300 dpi images; vector printing is a Phase 16 follow-up)
 - [x] Rendering golden tests (perceptual tolerance), plus a benchmark for first paint of page 1 and scrolling a 1000-page doc (`tests/benchmarks`; open 0.5 ms, first paint ~120 ms, cold full-text search ~1 s)
+
+### Phase P: Self-contained executable, early (S–M), done next, before Phase 4
+- [ ] `resources.py`: one helper to find bundled data (`importlib.resources` / `sys._MEIPASS`); no feature reads files relative to the source tree or relies on PATH tools
+- [ ] `--self-test` CLI mode: open a bundled sample PDF, render a page, extract text, save a copy to a temp dir, exit 0/1. It's used by CI and by users reporting problems
+- [ ] PyInstaller spec (`packaging/pdfeditor.spec`): one-file `pdfeditor.exe` (windowed), app icon, version info, trimmed Qt (only needed modules and plugins, no QtWebEngine/Qt3D/QML), excluding test and dev packages
+- [ ] Build script `scripts/build_exe.py` (clean build, reports size) and a size budget (target < 150 MB for the one-file exe)
+- [ ] CI job on windows-latest: build the exe, run `pdfeditor.exe --self-test`, upload it as a workflow artifact
+- [ ] Startup check of the one-file build (unpack + first window); if it's over ~3 s, evaluate Nuitka or a one-folder portable zip as an alternative deliverable
+- [ ] AGENTS.md rule: each new dependency or data file must work in the frozen build (added to the spec and covered by `--self-test` where practical)
 
 ### Phase 4: Session, undo/redo, persistence (M)
 - [ ] `DocumentSession`: dirty tracking, title asterisk, save prompts on close
@@ -165,10 +175,10 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [ ] Sanitize document: metadata/XMP, JavaScript, embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection)
 
 ### Phase 9: OCR (M)
-- [ ] Detect Tesseract (configurable path) and list installed languages; clear setup guidance when it's missing
+- [ ] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed
 - [ ] Preprocessing (optional OpenCV): deskew, denoise, and binarize for OCR only (the visible image stays unchanged)
 - [ ] Make scanned pages searchable by adding an invisible text layer (MuPDF OCR page output overlaid with `show_pdf_page`), with page ranges, skipping pages that already have text, and a `Job` with progress and cancel
-- [ ] Optional use of `ocrmypdf` when installed, for batch or high-quality mode
+- [ ] Batch OCR of many files through the same in-process engine (no `ocrmypdf` dependency)
 - [ ] Accuracy check against fixture scans (text similarity threshold)
 
 ### Phase 10: Export and conversion (M)
@@ -176,7 +186,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [ ] To text / HTML / Markdown (reading order via blocks, or `pymupdf4llm` when available)
 - [ ] To Word via `pdf2docx`; to Excel via table detection (`page.find_tables`) → `openpyxl`, with a table-picking UI
 - [ ] Extract all images and fonts
-- [ ] From Office files: optional LibreOffice headless integration (`soffice --convert-to pdf`) if installed
+- [ ] From Office files: optional extra, used only when LibreOffice is installed (`soffice --convert-to pdf`); the menu item explains the requirement otherwise. Core conversions never depend on it
 
 ### Phase 11: Optimize and compress (M)
 - [ ] Space-usage audit report (images / fonts / content / other, by bytes)
@@ -197,8 +207,8 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 
 ### Phase 14: Standards (PDF/A) (M)
 - [ ] Preflight-lite checks: fonts embedded, no encryption, no JS, color spaces with OutputIntent, transparency, XMP present
-- [ ] Convert to PDF/A-2b: embed missing fonts, add sRGB OutputIntent ICC, write the XMP PDF/A identification, remove disallowed features. Optional Ghostscript/ocrmypdf route for hard cases
-- [ ] Optional veraPDF integration (if installed) for authoritative validation reports
+- [ ] Convert to PDF/A-2b: embed missing fonts, add sRGB OutputIntent ICC, write the XMP PDF/A identification, remove disallowed features. Done fully in-process (MuPDF + pikepdf + bundled sRGB ICC); no Ghostscript
+- [ ] Built-in PDF/A checks cover the common rules; optional veraPDF integration (only if installed) for authoritative reports
 
 ### Phase 15: Accessibility (M)
 - [ ] Checker: tagged or not, document language, title shown in the window, image alt text, headings structure, reading-order sanity, and contrast of annotations/added text. Results panel with jump-to
@@ -211,18 +221,20 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [ ] Hard cases: corrupt or broken files (repair), huge files (streaming thumbnails, memory caps), encrypted files with unknown handlers
 - [ ] Profiling pass: open-to-first-paint under 300 ms for typical docs; scrolling at 60 fps on 1000 pages
 
+- [ ] Vector printing (native print path instead of 300 dpi raster), and running `select_all` off the GUI thread for very large documents (follow-ups from the Phase 3 review)
+
 ### Phase 17: Packaging and distribution (S–M)
-- [ ] PyInstaller one-folder build (evaluate Nuitka for startup time), bundling the Qt plugins and PyMuPDF
-- [ ] Inno Setup installer: `.pdf` file association (optional), Start menu, uninstall; optional bundled Tesseract with English
+- [ ] Release build of the self-contained one-file `pdfeditor.exe` (from Phase P), with all optional-feature data bundled (tessdata, ICC, fonts) and final size/startup tuning
+- [ ] Optional thin installer around the same exe (Inno Setup: Start menu, optional `.pdf` association, uninstall). The portable exe stays the primary deliverable
 - [ ] Code signing, version stamping, an "About" dialog with third-party licenses (AGPL notice and source offer)
-- [ ] Smoke test of the installed build in a clean Windows VM
+- [ ] Smoke test in a clean Windows VM with no Python or other tools installed (every feature, including OCR and PDF/A, works offline from the single exe)
 
 ### Later / not in current scope
 - AcroForm creation and editing, digital signatures (PAdES) and certificate validation. Rendering and keeping existing forms and signatures intact is covered above.
 - A permissive engine backend (pypdfium2 + pikepdf) implementing `engine/base.py`. The contract tests from Phase 1 are its acceptance suite.
 - Measurement tools, 3D/multimedia, batch "Action Wizard", cloud sync.
 
-**Suggested milestones:** M1 = Phases 0–3 (a usable viewer). M2 = Phases 4–6 (annotate and organize, the first useful release). M3 = Phase 7 (content editing). M4 = Phases 8–13. M5 = Phases 14–17 (release).
+**Suggested milestones:** M1 = Phases 0–3 (a usable viewer) + Phase P (it ships as one exe). M2 = Phases 4–6 (annotate and organize, the first useful release). M3 = Phase 7 (content editing). M4 = Phases 8–13. M5 = Phases 14–17 (release).
 
 ---
 
@@ -232,5 +244,6 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - **Round-trip rule:** every editing feature has a test that edits, saves, reopens, and asserts on the result. Every saved file is also opened with `pikepdf` (a qpdf structural check) and rendered with `pypdfium2`, so the output is checked by independent PDF implementations and not only by MuPDF.
 - **Golden rendering tests:** reference PNGs per fixture, compared with a perceptual tolerance.
 - **Redaction:** automated leak checks (text extraction and pixel inspection in redacted areas).
+- **Frozen build:** from Phase P on, CI builds `pdfeditor.exe` and runs `--self-test` on every PR, so a feature that works from source but breaks when frozen fails the build.
 - **Performance:** `pytest-benchmark` on the 1000-page fixture (open, first paint, search, save).
 - **Manual end-to-end per milestone:** `python -m pdfeditor tests/fixtures/real/<file>.pdf`, then run the milestone checklist (open, navigate, annotate, organize, edit text, redact, OCR, save), then reopen the result in Adobe Reader and a browser viewer to confirm it's compatible.
