@@ -248,6 +248,33 @@ def test_embedded_files(engine: Engine, fixture_pdf) -> None:
     doc.close()
 
 
+def test_extract_embedded_file(engine: Engine, fixture_pdf) -> None:
+    doc = engine.open(fixture_pdf("images"))
+    assert doc.extract_embedded_file("notes") == b"attached notes\n"
+    doc.close()
+
+
+def test_layers_toggle_rendering(engine: Engine, fixture_pdf) -> None:
+    if not engine.capabilities.layers:
+        pytest.skip("engine lacks layers")
+    doc = engine.open(fixture_pdf("layers"))
+    layers = doc.layers()
+    assert [(ly.name, ly.visible) for ly in layers] == [
+        ("Shown layer", True),
+        ("Hidden layer", False),
+    ]
+    page = doc.page(0)
+    request = RenderRequest(clip=Rect(100, 150, 110, 160), color=ColorMode.RGB)
+    assert set(page.render(request).samples) == {255}  # hidden red box not drawn
+    rev = page.revision
+    doc.set_layer_visible(layers[1].id, True)
+    assert page.revision != rev
+    red = page.render(request).samples
+    assert red[0:3] == bytes([255, 0, 0])
+    assert not doc.is_dirty  # a view toggle is not an edit
+    doc.close()
+
+
 def test_metadata_type_is_model(engine: Engine, fixture_pdf) -> None:
     doc = engine.open(fixture_pdf("images"))
     assert isinstance(doc.metadata(), Metadata)
@@ -379,4 +406,45 @@ def test_page_revision_changes_after_save(engine: Engine, tmp_path: Path, fixtur
     rev = doc.page(0).revision
     doc.save()
     assert doc.page(0).revision != rev  # reloaded pages must invalidate render caches
+    doc.close()
+
+
+@pytest.mark.parametrize("page_index", [0, 1, 2, 3, 4])
+def test_coordinates_match_rendering_on_rotated_pages(
+    engine: Engine, fixture_pdf, page_index: int
+) -> None:
+    """Text boxes and search hits must land where the glyphs are actually drawn."""
+    import numpy as np
+
+    doc = engine.open(fixture_pdf("rotated_pages"))
+    page = doc.page(page_index)
+    tp = page.text_page()
+    word_bbox = tp.blocks[0].lines[0].bbox
+    img = page.render(RenderRequest(color=ColorMode.GRAY, annotations=False))
+    arr = np.frombuffer(img.samples, dtype=np.uint8).reshape(img.height, img.stride)
+    ys, xs = np.nonzero(arr[:, : img.width] < 128)
+    ink = Rect(float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+    assert word_bbox.inflated(3).contains(ink.top_left)
+    assert word_bbox.inflated(3).contains(ink.bottom_right)
+    needle = tp.blocks[0].lines[0].text.split()[0]
+    hit = page.search(needle)[0].rect
+    assert hit.intersects(word_bbox)
+    doc.close()
+
+
+def test_page_handles_are_lock_free_bookkeeping(engine: Engine, fixture_pdf, monkeypatch) -> None:
+    """page(), page_count and revision must not call into the engine (used without the lock)."""
+    doc = engine.open(fixture_pdf("text_multipage"))
+    fz = getattr(doc, "fz", None)
+    if fz is None:
+        pytest.skip("backend exposes no native handle to guard")
+
+    class Guard:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"engine touched: {name}")
+
+    monkeypatch.setattr(type(doc), "fz", property(lambda self: Guard()))
+    assert doc.page_count == 5
+    assert isinstance(doc.page(4).revision, int)
+    monkeypatch.undo()
     doc.close()

@@ -72,3 +72,14 @@ class FontInfo:
     embedded: bool
     subset: bool
     ref: int  # engine object id
+
+
+@dataclass(frozen=True, slots=True)
+class LayerInfo:
+    """An optional-content group (layer) as presented in the layers panel."""
+
+    id: int  # engine-specific handle
+    name: str
+    visible: bool
+    depth: int = 0
+    locked: bool = False

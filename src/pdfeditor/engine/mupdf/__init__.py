@@ -27,6 +27,7 @@ class MuPDFEngine:
         outline_write=True,
         metadata_write=True,
         xmp=True,
+        layers=True,
     )
 
     @property

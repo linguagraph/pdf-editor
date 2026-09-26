@@ -73,8 +73,10 @@ pdfeditor.model     pure-Python dataclasses: geometry, text, annotations, outlin
 - Ruff config in `pyproject.toml` (line length 100). Match surrounding code's naming and comment
   density; docstrings explain *why*, not *what*.
 - Use `logging.getLogger(__name__)`; no `print` in the package.
-- Geometry in PDF user space (points, origin top-left as PyMuPDF reports it) inside `model/`;
-  conversion to screen pixels happens only in `ui/view/`.
+- Page coordinates everywhere above the engine are in the page's **visible space**: points,
+  origin top-left, with the page's /Rotate and CropBox applied (what `Page.rect` describes and
+  `Page.render` draws). Backends convert their native coordinates (MuPDF reports text, links and
+  annotations unrotated). View rotation and zoom are applied only in `ui/view/`.
 - Long-running work (OCR, compare, export, optimize, big searches) runs as a cancellable `Job`
   with progress, never on the GUI thread.
 
@@ -97,6 +99,13 @@ pdfeditor.model     pure-Python dataclasses: geometry, text, annotations, outlin
 The default backend (PyMuPDF) is AGPL, so the project is AGPL-3.0-or-later. Don't add
 dependencies with licenses that conflict with AGPL, and record every new runtime dependency in
 `pyproject.toml` (optional features go in an extra, not in core `dependencies`).
+
+## Git workflow
+
+- One branch per plan phase (`phase-N-short-name`), branched from an up-to-date `main`.
+- When the phase's checks pass: commit, push, open a PR against `main`, review it, then merge
+  (squash) and delete the branch. Commit messages and PR bodies follow the repo's attribution
+  settings.
 
 ## Things to avoid
 

@@ -28,6 +28,7 @@ from pdfeditor.model.metadata import (
     EmbeddedFile,
     EncryptionMethod,
     FontInfo,
+    LayerInfo,
     Metadata,
     Permissions,
 )
@@ -106,6 +107,8 @@ class MuDocument:
         self._pages: dict[int, MuPage] = {}
         self._revisions: dict[int, int] = {}
         self._generation = 0  # bumped whenever the whole document is reloaded
+        # Cached so page()/revision never call into MuPDF (they're used without the lock).
+        self._page_count = int(fz.page_count)
         self._backing_tmp: Path | None = None  # set when a failed save left us on a temp file
         self._force_dirty = False
 
@@ -123,8 +126,13 @@ class MuDocument:
         if page is not None:
             page.invalidate()
 
+    def structure_changed(self) -> None:
+        """Call after pages were inserted, deleted or moved: resync counts and drop caches."""
+        self._reset_pages()
+
     def _reset_pages(self) -> None:
         self._generation += 1
+        self._page_count = int(self._fz.page_count)
         for page in self._pages.values():
             page.invalidate()
         self._pages.clear()
@@ -140,7 +148,7 @@ class MuDocument:
 
     @property
     def page_count(self) -> int:
-        return int(self._fz.page_count)
+        return self._page_count
 
     @property
     def is_dirty(self) -> bool:
@@ -264,6 +272,27 @@ class MuDocument:
                 )
             )
         return out
+
+    def extract_embedded_file(self, name: str) -> bytes:
+        return bytes(self._fz.embfile_get(name))
+
+    def layers(self) -> list[LayerInfo]:
+        return [
+            LayerInfo(
+                id=int(cfg["number"]),
+                name=str(cfg["text"]),
+                visible=bool(cfg["on"]),
+                depth=int(cfg["depth"]),
+                locked=bool(cfg["locked"]),
+            )
+            for cfg in self._fz.layer_ui_configs()
+        ]
+
+    def set_layer_visible(self, layer_id: int, visible: bool) -> None:
+        self._fz.set_layer_ui_config(layer_id, 0 if visible else 2)
+        # Cached display lists bake in layer visibility.
+        for index in range(self.page_count):
+            self.mark_page_changed(index)
 
     def fonts(self) -> list[FontInfo]:
         seen: dict[int, FontInfo] = {}

@@ -81,7 +81,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 2 (Viewer).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 3 (Text selection, search, print).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -105,14 +105,14 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Engine contract tests (`tests/engine/`) written against the Protocol, so a future backend reuses them
 
 ### Phase 2: Viewer (L)
-- [ ] `MainWindow`: menu bar, ribbon-style tool tabs (Home / Comment / Edit / Organize / Protect / Tools), status bar, tabbed multi-document UI, recent files, drag-and-drop open, single-instance file opening
-- [ ] `DocumentView` (QGraphicsView): continuous or single-page layout, one- or two-page spreads, cover mode, smooth scroll, zoom (Ctrl+wheel, presets, fit width/page/actual), rotate view
-- [ ] Tiled asynchronous rendering (256–512 px tiles) with low-res placeholders, a DPI-aware device pixel ratio, and an LRU cache with a memory cap
-- [ ] Thumbnails panel (lazy, virtualized), Bookmarks panel (tree, click-to-navigate), Attachments panel, Layers (OCG) panel with visibility toggles
-- [ ] Navigation: page number box, first/prev/next/last, history back/forward, go-to-page, page labels
-- [ ] Clickable links (internal destinations, URIs with a confirmation prompt)
-- [ ] Light/dark theme, plus an optional "night reading" inverted render
-- [ ] Document properties dialog (metadata, fonts list, PDF version, security summary)
+- [x] `MainWindow`: menu bar, ribbon-style tool tabs (Home / Comment / Edit / Organize / Protect / Tools; the ribbon framework ships with Home and View, and each later phase adds its own tab), status bar, tabbed multi-document UI, recent files, drag-and-drop open, single-instance file opening
+- [x] `DocumentView` (QGraphicsView): continuous or single-page layout, one- or two-page spreads, cover mode, smooth scroll, zoom (Ctrl+wheel, presets, fit width/page/actual), rotate view
+- [x] Tiled asynchronous rendering (256–512 px tiles) with low-res placeholders, a DPI-aware device pixel ratio, and an LRU cache with a memory cap
+- [x] Thumbnails panel (lazy, virtualized), Bookmarks panel (tree, click-to-navigate), Attachments panel, Layers (OCG) panel with visibility toggles (engine gained `layers()`/`set_layer_visible()` and attachment extraction)
+- [x] Navigation: page number box, first/prev/next/last, history back/forward, go-to-page, page labels
+- [x] Clickable links (internal destinations, URIs with a confirmation prompt)
+- [x] Light/dark theme, plus an optional "night reading" inverted render
+- [x] Document properties dialog (metadata, fonts list, PDF version, security summary)
 
 ### Phase 3: Text selection, search, print (M)
 - [ ] SelectText tool: glyph-accurate selection across lines/columns, double-click word, triple-click line, copy as plain text

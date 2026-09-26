@@ -91,13 +91,26 @@ def run(argv: list[str]) -> int:
     from PySide6.QtWidgets import QApplication
 
     from pdfeditor.ui.main_window import MainWindow
+    from pdfeditor.ui.single_instance import InstanceServer, send_to_running_instance
+
+    new_instance = "--new-instance" in argv
+    files = [str(Path(a).resolve()) for a in argv[1:] if not a.startswith("--")]
 
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
     app.setApplicationVersion(__version__)
+
+    if not new_instance and send_to_running_instance(files):
+        log.info("handed %d file(s) to the running instance", len(files))
+        return 0
+
     window = MainWindow()
+    server = InstanceServer(parent=window)
+    if not new_instance:
+        server.listen()
+    server.files_received.connect(window.open_forwarded)
     window.show()
-    for arg in argv[1:]:
-        window.open_path(Path(arg))
+    for path in files:
+        window.open_path(Path(path))
     return app.exec()
