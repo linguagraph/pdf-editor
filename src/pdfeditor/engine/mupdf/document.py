@@ -28,6 +28,7 @@ from pdfeditor.model.metadata import (
     EmbeddedFile,
     EncryptionMethod,
     FontInfo,
+    LayerInfo,
     Metadata,
     Permissions,
 )
@@ -264,6 +265,27 @@ class MuDocument:
                 )
             )
         return out
+
+    def extract_embedded_file(self, name: str) -> bytes:
+        return bytes(self._fz.embfile_get(name))
+
+    def layers(self) -> list[LayerInfo]:
+        return [
+            LayerInfo(
+                id=int(cfg["number"]),
+                name=str(cfg["text"]),
+                visible=bool(cfg["on"]),
+                depth=int(cfg["depth"]),
+                locked=bool(cfg["locked"]),
+            )
+            for cfg in self._fz.layer_ui_configs()
+        ]
+
+    def set_layer_visible(self, layer_id: int, visible: bool) -> None:
+        self._fz.set_layer_ui_config(layer_id, 0 if visible else 2)
+        # Cached display lists bake in layer visibility.
+        for index in range(self.page_count):
+            self.mark_page_changed(index)
 
     def fonts(self) -> list[FontInfo]:
         seen: dict[int, FontInfo] = {}

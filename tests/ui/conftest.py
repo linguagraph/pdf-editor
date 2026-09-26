@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+import pytest
+from PySide6.QtGui import QImage
+
+from pdfeditor.core.render_cache import RenderCache
+from pdfeditor.core.session import DocumentSession
+from pdfeditor.ui.view.document_view import DocumentView
+from pdfeditor.ui.view.renderer import TileRenderer
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(tmp_path: Path) -> Iterator[None]:
+    """Keep QSettings (recent files, window state) out of the real user profile."""
+    from PySide6.QtCore import QCoreApplication, QSettings
+
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+    QCoreApplication.setOrganizationName("pdfeditor-tests")
+    QCoreApplication.setApplicationName("pdfeditor-tests")
+    yield
+
+
+@pytest.fixture
+def renderer(qtbot) -> Iterator[TileRenderer]:
+    r = TileRenderer(RenderCache[QImage](64 * 1024 * 1024))
+    yield r
+    r.wait_idle()
+
+
+@pytest.fixture
+def make_view(qtbot, renderer: TileRenderer, fixture_pdf) -> Iterator[Callable[..., DocumentView]]:
+    sessions: list[DocumentSession] = []
+
+    def make(name: str, width: int = 800, height: int = 600) -> DocumentView:
+        session = DocumentSession.open(fixture_pdf(name))
+        sessions.append(session)
+        view = DocumentView(session, renderer)
+        qtbot.addWidget(view)
+        view.resize(width, height)
+        view.show()
+        qtbot.waitExposed(view)
+        return view
+
+    yield make
+    renderer.wait_idle()
+    for s in sessions:
+        s.close()
+
+
+def wait_rendered(qtbot, view: DocumentView, timeout: int = 5000) -> QImage:
+    """Wait until the render queue is empty and return a grab of the viewport."""
+
+    def done() -> None:
+        view.renderer.wait_idle(100)
+        qtbot.wait(20)
+        assert not view.renderer._pending
+
+    qtbot.waitUntil(done, timeout=timeout)
+    qtbot.wait(50)
+    return view.viewport().grab().toImage()

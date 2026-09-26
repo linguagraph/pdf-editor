@@ -15,7 +15,7 @@ from typing import Protocol, runtime_checkable
 
 from pdfeditor.model.annotations import AnnotationModel
 from pdfeditor.model.geometry import Matrix, Quad, Rect
-from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, Metadata
+from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, LayerInfo, Metadata
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.text import TextPage
 
@@ -51,6 +51,7 @@ class Capabilities:
     outline_write: bool = False
     metadata_write: bool = False
     xmp: bool = False
+    layers: bool = False
     page_ops: bool = False
     content_edit: bool = False
     redact: bool = False
@@ -108,6 +109,11 @@ class SaveOptions:
 
 @runtime_checkable
 class Page(Protocol):
+    """One page. Every coordinate a Page returns (text, search hits, links, annotations) is in
+    the *visible* page space: the rotated, CropBox-relative space that ``rect`` describes and
+    ``render`` draws, with the origin at the top-left.
+    """
+
     @property
     def index(self) -> int: ...
 
@@ -170,6 +176,16 @@ class Document(Protocol):
     def page_label(self, index: int) -> str: ...
 
     def embedded_files(self) -> list[EmbeddedFile]: ...
+
+    def extract_embedded_file(self, name: str) -> bytes: ...
+
+    def layers(self) -> list[LayerInfo]:
+        """Optional-content groups in UI order (empty if the document has none)."""
+        ...
+
+    def set_layer_visible(self, layer_id: int, visible: bool) -> None:
+        """Change view visibility of a layer (does not make the document dirty)."""
+        ...
 
     def fonts(self) -> list[FontInfo]: ...
 

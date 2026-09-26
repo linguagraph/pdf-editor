@@ -52,6 +52,22 @@ class MuPage:
         self._fz_page = None
         self._display_lists.clear()
 
+    # MuPDF reports text, search hits, links and annotations in *unrotated* page space, while
+    # rendering and ``rect`` use the visible (rotated) space. The Page contract says everything is
+    # in visible space, so outputs pass through these helpers.
+    def _vis_matrix(self) -> pymupdf.Matrix | None:
+        page = self.fz
+        return page.rotation_matrix if page.rotation else None
+
+    def _vrect(self, r: Any, m: pymupdf.Matrix | None) -> Rect:
+        return cv.rect(pymupdf.Rect(r) * m) if m is not None else cv.rect(r)
+
+    def _vpoint(self, p: Any, m: pymupdf.Matrix | None) -> Point:
+        return cv.point(pymupdf.Point(p) * m) if m is not None else cv.point(p)
+
+    def _vquad(self, q: pymupdf.Quad, m: pymupdf.Matrix | None) -> Quad:
+        return cv.quad(q * m) if m is not None else cv.quad(q)
+
     def _display_list(self, annots: bool) -> pymupdf.DisplayList:
         rev = self.revision
         cached = self._display_lists.get(annots)
@@ -111,40 +127,45 @@ class MuPage:
     def text_page(self, with_chars: bool = True) -> TextPage:
         mode = "rawdict" if with_chars else "dict"
         data = self.fz.get_text(mode, flags=pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES)
+        m = self._vis_matrix()
         blocks: list[Block] = []
         for b in data["blocks"]:
             if b.get("type", 0) == 1:
-                blocks.append(Block(bbox=cv.rect(b["bbox"]), is_image=True))
+                blocks.append(Block(bbox=self._vrect(b["bbox"], m), is_image=True))
                 continue
             lines: list[Line] = []
             for ln in b.get("lines", []):
                 spans: list[Span] = []
                 for s in ln.get("spans", []):
                     chars = tuple(
-                        Char(ch["c"], cv.rect(ch["bbox"]), cv.point(ch["origin"]))
+                        Char(ch["c"], self._vrect(ch["bbox"], m), self._vpoint(ch["origin"], m))
                         for ch in s.get("chars", ())
                     )
                     text = s["text"] if "text" in s else "".join(ch.c for ch in chars)
                     spans.append(
                         Span(
                             text=text,
-                            bbox=cv.rect(s["bbox"]),
+                            bbox=self._vrect(s["bbox"], m),
                             font=s["font"],
                             size=float(s["size"]),
                             color=Color.from_int(int(s["color"])),
                             flags=FontFlags(int(s["flags"]) & 0x1F),
-                            origin=cv.point(s["origin"]),
+                            origin=self._vpoint(s["origin"], m),
                             chars=chars,
                         )
                     )
+                dx, dy = ln["dir"]
+                if m is not None:
+                    dx, dy = m.a * dx + m.c * dy, m.b * dx + m.d * dy
                 lines.append(
-                    Line(spans=tuple(spans), bbox=cv.rect(ln["bbox"]), direction=tuple(ln["dir"]))
+                    Line(spans=tuple(spans), bbox=self._vrect(ln["bbox"], m), direction=(dx, dy))
                 )
-            blocks.append(Block(bbox=cv.rect(b["bbox"]), lines=tuple(lines)))
+            blocks.append(Block(bbox=self._vrect(b["bbox"], m), lines=tuple(lines)))
+        visible = self.fz.rect
         return TextPage(
             page_index=self._index,
-            width=float(data["width"]),
-            height=float(data["height"]),
+            width=float(visible.width),
+            height=float(visible.height),
             blocks=tuple(blocks),
         )
 
@@ -156,23 +177,26 @@ class MuPage:
             # MuPDF matches case-insensitively; keep single-line hits whose text matches exactly.
             # Full regex / multi-line case-sensitive search lives in the search service.
             quads = [q for q in quads if needle in self.fz.get_textbox(q.rect)]
-        return [cv.quad(q) for q in quads]
+        m = self._vis_matrix()
+        return [self._vquad(q, m) for q in quads]
 
     def links(self) -> list[Link]:
+        m = self._vis_matrix()
         out: list[Link] = []
         for ln in self.fz.get_links():
             kind = _LINK_KINDS.get(ln.get("kind", 0), LinkKind.OTHER)
             dest = None
             if kind is LinkKind.GOTO and ln.get("page", -1) >= 0:
                 to = ln.get("to")
+                target = int(ln["page"])
                 dest = Destination(
-                    page_index=int(ln["page"]),
-                    point=cv.point(to) if to is not None else None,
+                    page_index=target,
+                    point=self._dest_point(target, to),
                     zoom=float(ln["zoom"]) if ln.get("zoom") else None,
                 )
             out.append(
                 Link(
-                    rect=cv.rect(ln["from"]),
+                    rect=self._vrect(ln["from"], m),
                     kind=kind,
                     dest=dest,
                     uri=ln.get("uri", "") or "",
@@ -182,6 +206,12 @@ class MuPage:
             )
         return out
 
+    def _dest_point(self, target: int, to: Any) -> Point | None:
+        if to is None or not 0 <= target < self._doc.page_count:
+            return None
+        target_page = self._doc.page(target)
+        return target_page._vpoint(to, target_page._vis_matrix())
+
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]
 
@@ -190,17 +220,18 @@ class MuPage:
         info = annot.info
         colors = annot.colors or {}
         border = annot.border or {}
+        m = self._vis_matrix()
         raw = annot.vertices or []
         vertices: list[Point] = []
         quads: tuple[Quad, ...] = ()
         ink: tuple[tuple[Point, ...], ...] = ()
         if atype is AnnotationType.INK:
-            ink = tuple(tuple(cv.point(p) for p in stroke) for stroke in raw)
+            ink = tuple(tuple(self._vpoint(p, m) for p in stroke) for stroke in raw)
         elif atype.is_markup:
-            pts = [cv.point(v) for v in raw]
+            pts = [self._vpoint(v, m) for v in raw]
             quads = tuple(Quad(*pts[i : i + 4]) for i in range(0, len(pts) - 3, 4))
         else:
-            vertices = [cv.point(v) for v in raw]
+            vertices = [self._vpoint(v, m) for v in raw]
         state_key = self._doc.fz.xref_get_key(annot.xref, "State")
         state = ReviewState.NONE
         if state_key[0] == "name":
@@ -215,7 +246,7 @@ class MuPage:
         return AnnotationModel(
             type=atype,
             page_index=self._index,
-            rect=cv.rect(annot.rect),
+            rect=self._vrect(annot.rect, m),
             id=annot.xref,
             name=info.get("id", ""),
             contents=info.get("content", ""),

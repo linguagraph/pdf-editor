@@ -218,7 +218,19 @@ def broken_xref() -> None:
     (OUT / "broken_xref.pdf").write_bytes(bytes(data))
 
 
+def layers() -> None:
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    shown = doc.add_ocg("Shown layer", on=True)
+    hidden = doc.add_ocg("Hidden layer", on=False)
+    page.insert_text((72, 72), "Always visible", fontsize=14)
+    page.insert_text((72, 100), "On the shown layer", fontsize=14, oc=shown)
+    page.draw_rect(pymupdf.Rect(72, 120, 300, 300), color=(1, 0, 0), fill=(1, 0, 0), oc=hidden)
+    _save(doc, "layers.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "layers": layers,
     "scanned": scanned,
     "broken_xref": broken_xref,
     "text_multipage": text_multipage,
