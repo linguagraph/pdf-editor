@@ -106,6 +106,9 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
 - When the phase's checks pass: commit, push, open a PR against `main`, review it, then merge
   (squash) and delete the branch. Commit messages and PR bodies follow the repo's attribution
   settings.
+- GitHub doesn't let a PR's author approve it. When the reviewer is the same account, post the
+  review with `gh pr review --comment` (verdict, findings, follow-ups), fix findings on the
+  branch, wait for green CI, then merge.
 
 ## Things to avoid
 

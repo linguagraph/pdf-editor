@@ -10,6 +10,14 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "generated"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        help="rewrite reference images in tests/golden/data instead of comparing",
+    )
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Generate the fixture corpus once if it is missing."""
     if not (FIXTURES / "text_multipage.pdf").exists():

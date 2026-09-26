@@ -43,14 +43,19 @@ from pdfeditor.core.session import DocumentSession
 from pdfeditor.engine.base import OpenError, PasswordRequired
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.ui.dialogs.password import password_prompt
+from pdfeditor.ui.dialogs.print_dialog import PrintDialog
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.panels.bookmarks import BookmarksPanel
 from pdfeditor.ui.panels.layers import LayersPanel
+from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.theme import Theme, apply_theme
+from pdfeditor.ui.tools.base import Tool
+from pdfeditor.ui.tools.hand import HandTool
+from pdfeditor.ui.tools.select import SelectTool
 from pdfeditor.ui.view.document_view import DocumentView
 from pdfeditor.ui.view.renderer import TileRenderer
 
@@ -189,9 +194,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.welcome, 1)
         self.setCentralWidget(central)
 
+        self.search_panel = SearchPanel()
         self.panels: list[ViewPanel] = [
             ThumbnailsPanel(),
             BookmarksPanel(),
+            self.search_panel,
             AttachmentsPanel(),
             LayersPanel(),
         ]
@@ -215,6 +222,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.zoom_box)
 
         self._create_actions()
+        self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
         self._restore_settings()
@@ -229,7 +237,9 @@ class MainWindow(QMainWindow):
         icon: QStyle.StandardPixmap | None = None,
         needs_doc: bool = True,
         checkable: bool = False,
+        scope: QWidget | None = None,
     ) -> QAction:
+        """Create an action. ``scope`` limits its shortcut to that widget and its children."""
         action = QAction(text, self)
         if icon is not None:
             action.setIcon(self.style().standardIcon(icon))
@@ -241,7 +251,11 @@ class MainWindow(QMainWindow):
         else:
             action.triggered.connect(slot)
         action.setProperty("needs_doc", needs_doc)
-        self.addAction(action)
+        if scope is not None:
+            action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            scope.addAction(action)
+        else:
+            self.addAction(action)
         return action
 
     def _create_actions(self) -> None:
@@ -256,6 +270,48 @@ class MainWindow(QMainWindow):
         self.act_properties = a(
             "Document &Properties…", self.show_properties, "Ctrl+D", sp.SP_FileDialogInfoView
         )
+        self.act_print = a(
+            "&Print…", self.print_document, QKeySequence.StandardKey.Print, sp.SP_FileIcon
+        )
+        # Copy/Select All only apply while the page view has focus (line edits keep theirs).
+        self.act_copy = a(
+            "&Copy",
+            self.copy_selection,
+            QKeySequence.StandardKey.Copy,
+            None,
+            True,
+            False,
+            self.tabs,
+        )
+        self.act_select_all = a(
+            "Select &All",
+            lambda: self._with_view(DocumentView.select_all),
+            QKeySequence.StandardKey.SelectAll,
+            None,
+            True,
+            False,
+            self.tabs,
+        )
+        self.act_find = a("&Find…", self.show_find, QKeySequence.StandardKey.Find)
+        self.act_find_next = a(
+            "Find &Next", self.search_panel.next_hit, QKeySequence.StandardKey.FindNext
+        )
+        self.act_find_prev = a(
+            "Find Pre&vious", self.search_panel.previous_hit, QKeySequence.StandardKey.FindPrevious
+        )
+        self.tool_group = QActionGroup(self)
+        self.tool_actions: dict[str, QAction] = {}
+        for name, text, key in (("select", "&Select Tool", "V"), ("hand", "&Hand Tool", "H")):
+            act = QAction(text, self, checkable=True)
+            act.setShortcut(QKeySequence(key))
+            act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            act.setProperty("needs_doc", True)
+            act.triggered.connect(lambda _=False, n=name: self.set_tool(n))
+            self.tabs.addAction(act)
+            self.tool_group.addAction(act)
+            self.tool_actions[name] = act
+        self.tool_actions["select"].setChecked(True)
+        self.current_tool = "select"
         self.act_quit = a("E&xit", self.close, QKeySequence.StandardKey.Quit, None, False)
         self.act_zoom_in = a(
             "Zoom &In",
@@ -348,8 +404,20 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_close)
         file_menu.addSeparator()
         file_menu.addAction(self.act_properties)
+        file_menu.addAction(self.act_print)
         file_menu.addSeparator()
         file_menu.addAction(self.act_quit)
+
+        edit_menu = mb.addMenu("&Edit")
+        edit_menu.addAction(self.act_copy)
+        edit_menu.addAction(self.act_select_all)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.act_find)
+        edit_menu.addAction(self.act_find_next)
+        edit_menu.addAction(self.act_find_prev)
+        edit_menu.addSeparator()
+        for act in self.tool_actions.values():
+            edit_menu.addAction(act)
 
         view_menu = mb.addMenu("&View")
         for act in (
@@ -388,7 +456,9 @@ class MainWindow(QMainWindow):
 
     def _create_ribbon(self) -> None:
         home = self.ribbon.add_tab("Home")
-        home.add_group(self.act_open, self.act_properties)
+        home.add_group(self.act_open, self.act_print, self.act_properties)
+        home.add_group(*self.tool_actions.values())
+        home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
         home.add_group(self.act_prev, self.act_next)
         view = self.ribbon.add_tab("View")
@@ -447,6 +517,8 @@ class MainWindow(QMainWindow):
         )
         view.history_changed.connect(self._update_ui)
         view.link_activated.connect(self.open_external_link)
+        view.selection_changed.connect(self._update_ui)
+        view.set_tool(self._make_tool(self.current_tool))
         index = self.tabs.addTab(view, session.display_name)
         self.tabs.setTabToolTip(index, str(path))
         self.tabs.setCurrentIndex(index)
@@ -495,6 +567,10 @@ class MainWindow(QMainWindow):
             self.act_night.blockSignals(True)
             self.act_night.setChecked(view.night_mode)
             self.act_night.blockSignals(False)
+            self.act_copy.setEnabled(view.has_selection())
+            self.act_find_next.setEnabled(bool(self.search_panel.hits))
+            self.act_find_prev.setEnabled(bool(self.search_panel.hits))
+            self.tool_actions[view.tool.name].setChecked(True)
             self.act_prev.setEnabled(view.current_page > 0)
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         else:
@@ -547,6 +623,35 @@ class MainWindow(QMainWindow):
                     new_view.go_to_page(link.dest.page_index, link.dest.point)
         else:
             self.statusBar().showMessage("This kind of link isn't supported.", 4000)
+
+    # -- text & tools ---------------------------------------------------------------------
+    def copy_selection(self) -> None:
+        view = self.current_view()
+        if view is not None and view.copy_selection():
+            self.statusBar().showMessage("Copied to clipboard.", 2000)
+
+    def show_find(self) -> None:
+        view = self.current_view()
+        if view is None:
+            return
+        self.nav_dock.show()
+        self.nav_tabs.setCurrentWidget(self.search_panel)
+        self.search_panel.focus_query(view.selected_text())
+
+    @staticmethod
+    def _make_tool(name: str) -> Tool:
+        return HandTool() if name == "hand" else SelectTool()
+
+    def set_tool(self, name: str) -> None:
+        self.current_tool = name
+        for view in self.views():
+            view.set_tool(self._make_tool(name))
+        self.tool_actions[name].setChecked(True)
+
+    def print_document(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            PrintDialog(view, self).exec()
 
     def _toggle_night(self, on: bool) -> None:
         self._with_view(lambda v: v.set_night_mode(on))

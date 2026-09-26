@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QKeyEvent,
@@ -15,7 +15,14 @@ from PySide6.QtGui import (
     QTransform,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QFrame, QGraphicsScene, QGraphicsView, QToolTip, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGraphicsScene,
+    QGraphicsView,
+    QToolTip,
+    QWidget,
+)
 
 from pdfeditor.core.layout import (
     PAGE_GAP,
@@ -29,6 +36,10 @@ from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
 from pdfeditor.core.session import DocumentSession
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.outline import Link, LinkKind
+from pdfeditor.model.text import SearchHit
+from pdfeditor.services.text import TextIndexCache, TextPos, TextSelection
+from pdfeditor.ui.tools.base import Tool
+from pdfeditor.ui.tools.select import SelectTool
 from pdfeditor.ui.view.page_item import PageItem, qrect
 from pdfeditor.ui.view.renderer import TileRenderer
 
@@ -38,6 +49,11 @@ MIN_ZOOM, MAX_ZOOM = 0.05, 64.0
 ZOOM_STEPS = (
     0.1, 0.25, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0, 64.0
 )  # fmt: skip
+
+
+SELECTION_COLOR = QColor(51, 136, 255, 90)
+SEARCH_HIT_COLOR = QColor(255, 225, 0, 130)
+CURRENT_HIT_COLOR = QColor(255, 140, 0, 170)
 
 
 class FitMode(Enum):
@@ -59,6 +75,7 @@ class DocumentView(QGraphicsView):
     history_changed = Signal()
     content_changed = Signal()  # page pixels changed (layers, edits): thumbnails must refresh
     link_activated = Signal(object)  # Link that isn't an internal jump (URI, launch, ...)
+    selection_changed = Signal()
 
     def __init__(
         self, session: DocumentSession, renderer: TileRenderer, parent: QWidget | None = None
@@ -72,7 +89,6 @@ class DocumentView(QGraphicsView):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setBackgroundBrush(QColor(0x5A, 0x5D, 0x63))
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
@@ -93,6 +109,13 @@ class DocumentView(QGraphicsView):
         self._history_pos = -1
         self._hover_link: Link | None = None
         self._scrolling_programmatically = False
+        self.text_cache = TextIndexCache(session)
+        self.selection: TextSelection | None = None
+        self._selection_rects: dict[int, list[Rect]] = {}
+        self._search_rects: dict[int, list[Rect]] = {}
+        self._current_hit: SearchHit | None = None
+        self.tool: Tool = SelectTool()
+        self.tool.activate(self)
 
         renderer.tile_ready.connect(self._on_tile_ready)
         self.verticalScrollBar().valueChanged.connect(self._update_current_page)
@@ -106,6 +129,11 @@ class DocumentView(QGraphicsView):
             self._page_rects = [doc.page(i).rect for i in range(doc.page_count)]
         self._links.clear()
         self._labels = None
+        self.text_cache.clear()
+        self.selection = None
+        self._selection_rects = {}
+        self._search_rects = {}
+        self._current_hit = None
         for item in self._items:
             self._scene.removeItem(item)
         self._items = [PageItem(self, i, r) for i, r in enumerate(self._page_rects)]
@@ -444,16 +472,16 @@ class DocumentView(QGraphicsView):
             self.link_activated.emit(link)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if event.buttons() and self.tool.move(self, event):
+            event.accept()
+            return
         super().mouseMoveEvent(event)
         if event.buttons():
             return
         link = self.link_at(self.mapToScene(event.position().toPoint()))
         if link is not self._hover_link:
             self._hover_link = link
-            if link is None:
-                self.viewport().unsetCursor()
-                QToolTip.hideText()
-            else:
+            if link is not None:
                 self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
                 tip = (
                     link.uri
@@ -462,6 +490,10 @@ class DocumentView(QGraphicsView):
                 )
                 if tip:
                     QToolTip.showText(event.globalPosition().toPoint(), tip, self)
+            else:
+                QToolTip.hideText()
+        if link is None:
+            self.tool.hover(self, event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -470,7 +502,122 @@ class DocumentView(QGraphicsView):
                 self.activate_link(link)
                 event.accept()
                 return
+        if self.tool.press(self, event):
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self.tool.release(self, event):
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+        self.tool.after_release(self)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self.tool.double_click(self, event):
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    # -- tools ----------------------------------------------------------------------------
+    def set_tool(self, tool: Tool) -> None:
+        self.tool.deactivate(self)
+        self.tool = tool
+        tool.activate(self)
+        self.viewport().unsetCursor()
+
+    def page_point_nearest(self, scene_pos: QPointF) -> tuple[int, Point] | None:
+        """Like :meth:`page_point_at`, but snaps to the closest visible page (for drags)."""
+        visible = [i for i, item in enumerate(self._items) if item.isVisible()]
+        if not visible:
+            return None
+        p = Point(scene_pos.x(), scene_pos.y())
+
+        def dist(i: int) -> float:
+            r = self._scene_rects[i]
+            return max(r.y0 - p.y, 0.0, p.y - r.y1) * 4 + max(r.x0 - p.x, 0.0, p.x - r.x1)
+
+        i = min(visible, key=dist)
+        r = self._scene_rects[i]
+        clamped = QPointF(min(max(p.x, r.x0), r.x1), min(max(p.y, r.y0), r.y1))
+        return self.page_point_at(clamped) or (i, Point(0, 0))
+
+    def page_rect_to_scene(self, index: int, rect: Rect) -> QRectF:
+        m = view_matrix(self._page_rects[index], self.rotation, 1.0)
+        scene = self._scene_rects[index]
+        return qrect(rect.transform(m).translated(scene.x0, scene.y0))
+
+    # -- selection ------------------------------------------------------------------------
+    def set_selection(self, selection: TextSelection | None) -> None:
+        if selection == self.selection:
+            return
+        old_pages = set(self._selection_rects)
+        self.selection = selection
+        self._selection_rects = (
+            {} if selection is None or selection.is_empty else selection.rects(self.text_cache)
+        )
+        for page in old_pages | set(self._selection_rects):
+            self._items[page].update()
+        self.selection_changed.emit()
+
+    def clear_selection(self) -> None:
+        self.set_selection(None)
+
+    def has_selection(self) -> bool:
+        return self.selection is not None and not self.selection.is_empty
+
+    def selected_text(self) -> str:
+        if self.selection is None or self.selection.is_empty:
+            return ""
+        return self.selection.text(self.text_cache)
+
+    def copy_selection(self) -> bool:
+        text = self.selected_text()
+        if text:
+            QApplication.clipboard().setText(text)
+        return bool(text)
+
+    def select_all(self) -> None:
+        if not self.page_count:
+            return
+        last = self.page_count - 1
+        end = TextPos(last, len(self.text_cache.get(last)))
+        self.set_selection(TextSelection(TextPos(0, 0), end))
+
+    # -- search highlights ----------------------------------------------------------------
+    def clear_search_hits(self) -> None:
+        pages = set(self._search_rects)
+        if self._current_hit is not None:
+            pages.add(self._current_hit.page_index)
+        self._search_rects = {}
+        self._current_hit = None
+        for page in pages:
+            self._items[page].update()
+
+    def add_search_hits(self, hits: list[SearchHit]) -> None:
+        for hit in hits:
+            self._search_rects.setdefault(hit.page_index, []).extend(q.rect for q in hit.quads)
+            self._items[hit.page_index].update()
+
+    def show_search_hit(self, hit: SearchHit) -> None:
+        previous = self._current_hit
+        self._current_hit = hit
+        if previous is not None:
+            self._items[previous.page_index].update()
+        if self._mode is LayoutMode.SINGLE and hit.page_index != self._current:
+            self.go_to_page(hit.page_index, record=False)
+        self.ensureVisible(self.page_rect_to_scene(hit.page_index, hit.rect), 60, 120)
+        self._set_current(hit.page_index)
+        self._items[hit.page_index].update()
+
+    def overlays(self, index: int) -> list[tuple[Rect, QColor]]:
+        """Highlight rectangles (page space) that PageItem draws over the page."""
+        out = [(r, SEARCH_HIT_COLOR) for r in self._search_rects.get(index, ())]
+        if self._current_hit is not None and self._current_hit.page_index == index:
+            out.extend((q.rect, CURRENT_HIT_COLOR) for q in self._current_hit.quads)
+        out.extend((r, SELECTION_COLOR) for r in self._selection_rects.get(index, ()))
+        return out
 
     # -- rendering ------------------------------------------------------------------------
     def _on_tile_ready(self, key: TileKey) -> None:
