@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdfeditor"
+version = "0.1.0"
+description = "Acrobat-style desktop PDF editor built on an abstract engine layer (PyMuPDF backend) and PySide6."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "pymupdf>=1.24",
+    "PySide6>=6.6",
+    "pikepdf>=8.0",
+    "fonttools>=4.47",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10", "opencv-python-headless>=4.8"]
+export = ["pdf2docx>=0.5.8", "openpyxl>=3.1"]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.3",
+    "pytest-benchmark>=4.0",
+    "hypothesis>=6.90",
+    "pypdfium2>=4.20",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "import-linter>=2.0",
+    "pre-commit>=3.6",
+]
+
+[project.scripts]
+pdfeditor = "pdfeditor.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdfeditor"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["pdfeditor"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# "strict" can't be set per module; these are its per-module equivalents.
+module = ["pdfeditor.model.*", "pdfeditor.engine.base", "pdfeditor.core.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_any_generics = true
+check_untyped_defs = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+# PyMuPDF's bundled hints are partial and constants are created dynamically.
+module = ["pymupdf", "pymupdf.*", "fitz"]
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --benchmark-disable"
+qt_api = "pyside6"
+markers = [
+    "slow: long-running tests (large fixtures, OCR)",
+    "gui: tests that need a Qt application",
+]
+
+[tool.importlinter]
+root_package = "pdfeditor"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "pdfeditor.ui",
+    "pdfeditor.services",
+    "pdfeditor.core",
+    "pdfeditor.engine",
+    "pdfeditor.model",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only the mupdf backend may import PyMuPDF"
+type = "forbidden"
+source_modules = [
+    "pdfeditor.model",
+    "pdfeditor.core",
+    "pdfeditor.services",
+    "pdfeditor.ui",
+    "pdfeditor.engine.base",
+    "pdfeditor.engine.registry",
+    "pdfeditor.engine.contentstream",
+]
+forbidden_modules = ["fitz", "pymupdf"]
