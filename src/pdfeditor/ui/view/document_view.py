@@ -35,6 +35,7 @@ from pdfeditor.core.layout import (
 )
 from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
 from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
+from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.model.text import SearchHit
@@ -77,6 +78,10 @@ class DocumentView(QGraphicsView):
     content_changed = Signal()  # page pixels changed (layers, edits): thumbnails must refresh
     link_activated = Signal(object)  # Link that isn't an internal jump (URI, launch, ...)
     selection_changed = Signal()
+    annotation_selection_changed = Signal()
+    escape_pressed = Signal()  # the window switches back to the Select tool
+    annotation_activated = Signal(object)  # AnnotationModel double-clicked
+    annotation_context_menu = Signal(object, object)  # AnnotationModel, global QPoint
     document_changed = Signal(object)  # tuple[Change, ...] after the view has updated itself
 
     def __init__(
@@ -116,6 +121,10 @@ class DocumentView(QGraphicsView):
         self._selection_rects: dict[int, list[Rect]] = {}
         self._search_rects: dict[int, list[Rect]] = {}
         self._current_hit: SearchHit | None = None
+        self._annots: dict[int, tuple[int, list[AnnotationModel]]] = {}
+        self.selected_annotations: list[tuple[int, str]] = []  # (page, /NM name)
+        self.annotation_preview: dict[int, list[Rect]] = {}  # drag outlines per page
+        self.author = ""
         self.tool: Tool = SelectTool()
         self.tool.activate(self)
 
@@ -137,6 +146,8 @@ class DocumentView(QGraphicsView):
         self._selection_rects = {}
         self._search_rects = {}
         self._current_hit = None
+        self._annots.clear()
+        self.selected_annotations = []
         for item in self._items:
             self._scene.removeItem(item)
         self._items = [PageItem(self, i, r) for i, r in enumerate(self._page_rects)]
@@ -166,6 +177,14 @@ class DocumentView(QGraphicsView):
                     if 0 <= page < len(self._items):
                         self._items[page].update()
                 self.content_changed.emit()
+        if self.selected_annotations:
+            alive = [
+                (page, name)
+                for page, name in self.selected_annotations
+                if 0 <= page < self.page_count and self.annotation_by_name(page, name) is not None
+            ]
+            if alive != self.selected_annotations:
+                self.set_annotation_selection(alive)
         self.document_changed.emit(tuple(event.changes))
 
     def close_view(self) -> None:
@@ -449,8 +468,32 @@ class DocumentView(QGraphicsView):
         self.verticalScrollBar().setValue(round(y * k))
         self.history_changed.emit()
 
+    def delete_selected_annotations(self) -> bool:
+        from pdfeditor.core.commands import Command, DeleteAnnotationsCommand, MacroCommand
+
+        by_page: dict[int, list[str]] = {}
+        for model in self.selected_models():
+            if not model.locked:
+                by_page.setdefault(model.page_index, []).append(model.name)
+        if not by_page:
+            return False
+        commands: list[Command] = [DeleteAnnotationsCommand(p, n) for p, n in by_page.items()]
+        label = "Delete Comments" if sum(map(len, by_page.values())) > 1 else "Delete Comment"
+        self.set_annotation_selection([])
+        self.session.execute(commands[0] if len(commands) == 1 else MacroCommand(label, commands))
+        return True
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.selected_annotations:
+            self.delete_selected_annotations()
+            return
+        if key == Qt.Key.Key_Escape:
+            self.set_annotation_selection([])
+            self.clear_selection()
+            if self.tool.name != "select":
+                self.escape_pressed.emit()
+            return
         single = self._mode is LayoutMode.SINGLE
         if key == Qt.Key.Key_Home and not event.modifiers():
             self.first_page()
@@ -638,6 +681,91 @@ class DocumentView(QGraphicsView):
         self._set_current(hit.page_index)
         self._items[hit.page_index].update()
 
+    # -- annotations ----------------------------------------------------------------------
+    def page_annotations(self, index: int) -> list[AnnotationModel]:
+        """Annotations on a page (cached per page revision)."""
+        with self.session.lock:
+            page = self.session.document.page(index)
+            rev = page.revision
+            cached = self._annots.get(index)
+            if cached is None or cached[0] != rev:
+                cached = (rev, page.annotations())
+                self._annots[index] = cached
+        return cached[1]
+
+    def annotation_by_name(self, index: int, name: str) -> AnnotationModel | None:
+        return next((a for a in self.page_annotations(index) if a.name == name), None)
+
+    def annotation_at(self, scene_pos: QPointF) -> AnnotationModel | None:
+        """Topmost visible comment under ``scene_pos`` (replies and popups are skipped)."""
+        hit = self.page_point_at(scene_pos)
+        if hit is None:
+            return None
+        index, point = hit
+        tolerance = 3 / max(self.transform().m11(), 0.01)  # ~3 screen pixels
+        for a in reversed(self.page_annotations(index)):
+            if a.in_reply_to is not None or not a.type.is_comment or a.flags & 2:
+                continue
+            if annotation_bounds(a).inflated(tolerance).contains(point):
+                return a
+        return None
+
+    def show_annotation(self, index: int, name: str) -> None:
+        """Scroll to a comment and select it."""
+        model = self.annotation_by_name(index, name)
+        if model is None:
+            return
+        if self._mode is LayoutMode.SINGLE and index != self._current:
+            self.go_to_page(index, record=False)
+        self.ensureVisible(self.page_rect_to_scene(index, annotation_bounds(model)), 60, 120)
+        self._set_current(index)
+        self.set_annotation_selection([(index, name)])
+
+    def selected_models(self) -> list[AnnotationModel]:
+        out = []
+        for page, name in self.selected_annotations:
+            model = self.annotation_by_name(page, name)
+            if model is not None:
+                out.append(model)
+        return out
+
+    def set_annotation_selection(self, items: list[tuple[int, str]]) -> None:
+        if items == self.selected_annotations:
+            return
+        pages = {p for p, _ in self.selected_annotations} | {p for p, _ in items}
+        self.selected_annotations = list(items)
+        for page in pages:
+            if 0 <= page < len(self._items):
+                self._items[page].update()
+        self.annotation_selection_changed.emit()
+
+    def set_annotation_preview(self, preview: dict[int, list[Rect]]) -> None:
+        pages = set(self.annotation_preview) | set(preview)
+        self.annotation_preview = preview
+        for page in pages:
+            if 0 <= page < len(self._items):
+                self._items[page].update()
+
+    def selection_frames(self, index: int) -> list[Rect]:
+        """Bounds of selected annotations on a page (PageItem draws frames and handles)."""
+        return [annotation_bounds(a) for a in self.selected_models() if a.page_index == index]
+
+    def page_rect(self, index: int) -> Rect:
+        """Visible page rectangle (page space)."""
+        return self._page_rects[index]
+
+    def scene_to_page(self, index: int, scene_pos: QPointF) -> Point:
+        """Scene position in ``index``'s page space, even when outside that page."""
+        scene = self._scene_rects[index]
+        local = Point(scene_pos.x() - scene.x0, scene_pos.y() - scene.y0)
+        return local.transform(view_matrix(self._page_rects[index], self.rotation, 1.0).inverted())
+
+    def page_point_to_scene(self, index: int, point: Point) -> QPointF:
+        m = view_matrix(self._page_rects[index], self.rotation, 1.0)
+        local = point.transform(m)
+        scene = self._scene_rects[index]
+        return QPointF(scene.x0 + local.x, scene.y0 + local.y)
+
     def overlays(self, index: int) -> list[tuple[Rect, QColor]]:
         """Highlight rectangles (page space) that PageItem draws over the page."""
         out = [(r, SEARCH_HIT_COLOR) for r in self._search_rects.get(index, ())]
@@ -657,3 +785,17 @@ class DocumentView(QGraphicsView):
         for item in self._items:
             item.update()
         self.content_changed.emit()
+
+
+def annotation_bounds(a: AnnotationModel) -> Rect:
+    """Tight bounds of an annotation's geometry (its /Rect can include line-ending margins)."""
+    points: list[Point] = []
+    if a.type.is_markup:
+        points = [p for q in a.quads for p in (q.ul, q.ur, q.ll, q.lr)]
+    elif a.type is AnnotationType.INK:
+        points = [p for stroke in a.ink for p in stroke]
+    elif a.type in (AnnotationType.LINE, AnnotationType.POLYGON, AnnotationType.POLYLINE):
+        points = list(a.vertices)
+    if points:
+        return Rect.from_points(points)
+    return a.rect.normalized()

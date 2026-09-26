@@ -81,6 +81,35 @@ class PageItem(QGraphicsItem):
                 painter.fillRect(qrect(rect.transform(m).inflated(0.5)), color)
             painter.restore()
 
+        frames = view.selection_frames(self.index)
+        previews = view.annotation_preview.get(self.index, [])
+        if frames or previews:
+            m = view_matrix(self.page_rect, view.rotation, 1.0)
+            painter.save()
+            dash = QPen(QColor(0, 120, 215))
+            dash.setCosmetic(True)
+            dash.setStyle(Qt.PenStyle.DashLine)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(dash)
+            for rect in previews:
+                painter.drawRect(qrect(rect.transform(m)))
+            solid = QPen(QColor(0, 120, 215))
+            solid.setCosmetic(True)
+            painter.setPen(solid)
+            # handles are a fixed size on screen: convert 6 device pixels to item units
+            lod = QStyleOptionGraphicsItem.levelOfDetailFromTransform(painter.worldTransform())
+            h = 3 / max(lod, 0.01)
+            for rect in frames:
+                r = qrect(rect.transform(m))
+                painter.drawRect(r)
+                painter.setBrush(QColor(255, 255, 255))
+                for x in (r.left(), r.center().x(), r.right()):
+                    for y in (r.top(), r.center().y(), r.bottom()):
+                        if (x, y) != (r.center().x(), r.center().y()):
+                            painter.drawRect(QRectF(x - h, y - h, 2 * h, 2 * h))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.restore()
+
         pen = QPen(QColor(0, 0, 0, 70))
         pen.setCosmetic(True)
         painter.setPen(pen)

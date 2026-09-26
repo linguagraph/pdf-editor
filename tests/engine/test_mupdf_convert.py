@@ -21,3 +21,12 @@ def test_format_roundtrip() -> None:
     dt = datetime(2025, 6, 7, 8, 9, 10, tzinfo=timezone(timedelta(hours=-5, minutes=-30)))
     assert format_pdf_date(dt) == "D:20250607080910-05'30'"
     assert parse_pdf_date(format_pdf_date(dt)) == dt
+
+
+def test_pdf_numbers_never_use_exponents() -> None:
+    from pdfeditor.engine.mupdf.annots import pdf_num
+
+    assert pdf_num(2.48081e-06) == "0"
+    assert pdf_num(-1e-7) == "0"
+    assert pdf_num(1.5) == "1.5" and pdf_num(100.0) == "100" and pdf_num(-0.25) == "-0.25"
+    assert "e" not in pdf_num(1e20)

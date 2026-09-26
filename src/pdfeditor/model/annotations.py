@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
 from pdfeditor.model.color import Color
-from pdfeditor.model.geometry import Point, Quad, Rect
+from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 
 
 class AnnotationType(Enum):
@@ -99,8 +100,48 @@ class AnnotationModel:
     state: ReviewState = ReviewState.NONE
     flags: int = 0
     locked: bool = False
+    file_name: str = ""  # FileAttachment: attached file's name
+    file_data: bytes | None = None  # FileAttachment: contents (only needed to create one)
     extra: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_reply(self) -> bool:
         return self.in_reply_to is not None
+
+
+# Standard stamp names (PDF 32000 12.5.6.12), in the order MuPDF numbers them.
+STANDARD_STAMPS = (
+    "Approved",
+    "AsIs",
+    "Confidential",
+    "Departmental",
+    "Experimental",
+    "Expired",
+    "Final",
+    "ForComment",
+    "ForPublicRelease",
+    "NotApproved",
+    "NotForPublicRelease",
+    "Sold",
+    "TopSecret",
+    "Draft",
+)
+
+NOTE_ICONS = ("Note", "Comment", "Key", "Help", "NewParagraph", "Paragraph", "Insert")
+
+# Annotation flags (PDF 32000 12.5.3)
+FLAG_HIDDEN = 2
+FLAG_PRINT = 4
+FLAG_NO_ZOOM = 8
+FLAG_NO_ROTATE = 16
+FLAG_LOCKED = 128
+
+
+def transformed(model: AnnotationModel, m: Matrix) -> AnnotationModel:
+    """A copy of ``model`` with every geometry field mapped through ``m`` (move/resize)."""
+    out = copy.deepcopy(model)
+    out.rect = model.rect.transform(m)
+    out.quads = tuple(q.transform(m) for q in model.quads)
+    out.ink = tuple(tuple(p.transform(m) for p in stroke) for stroke in model.ink)
+    out.vertices = tuple(p.transform(m) for p in model.vertices)
+    return out

@@ -24,6 +24,8 @@ class MuPDFEngine:
         search=True,
         incremental_save=True,
         annotations_read=True,
+        annotations_write=True,
+        annotations_flatten=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

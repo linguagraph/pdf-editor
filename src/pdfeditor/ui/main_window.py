@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import copy
+import functools
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QStyle,
     QTabWidget,
@@ -37,12 +41,28 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor import __version__
+from pdfeditor.core import engine_lock
 from pdfeditor.core.autosave import Autosaver, RecoveryStore
+from pdfeditor.core.commands import (
+    AddAnnotationCommand,
+    Command,
+    MacroCommand,
+    ReorderAnnotationCommand,
+    SnapshotCommand,
+    UpdateAnnotationCommand,
+)
 from pdfeditor.core.layout import LayoutMode
 from pdfeditor.core.paths import recovery_dir
 from pdfeditor.core.render_cache import RenderCache
 from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
-from pdfeditor.engine.base import OpenError, PasswordRequired, SaveError
+from pdfeditor.engine.base import Document, OpenError, PasswordRequired, SaveError
+from pdfeditor.model.annotations import (
+    STANDARD_STAMPS,
+    AnnotationModel,
+    AnnotationType,
+    ReviewState,
+)
+from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
@@ -52,12 +72,15 @@ from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.panels.bookmarks import BookmarksPanel
+from pdfeditor.ui.panels.comments import CommentsPanel, add_reply
+from pdfeditor.ui.panels.inspector import InspectorPanel
 from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.theme import Theme, apply_theme
+from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.hand import HandTool
 from pdfeditor.ui.tools.select import SelectTool
@@ -65,6 +88,42 @@ from pdfeditor.ui.view.document_view import DocumentView
 from pdfeditor.ui.view.renderer import TileRenderer
 
 log = logging.getLogger(__name__)
+
+# (action name, label, standard icon name or None)
+COMMENT_TOOLS = (
+    ("highlight", "&Highlight", None),
+    ("underline", "&Underline", None),
+    ("strikeout", "S&trikethrough", None),
+    ("squiggly", "S&quiggly", None),
+    ("note", "Sticky &Note", "SP_MessageBoxInformation"),
+    ("textbox", "Te&xt Box", None),
+    ("stamp", "Sta&mp", None),
+    ("attach", "Attach &File", "SP_FileLinkIcon"),
+    ("rectangle", "&Rectangle", None),
+    ("oval", "&Oval", None),
+    ("line", "&Line", None),
+    ("arrow", "&Arrow", None),
+    ("polygon", "Pol&ygon", None),
+    ("polyline", "Poly&line", None),
+    ("pen", "&Pen", None),
+)
+MARKUP_TOOLS = {
+    "highlight": AnnotationType.HIGHLIGHT,
+    "underline": AnnotationType.UNDERLINE,
+    "strikeout": AnnotationType.STRIKEOUT,
+    "squiggly": AnnotationType.SQUIGGLY,
+}
+
+
+def _split_camel(name: str) -> str:
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
+
+
+def annotate_transform(model: AnnotationModel, m: Matrix) -> AnnotationModel:
+    from pdfeditor.model.annotations import transformed
+
+    return transformed(model, m)
+
 
 MAX_RECENT = 10
 SETTINGS_RECENT = "recent_files"
@@ -184,6 +243,10 @@ class MainWindow(QMainWindow):
         self.autosaver = Autosaver(self.recovery)
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave_now)
+        # Cyclic GC runs here, under the engine lock (see core/engine_lock.py).
+        self.gc_timer = QTimer(self)
+        self.gc_timer.timeout.connect(engine_lock.collect)
+        self.gc_timer.start(4000)
 
         self.tabs = QTabWidget(self)
         self.tabs.setDocumentMode(True)
@@ -206,9 +269,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.search_panel = SearchPanel()
+        self.comments_panel = CommentsPanel()
+        self.inspector = InspectorPanel()
         self.panels: list[ViewPanel] = [
             ThumbnailsPanel(),
             BookmarksPanel(),
+            self.comments_panel,
             self.search_panel,
             AttachmentsPanel(),
             LayersPanel(),
@@ -225,6 +291,13 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetMovable
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.nav_dock)
+        self.inspector_dock = QDockWidget("Properties", self)
+        self.inspector_dock.setObjectName("inspector")
+        self.inspector_dock.setWidget(self.inspector)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
+        self.inspector_dock.hide()  # opened on demand: the page needs the width
+        self.panels.append(self.inspector)
+        self._annotation_clipboard: list[AnnotationModel] = []
         self._state_restored = False
 
         self.navigator = PageNavigator(self)
@@ -328,8 +401,37 @@ class MainWindow(QMainWindow):
             self.tabs.addAction(act)
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
+        sp_note = QStyle.StandardPixmap
+        for name, text, icon in COMMENT_TOOLS:
+            act = QAction(text, self, checkable=True)
+            if icon is not None:
+                act.setIcon(self.style().standardIcon(getattr(sp_note, icon)))
+            act.setProperty("needs_doc", True)
+            act.triggered.connect(lambda _=False, n=name: self.set_tool(n))
+            self.tool_group.addAction(act)
+            self.tool_actions[name] = act
+        self.stamp_name = STANDARD_STAMPS[0]
+        self.stamp_menu = QMenu("Stamp", self)
+        for stamp in STANDARD_STAMPS:
+            choose = functools.partial(self.choose_stamp, stamp)
+            self.stamp_menu.addAction(_split_camel(stamp), choose)
+        self.tool_actions["stamp"].setMenu(self.stamp_menu)
         self.current_tool = self.prefs.default_tool
         self.tool_actions[self.current_tool].setChecked(True)
+        self.act_paste = a(
+            "&Paste Comments",
+            self.paste_annotations,
+            QKeySequence.StandardKey.Paste,
+            None,
+            True,
+            False,
+            self.tabs,
+        )
+        self.act_delete_annots = a(
+            "&Delete Comment", self.delete_annotations, None, sp_note.SP_TrashIcon
+        )
+        self.act_flatten = a("&Flatten All Comments…", self.flatten_all)
+        self.act_show_comments = a("Comments &List", self.show_comments, "Ctrl+Shift+C")
         self.act_quit = a("E&xit", self.close, QKeySequence.StandardKey.Quit, None, False)
         self.act_zoom_in = a(
             "Zoom &In",
@@ -465,6 +567,10 @@ class MainWindow(QMainWindow):
         for act in self.theme_actions.values():
             theme_menu.addAction(act)
         view_menu.addAction(self.act_nav_pane)
+        self.act_inspector = self.inspector_dock.toggleViewAction()
+        self.act_inspector.setText("&Properties Panel")
+        self.act_inspector.setShortcut(QKeySequence("Ctrl+E"))
+        view_menu.addAction(self.act_inspector)
 
         go_menu = mb.addMenu("&Go")
         for act in (self.act_first, self.act_prev, self.act_next, self.act_last, self.act_goto):
@@ -483,10 +589,22 @@ class MainWindow(QMainWindow):
         home = self.ribbon.add_tab("Home")
         home.add_group(self.act_open, self.act_save, self.act_print, self.act_properties)
         home.add_group(self.act_undo, self.act_redo)
-        home.add_group(*self.tool_actions.values())
+        home.add_group(self.tool_actions["select"], self.tool_actions["hand"])
         home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
         home.add_group(self.act_prev, self.act_next)
+        comment = self.ribbon.add_tab("Comment")
+        comment.add_group(
+            *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
+        )
+        comment.add_group(*(self.tool_actions[n] for n in ("note", "textbox", "stamp", "attach")))
+        comment.add_group(
+            *(
+                self.tool_actions[n]
+                for n in ("rectangle", "oval", "line", "arrow", "polygon", "polyline", "pen")
+            )
+        )
+        comment.add_group(self.act_show_comments, self.act_delete_annots, self.act_flatten)
         view = self.ribbon.add_tab("View")
         view.add_group(
             self.act_zoom_out,
@@ -548,6 +666,11 @@ class MainWindow(QMainWindow):
         view.history_changed.connect(self._update_ui)
         view.link_activated.connect(self.open_external_link)
         view.selection_changed.connect(self._update_ui)
+        view.annotation_selection_changed.connect(self._update_ui)
+        view.annotation_activated.connect(self.edit_annotation)
+        view.annotation_context_menu.connect(self.annotation_menu)
+        view.escape_pressed.connect(lambda: self.set_tool("select"))
+        view.author = self.prefs.author
         view.set_tool(self._make_tool(self.current_tool))
         session.subscribe(lambda event: self._on_session_event(view, event))
         index = self.tabs.addTab(view, session.display_name)
@@ -685,6 +808,7 @@ class MainWindow(QMainWindow):
             self.autosave_timer.stop()
         for view in self.views():
             view.session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
+            view.author = self.prefs.author
 
     def show_preferences(self) -> None:
         if PreferencesDialog(self.prefs, self).exec():
@@ -750,10 +874,13 @@ class MainWindow(QMainWindow):
             self.act_night.blockSignals(True)
             self.act_night.setChecked(view.night_mode)
             self.act_night.blockSignals(False)
-            self.act_copy.setEnabled(view.has_selection())
+            self.act_copy.setEnabled(view.has_selection() or bool(view.selected_annotations))
+            self.act_paste.setEnabled(bool(self._annotation_clipboard))
+            self.act_delete_annots.setEnabled(bool(view.selected_annotations))
             self.act_find_next.setEnabled(bool(self.search_panel.hits))
             self.act_find_prev.setEnabled(bool(self.search_panel.hits))
-            self.tool_actions[view.tool.name].setChecked(True)
+            if view.tool.name in self.tool_actions:
+                self.tool_actions[view.tool.name].setChecked(True)
             self.act_prev.setEnabled(view.current_page > 0)
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         else:
@@ -810,8 +937,162 @@ class MainWindow(QMainWindow):
     # -- text & tools ---------------------------------------------------------------------
     def copy_selection(self) -> None:
         view = self.current_view()
-        if view is not None and view.copy_selection():
+        if view is None:
+            return
+        if view.selected_annotations:
+            self._annotation_clipboard = [copy.deepcopy(m) for m in view.selected_models()]
+            self.statusBar().showMessage(
+                f"Copied {len(self._annotation_clipboard)} comment(s).", 2000
+            )
+            self._update_ui()
+        elif view.copy_selection():
             self.statusBar().showMessage("Copied to clipboard.", 2000)
+
+    def paste_annotations(self) -> None:
+        """Paste copied comments onto the current page, slightly offset."""
+        view = self.current_view()
+        if view is None or not self._annotation_clipboard:
+            return
+        page = view.current_page
+        rect = view.page_rect(page)
+        commands: list[Command] = []
+        for original in self._annotation_clipboard:
+            model = annotate_transform(original, Matrix.translate(12, 12))
+            model.page_index = page
+            model.name = ""
+            model.id = None
+            model.in_reply_to = None
+            # keep pasted comments on the page even when it is smaller than the source
+            b = model.rect
+            if not b.intersects(rect):
+                model = annotate_transform(
+                    model, Matrix.translate(rect.x0 - b.x0 + 20, rect.y0 - b.y0 + 20)
+                )
+            commands.append(AddAnnotationCommand(model, "Paste Comment"))
+        view.session.execute(
+            commands[0] if len(commands) == 1 else MacroCommand("Paste Comments", commands)
+        )
+        added = [(page, c.model.name) for c in commands if isinstance(c, AddAnnotationCommand)]
+        view.set_annotation_selection(added)
+
+    def delete_annotations(self) -> None:
+        view = self.current_view()
+        if view is not None:
+            view.delete_selected_annotations()
+
+    def show_inspector(self) -> None:
+        was_hidden = not self.inspector_dock.isVisible()
+        self.inspector_dock.show()
+        if was_hidden:
+            self.resizeDocks([self.inspector_dock], [250], Qt.Orientation.Horizontal)
+
+    def show_comments(self) -> None:
+        self.nav_dock.show()
+        self.nav_tabs.setCurrentWidget(self.comments_panel)
+
+    def choose_stamp(self, stamp: str) -> None:
+        self.stamp_name = stamp
+        self.set_tool("stamp")
+
+    def edit_annotation(self, model: AnnotationModel) -> None:
+        """Double-click: edit a comment's text (or save an attached file)."""
+        view = self.current_view()
+        if view is None:
+            return
+        if model.type is AnnotationType.FILE_ATTACHMENT and model.file_data is not None:
+            chosen, _ = QFileDialog.getSaveFileName(self, "Save Attached File", model.file_name)
+            if chosen:
+                Path(chosen).write_bytes(model.file_data)
+            return
+        if model.locked:
+            self.statusBar().showMessage("This comment is locked.", 3000)
+            return
+        text = annotate.ask_text(view, "Edit Comment", model.contents)
+        if text is not None and text != model.contents:
+            after = copy.deepcopy(model)
+            after.contents = text
+            view.session.execute(UpdateAnnotationCommand(model, after, "Edit Comment Text"))
+
+    def annotation_menu(self, model: AnnotationModel, pos: QPoint) -> None:
+        view = self.current_view()
+        if view is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Edit Text…", lambda: self.edit_annotation(model)).setEnabled(
+            not model.locked
+        )
+        menu.addAction("Reply…", lambda: self._reply(view, model))
+        status = menu.addMenu("Set Status")
+        for state in ReviewState:
+            if state is not ReviewState.NONE:
+                status.addAction(state.value, functools.partial(add_reply, view, model, "", state))
+        menu.addAction("Properties", self.show_inspector)
+        menu.addSeparator()
+        menu.addAction(
+            "Bring to Front",
+            lambda: view.session.execute(
+                ReorderAnnotationCommand(model.page_index, model.name, True)
+            ),
+        )
+        menu.addAction(
+            "Send to Back",
+            lambda: view.session.execute(
+                ReorderAnnotationCommand(model.page_index, model.name, False)
+            ),
+        )
+        menu.addSeparator()
+        menu.addAction("Flatten", self.flatten_selected)
+        menu.addAction("Delete", view.delete_selected_annotations).setEnabled(not model.locked)
+        menu.exec(pos)
+
+    def _reply(self, view: DocumentView, model: AnnotationModel) -> None:
+        text = annotate.ask_text(view, "Reply")
+        if text:
+            add_reply(view, model, text)
+
+    def flatten_selected(self) -> int:
+        """Burn only the selected comments into their pages (one undo step)."""
+        view = self.current_view()
+        if view is None or not view.session.engine.capabilities.annotations_flatten:
+            return 0
+        by_page: dict[int, list[int]] = {}
+        for model in view.selected_models():
+            if model.id is not None:
+                by_page.setdefault(model.page_index, []).append(model.id)
+        if not by_page:
+            return 0
+        counted: list[int] = []
+
+        def operation(doc: Document) -> None:
+            counted.append(sum(doc.page(p).flatten_annotations(ids) for p, ids in by_page.items()))
+
+        view.set_annotation_selection([])
+        session = view.session
+        session.execute(SnapshotCommand("Flatten Comment", operation, session.snapshots))
+        return counted[0] if counted else 0
+
+    def flatten_all(self, confirm: bool = True) -> int:
+        """Burn every visible comment into the pages (one undo step)."""
+        view = self.current_view()
+        if view is None or not view.session.engine.capabilities.annotations_flatten:
+            return 0
+        if confirm:
+            answer = QMessageBox.question(
+                self,
+                "Flatten Comments",
+                "Make all comments part of the page content? They can't be edited as comments "
+                "afterwards (you can still undo).",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return 0
+        counted: list[int] = []
+
+        def operation(doc: Document) -> None:
+            counted.append(sum(doc.page(i).flatten_annotations() for i in range(doc.page_count)))
+
+        session = view.session
+        session.execute(SnapshotCommand("Flatten Comments", operation, session.snapshots))
+        return counted[0] if counted else 0
 
     def show_find(self) -> None:
         view = self.current_view()
@@ -821,14 +1102,27 @@ class MainWindow(QMainWindow):
         self.nav_tabs.setCurrentWidget(self.search_panel)
         self.search_panel.focus_query(view.selected_text())
 
-    @staticmethod
-    def _make_tool(name: str) -> Tool:
-        return HandTool() if name == "hand" else SelectTool()
+    def _make_tool(self, name: str) -> Tool:
+        if name == "hand":
+            tool: Tool = HandTool()
+        elif name == "stamp":
+            tool = annotate.StampTool(self.stamp_name)
+        else:
+            tool = annotate.tool_for(name) or SelectTool()
+        tool.name = name
+        return tool
 
     def set_tool(self, name: str) -> None:
+        view = self.current_view()
+        markup = MARKUP_TOOLS.get(name)
+        if markup is not None and view is not None and view.has_selection():
+            # Acrobat-style: select text first, then pick Highlight, and it's applied at once.
+            annotate.apply_markup(view, markup, self.tool_actions[name].text().replace("&", ""))
+            self.tool_actions[self.current_tool].setChecked(True)
+            return
         self.current_tool = name
-        for view in self.views():
-            view.set_tool(self._make_tool(name))
+        for v in self.views():
+            v.set_tool(self._make_tool(name))
         self.tool_actions[name].setChecked(True)
 
     def print_document(self) -> None:

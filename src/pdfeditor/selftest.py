@@ -73,6 +73,25 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         session.redo()
         return "edit, undo, redo"
 
+    def annotations() -> str:
+        from pdfeditor.core.commands import AddAnnotationCommand
+        from pdfeditor.model.annotations import AnnotationModel, AnnotationType
+        from pdfeditor.model.color import Color
+        from pdfeditor.model.geometry import Rect
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        model = AnnotationModel(
+            AnnotationType.SQUARE, 0, Rect(72, 450, 200, 520), color=Color(1, 0, 0)
+        )
+        session.execute(AddAnnotationCommand(model))
+        found = [
+            a for a in session.document.page(0).annotations() if a.type is AnnotationType.SQUARE
+        ]
+        if len(found) != 1:
+            raise AssertionError("annotation was not created")
+        return "square comment created"
+
     def save_copy() -> str:
         session = state["session"]
         assert isinstance(session, DocumentSession)
@@ -124,6 +143,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("render", render),
         ("text + search", text_and_search),
         ("undo + redo", undo_redo),
+        ("annotations", annotations),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),
@@ -134,6 +154,9 @@ def run_self_test(report_path: Path | None = None) -> int:
     """Run all checks; returns a process exit code (0 = all passed)."""
     # No window may appear, and a real printer must not be needed.
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from pdfeditor.core.engine_lock import install_manual_gc
+
+    install_manual_gc()
     lines = [
         f"pdfeditor {__version__} self-test",
         f"frozen: {is_frozen()}  python: {platform.python_version()}  os: {platform.platform()}",

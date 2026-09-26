@@ -48,6 +48,7 @@ class Capabilities:
     incremental_save: bool = False
     annotations_read: bool = False
     annotations_write: bool = False
+    annotations_flatten: bool = False
     outline_write: bool = False
     metadata_write: bool = False
     xmp: bool = False
@@ -148,6 +149,36 @@ class Page(Protocol):
     def links(self) -> list[Link]: ...
 
     def annotations(self) -> list[AnnotationModel]: ...
+
+    @property
+    def pdf_matrix(self) -> Matrix:
+        """Maps visible page space to PDF user space (points, origin bottom-left, unrotated).
+
+        Needed for exchange formats such as XFDF that use raw PDF coordinates.
+        """
+        ...
+
+    # Optional (``capabilities.annotations_write``). Annotations are identified by ``id``
+    # (engine object id) with ``name`` (/NM) as a stable fallback that survives delete + re-add.
+    def add_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        """Create an annotation; returns it as stored (with ``id`` and ``name`` filled in)."""
+        ...
+
+    def update_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        """Overwrite geometry and properties of the annotation ``model`` identifies."""
+        ...
+
+    def delete_annotation(self, annot_id: int | None, name: str = "") -> None: ...
+
+    def annotation_order(self) -> list[int]:
+        """Annotation ids in drawing order (last = on top)."""
+        ...
+
+    def set_annotation_order(self, ids: Sequence[int]) -> None: ...
+
+    def flatten_annotations(self, ids: Sequence[int] | None = None) -> int:
+        """Burn annotations (all, or ``ids``) into the page content; returns how many."""
+        ...
 
 
 @runtime_checkable
