@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 14 (PDF/A).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 15 (Accessibility).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -222,10 +222,10 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Remove security (requires the owner password); security summary in Properties. *(The owner password is checked on a scratch copy, because a wrong password leaves an open MuPDF document unreadable; Properties also shows a security change that is pending until the next save)*
 - [x] Metadata editor (Info dictionary plus XMP sync). *(The existing Properties editor now writes title/author/subject/keywords/creator/producer into XMP too, keeping other XMP content such as the PDF/A identification)*
 
-### Phase 14: Standards (PDF/A) (M)
-- [ ] Preflight-lite checks: fonts embedded, no encryption, no JS, color spaces with OutputIntent, transparency, XMP present
-- [ ] Convert to PDF/A-2b: embed missing fonts, add sRGB OutputIntent ICC, write the XMP PDF/A identification, remove disallowed features. Done fully in-process (MuPDF + pikepdf + bundled sRGB ICC); no Ghostscript
-- [ ] Built-in PDF/A checks cover the common rules; optional veraPDF integration (only if installed) for authoritative reports
+### Phase 14: Standards (PDF/A) (M), done
+- [x] Preflight-lite checks: fonts embedded, no encryption, no JS, color spaces with OutputIntent, transparency, XMP present. *(Tools ▸ PDF/A Preflight, via pikepdf: also embedded files, XFA, annotation types/flags/appearances, image interpolation/alternates, PostScript XObjects, transfer functions, CMYK images; each marked fixable or not. Transparency is allowed in PDF/A-2, so it isn't flagged)*
+- [x] Convert to PDF/A-2b: embed missing fonts, add sRGB OutputIntent ICC, write the XMP PDF/A identification, remove disallowed features. Done fully in-process (MuPDF + pikepdf + bundled sRGB ICC); no Ghostscript. *(Tools ▸ Save as PDF/A writes a new file and leaves the open document alone. Standard fonts the file only names (and Arial/Times New Roman/Courier New) get MuPDF's metric-compatible Type1C programs with widths computed by fontTools; rendering is pixel-identical and text positions match in pdfium. Other non-embedded fonts are reported, not substituted)*
+- [x] Built-in PDF/A checks cover the common rules; optional veraPDF integration (only if installed) for authoritative reports. *(The result is re-checked; "Validate with veraPDF" appears only when veraPDF is found)*
 
 ### Phase 15: Accessibility (M)
 - [ ] Checker: tagged or not, document language, title shown in the window, image alt text, headings structure, reading-order sanity, and contrast of annotations/added text. Results panel with jump-to

@@ -84,6 +84,7 @@ from pdfeditor.ui.panels.inspector import InspectorPanel
 from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
+from pdfeditor.ui.pdfa_controller import PdfaController
 from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
@@ -337,6 +338,7 @@ class MainWindow(QMainWindow):
         self.export = ExportController(self)
         self.optimize = OptimizeController(self)
         self.compare = CompareController(self)
+        self.pdfa = PdfaController(self)
         self.panels.insert(3, self.protect.panel)
         self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -634,6 +636,9 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.optimize.act_audit)
         tools_menu.addSeparator()
         tools_menu.addAction(self.compare.act_compare)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.pdfa.act_preflight)
+        tools_menu.addAction(self.pdfa.act_save_pdfa)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -686,6 +691,7 @@ class MainWindow(QMainWindow):
         self.export.ribbon()
         self.optimize.ribbon()
         self.compare.ribbon()
+        self.pdfa.ribbon()
 
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:

@@ -56,6 +56,34 @@ class MuPDFEngine:
 
         return text_width(text, font, size)
 
+    def standard_font_program(self, base_font: str) -> bytes | None:
+        code = standard_font_code(base_font)
+        return bytes(pymupdf.Font(code).buffer) if code else None
+
+
+_FAMILIES = (
+    (("courier", "couriernew", "mono"), ("cour", "cobo", "coit", "cobi")),
+    (("times", "timesnewroman", "roman", "serif"), ("tiro", "tibo", "tiit", "tibi")),
+    (("helvetica", "arial", "helv", "sans"), ("helv", "hebo", "heit", "hebi")),
+)
+
+
+def standard_font_code(base_font: str) -> str | None:
+    """MuPDF's built-in font for a base-14 name or a common metric-compatible alias."""
+    name = base_font.split("+", 1)[-1].lower().replace(" ", "")
+    if name.startswith("symbol"):
+        return "symb"
+    if name.startswith("zapfdingbats") or name.startswith("dingbats"):
+        return "zadb"
+    style = name.replace("-", ",").split(",", 1)[1] if ("-" in name or "," in name) else ""
+    bold = "bold" in style or "black" in style
+    italic = "italic" in style or "oblique" in style
+    family_name = name.replace("-", ",").split(",", 1)[0].removesuffix("mt").removesuffix("psmt")
+    for aliases, codes in _FAMILIES:
+        if family_name.removesuffix("ps") in aliases or family_name in aliases:
+            return codes[(2 if italic else 0) + (1 if bold else 0)]
+    return None
+
 
 def create_engine() -> MuPDFEngine:
     return MuPDFEngine()

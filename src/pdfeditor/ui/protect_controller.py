@@ -328,7 +328,7 @@ class ProtectController:
     last_message = ""
 
     # -- password security --------------------------------------------------------------------
-    def _owner_access(self, session: DocumentSession, owner_password: str | None) -> bool:
+    def owner_access(self, session: DocumentSession, owner_password: str | None) -> bool:
         """Changing security needs the owner password when the document already has one."""
         with session.lock:
             if session.document.has_owner_access():
@@ -360,7 +360,7 @@ class ProtectController:
         if view is None:
             return False
         session = view.session
-        if not self._owner_access(session, owner_password):
+        if not self.owner_access(session, owner_password):
             return False
         if dialog is None:
             with session.lock:
@@ -384,7 +384,7 @@ class ProtectController:
         if not encrypted and (pending is None or pending.method is EncryptionMethod.NONE):
             QMessageBox.information(self.w, "Remove Security", "This document has no security.")
             return False
-        if encrypted and not self._owner_access(session, owner_password):
+        if encrypted and not self.owner_access(session, owner_password):
             return False
         if not encrypted:  # only a pending change: just drop it
             session.execute(SetSecurityCommand(SecuritySettings(EncryptionMethod.NONE)))
