@@ -9,12 +9,15 @@ paragraph per piece. Ordinary paragraphs pass through unchanged.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.text import Block, Char, Line, Span
 
 COLUMN_GAP_EM = 2.5  # a horizontal gap this many font sizes wide separates columns
+HEADING_RATIO = 1.15  # a block this much larger than body text is a heading
+MAX_HEADING_LEVEL = 3
 
 
 def _union(rects: Sequence[Rect]) -> Rect:
@@ -106,3 +109,27 @@ def editable_blocks(blocks: Sequence[Block]) -> list[Block]:
             continue
         out.extend(Block(p.bbox, (p,)) for p in pieces if p.text.strip())
     return sorted(out, key=lambda b: (round(b.bbox.y0, 1), b.bbox.x0))
+
+
+# -- headings (shared by reflowing export and auto-tagging) -----------------------------------
+def body_size(blocks: Sequence[Block]) -> float:
+    """The most common text size, weighted by characters."""
+    sizes: Counter[float] = Counter()
+    for b in blocks:
+        for line in b.lines:
+            for s in line.spans:
+                sizes[round(s.size * 2) / 2] += len(s.text.strip())
+    return sizes.most_common(1)[0][0] if sizes else 11.0
+
+
+def heading_levels(blocks: Sequence[Block], body: float) -> dict[float, int]:
+    larger = sorted(
+        {
+            round(max(s.size for ln in b.lines for s in ln.spans) * 2) / 2
+            for b in blocks
+            if b.lines and any(ln.spans for ln in b.lines)
+        },
+        reverse=True,
+    )
+    levels = [s for s in larger if s >= body * HEADING_RATIO]
+    return {size: min(i + 1, MAX_HEADING_LEVEL) for i, size in enumerate(levels)}

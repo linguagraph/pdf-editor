@@ -74,6 +74,7 @@ class Capabilities:
     export: bool = False  # tables, image areas, image/font extraction
     encrypt: bool = False
     structure: bool = False  # read/edit tags and accessibility settings
+    auto_tag: bool = False  # tag untagged documents from layout analysis (experimental)
     optimize: bool = False
 
 
@@ -334,6 +335,14 @@ class Document(Protocol):
 
     def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
         """Put the element children of ``parent`` (None: the root) in the given order."""
+        ...
+
+    # Optional (``capabilities.auto_tag``). Experimental.
+    def auto_tag(self) -> dict[str, int]:
+        """Tag an untagged document: wrap each paragraph and image in marked content and build
+        a structure tree (Document -> H1..H3 / P / Figure, in reading order) with a ParentTree.
+        Returns the number of elements created per type. Raises :class:`EngineError` if the
+        document is already tagged or has nothing to tag."""
         ...
 
     def accessibility_settings(self) -> AccessibilitySettings: ...

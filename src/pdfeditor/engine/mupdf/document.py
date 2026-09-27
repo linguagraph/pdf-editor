@@ -23,9 +23,9 @@ from pdfeditor.engine.base import (
     SaveError,
     SaveOptions,
 )
+from pdfeditor.engine.mupdf import autotag, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.engine.mupdf import optimize as opt
-from pdfeditor.engine.mupdf import pages
 from pdfeditor.engine.mupdf import structure as struct
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
@@ -392,6 +392,9 @@ class MuDocument:
 
     def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
         struct.reorder_children(self._fz, parent, order)
+
+    def auto_tag(self) -> dict[str, int]:
+        return autotag.auto_tag(self)
 
     def accessibility_settings(self) -> AccessibilitySettings:
         return struct.accessibility_settings(self._fz)
