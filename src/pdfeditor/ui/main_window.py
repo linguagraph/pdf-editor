@@ -76,6 +76,7 @@ from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_t
 from pdfeditor.ui.export_controller import ExportController
 from pdfeditor.ui.optimize_controller import OptimizeController
 from pdfeditor.ui.organize import OrganizeController
+from pdfeditor.ui.panels.accessibility import AccessibilityPanel, TagsPanel
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.panels.bookmarks import BookmarksPanel
@@ -293,6 +294,10 @@ class MainWindow(QMainWindow):
             AttachmentsPanel(),
             LayersPanel(),
         ]
+        self.accessibility_panel = AccessibilityPanel()
+        self.tags_panel = TagsPanel()
+        self.panels += [self.accessibility_panel, self.tags_panel]
+        self.accessibility_panel.tag_requested.connect(self._show_tag)
         self.nav_tabs = QTabWidget()
         self.nav_tabs.setDocumentMode(True)
         for panel in self.panels:
@@ -639,6 +644,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self.pdfa.act_preflight)
         tools_menu.addAction(self.pdfa.act_save_pdfa)
+        tools_menu.addAction(self.pdfa.act_accessibility)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -705,6 +711,16 @@ class MainWindow(QMainWindow):
     def current_tab(self) -> DocumentTab | None:
         w = self.tabs.currentWidget()
         return w if isinstance(w, DocumentTab) else None
+
+    def _show_tag(self, ref: int) -> None:
+        self.nav_dock.show()
+        self.nav_tabs.setCurrentWidget(self.tags_panel)
+        self.tags_panel.show_tag(ref)
+
+    def accessibility_check(self) -> None:
+        self.nav_dock.show()
+        self.nav_tabs.setCurrentWidget(self.accessibility_panel)
+        self.accessibility_panel.run()
 
     def current_view(self) -> DocumentView | None:
         tab = self.current_tab()

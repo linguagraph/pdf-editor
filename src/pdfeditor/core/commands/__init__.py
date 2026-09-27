@@ -8,10 +8,13 @@ from pdfeditor.core.commands.annotation_cmds import (
 )
 from pdfeditor.core.commands.base import Change, ChangeKind, Command, MacroCommand, UndoStack
 from pdfeditor.core.commands.document_cmds import (
+    ReorderStructCommand,
+    SetAccessibilityCommand,
     SetMetadataCommand,
     SetOutlineCommand,
     SetPageLabelsCommand,
     SetSecurityCommand,
+    SetStructElementCommand,
 )
 from pdfeditor.core.commands.snapshot import SnapshotCommand, SnapshotStore
 
@@ -23,10 +26,13 @@ __all__ = [
     "DeleteAnnotationsCommand",
     "MacroCommand",
     "ReorderAnnotationCommand",
+    "ReorderStructCommand",
+    "SetAccessibilityCommand",
     "SetMetadataCommand",
     "SetOutlineCommand",
     "SetPageLabelsCommand",
     "SetSecurityCommand",
+    "SetStructElementCommand",
     "SnapshotCommand",
     "SnapshotStore",
     "UndoStack",

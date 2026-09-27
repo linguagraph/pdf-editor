@@ -39,11 +39,14 @@ class PdfaController:
 
         self.act_preflight = act("PDF/A &Preflight…", self.preflight)
         self.act_save_pdfa = act("Save as PDF/&A…", self.save_as_pdfa)
+        self.act_accessibility = act("Accessibility &Check", window.accessibility_check)
         self.last_message = ""
         self.dialog: PdfaReportDialog | None = None
 
     def ribbon(self) -> None:
-        self.w.ribbon.tab("Tools").add_group(self.act_preflight, self.act_save_pdfa)
+        self.w.ribbon.tab("Tools").add_group(
+            self.act_preflight, self.act_save_pdfa, self.act_accessibility
+        )
 
     def _session(self) -> DocumentSession | None:
         view = self.w.current_view()

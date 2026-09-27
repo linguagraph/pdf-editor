@@ -385,7 +385,76 @@ def two_columns() -> None:
     _save(doc, "two_columns.pdf")
 
 
+def tagged() -> None:
+    """A tagged PDF with accessibility problems: no /Lang, no DisplayDocTitle, a Figure without
+    alt text, a skipped heading level (H1 -> H3), page-2 content ordered before page-1 content,
+    and pale (low-contrast) text."""
+    doc = pymupdf.open()
+    for _ in range(2):
+        doc.new_page(width=A4.width, height=A4.height)
+    p1, p2 = doc[0], doc[1]  # re-fetched: adding a page orphans earlier Page objects
+    for page in (p1, p2):
+        page.insert_text((72, 72), "x", fontname="helv", fontsize=1)  # creates the font resource
+    p1.insert_image(pymupdf.Rect(72, 150, 272, 250), stream=_gradient_png(200, 100))
+    font = p1.get_fonts(full=True)[0][4]
+    image = p1.get_images(full=True)[0][7]
+    h = A4.height
+
+    def text(tag: str, mcid: int, y: float, size: float, words: str, rgb: str = "0 0 0") -> str:
+        return (
+            f"/{tag} <</MCID {mcid}>> BDC BT {rgb} rg /{font} {size} Tf 72 {h - y} Td "
+            f"({words}) Tj ET EMC\n"
+        )
+
+    c1 = (
+        text("H1", 0, 72, 20, "Annual Report")
+        + text("P", 1, 110, 11, "An introductory paragraph.")
+        + f"/Figure <</MCID 2>> BDC q 200 0 0 100 72 {h - 250} cm /{image} Do Q EMC\n"
+        + text("H3", 3, 290, 14, "A skipped heading level")
+        + text("P", 4, 320, 11, "Pale text that is hard to read.", "0.8 0.8 0.8")
+    )
+    c2 = text("H2", 0, 72, 16, "Second page heading") + text("P", 1, 110, 11, "Page two text.")
+    for page, content in ((p1, c1), (p2, c2)):
+        xref = doc.get_new_xref()
+        doc.update_object(xref, "<<>>")
+        doc.update_stream(xref, content.encode("latin-1"))
+        doc.xref_set_key(page.xref, "Contents", f"{xref} 0 R")
+
+    root = doc.get_new_xref()
+    document = doc.get_new_xref()
+
+    def elem(tag: str, page: pymupdf.Page, mcid: int, extra: str = "") -> int:
+        x = doc.get_new_xref()
+        doc.update_object(x, f"<< /Type /StructElem /S /{tag} /P {document} 0 R "
+                             f"/Pg {page.xref} 0 R /K {mcid} {extra}>>")  # fmt: skip
+        return x
+
+    h1 = elem("H1", p1, 0)
+    para = elem("P", p1, 1)
+    fig = elem("Figure", p1, 2)
+    h3 = elem("H3", p1, 3)
+    pale = elem("P", p1, 4)
+    h2 = elem("H2", p2, 0)
+    para2 = elem("P", p2, 1)
+    # reading order: page 2's paragraph comes before the rest of page 1
+    kids = [h1, para, para2, fig, h3, pale, h2]
+    doc.update_object(document, f"<< /Type /StructElem /S /Document /P {root} 0 R "
+                                f"/K [{' '.join(f'{k} 0 R' for k in kids)}] >>")  # fmt: skip
+    parents = doc.get_new_xref()
+    doc.update_object(parents, f"<< /Nums [0 [{h1} 0 R {para} 0 R {fig} 0 R {h3} 0 R "
+                               f"{pale} 0 R] 1 [{h2} 0 R {para2} 0 R]] >>")  # fmt: skip
+    doc.update_object(root, f"<< /Type /StructTreeRoot /K {document} 0 R "
+                            f"/ParentTree {parents} 0 R /ParentTreeNextKey 2 >>")  # fmt: skip
+    doc.xref_set_key(p1.xref, "StructParents", "0")
+    doc.xref_set_key(p2.xref, "StructParents", "1")
+    catalog = doc.pdf_catalog()
+    doc.xref_set_key(catalog, "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(catalog, "MarkInfo", "<< /Marked true >>")
+    _save(doc, "tagged.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "tagged": tagged,
     "two_columns": two_columns,
     "heavy": heavy,
     "report": report,

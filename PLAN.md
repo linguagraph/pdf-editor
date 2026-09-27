@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 15 (Accessibility).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 16 (Polish, robustness, performance).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -228,9 +228,9 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Built-in PDF/A checks cover the common rules; optional veraPDF integration (only if installed) for authoritative reports. *(The result is re-checked; "Validate with veraPDF" appears only when veraPDF is found)*
 
 ### Phase 15: Accessibility (M)
-- [ ] Checker: tagged or not, document language, title shown in the window, image alt text, headings structure, reading-order sanity, and contrast of annotations/added text. Results panel with jump-to
-- [ ] Fix-ups: set language/title/DisplayDocTitle; edit alt text in the struct tree (pikepdf); a Tags tree panel (read, rename, reorder)
-- [ ] Stretch: basic auto-tagging (paragraphs/headings/figures from block analysis). Marked experimental
+- [x] Checker: tagged or not, document language, title shown in the window, image alt text, headings structure, reading-order sanity, and contrast of annotations/added text. Results panel with jump-to. *(Tools ▸ Accessibility Check and an Accessibility panel: failed / needs review / passed, double-click goes to the page and the tag; also tab order for pages with annotations. Contrast follows WCAG 2 against an assumed white background, for all text and FreeText comments)*
+- [x] Fix-ups: set language/title/DisplayDocTitle; edit alt text in the struct tree (pikepdf); a Tags tree panel (read, rename, reorder). *(Fix… in the Accessibility panel for language, title, title bar, tab order and alt text; a Tags panel to change tag types and alt text and move tags up/down. All undoable. Done through the engine (MuPDF objects plus our own PDF object parser), not pikepdf, so edits apply to the open document)*
+- [ ] Stretch: basic auto-tagging (paragraphs/headings/figures from block analysis). Marked experimental. _(not started: it needs marked-content rewriting of every page's content stream plus a ParentTree)_
 
 ### Phase 16: Polish, robustness, performance (M)
 - [ ] Keyboard shortcuts that match Acrobat conventions, customizable; a command palette (Ctrl+Shift+P)
