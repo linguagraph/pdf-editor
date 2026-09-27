@@ -89,6 +89,7 @@ from pdfeditor.ui.pdfa_controller import PdfaController
 from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
+from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
 from pdfeditor.ui.theme import Theme, apply_theme
 from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
@@ -169,6 +170,7 @@ class PageNavigator(QWidget):
         )
         self.prev = button(QStyle.StandardPixmap.SP_ArrowUp, "Previous page", window.previous_page)
         self.edit = QLineEdit(self)
+        self.edit.setAccessibleName("Page number")
         self.edit.setFixedWidth(56)
         self.edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.edit.returnPressed.connect(self._jump)
@@ -220,6 +222,10 @@ class ZoomBox(QComboBox):
         super().__init__(window)
         self._window = window
         self.setEditable(True)
+        self.setAccessibleName("Zoom")
+        edit = self.lineEdit()
+        if edit is not None:
+            edit.setAccessibleName("Zoom")
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.addItems(self.PRESETS)
         self.setMinimumContentsLength(8)
@@ -264,6 +270,8 @@ class MainWindow(QMainWindow):
         self.gc_timer.start(4000)
 
         self.tabs = QTabWidget(self)
+        self.tabs.setAccessibleName("Open documents")
+        self.tabs.tabBar().setAccessibleName("Document tabs")
         self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
@@ -299,6 +307,8 @@ class MainWindow(QMainWindow):
         self.panels += [self.accessibility_panel, self.tags_panel]
         self.accessibility_panel.tag_requested.connect(self._show_tag)
         self.nav_tabs = QTabWidget()
+        self.nav_tabs.setAccessibleName("Navigation panels")
+        self.nav_tabs.tabBar().setAccessibleName("Panel tabs")
         self.nav_tabs.setDocumentMode(True)
         for panel in self.panels:
             self.nav_tabs.addTab(panel, panel.title)
@@ -349,6 +359,8 @@ class MainWindow(QMainWindow):
         self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
+        # after every controller has made its actions: defaults + the user's own shortcuts
+        self.shortcuts = ShortcutManager(self)
         self._restore_settings()
         self._apply_prefs()
         self._update_ui()
@@ -401,6 +413,10 @@ class MainWindow(QMainWindow):
         self.act_redo = a("&Redo", self.redo, QKeySequence.StandardKey.Redo, sp.SP_ArrowForward)
         self.act_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.act_prefs = a("Pre&ferences…", self.show_preferences, "Ctrl+K", None, False)
+        self.act_palette = a("Command &Palette…", self.show_command_palette, None, None, False)
+        self.act_palette.setObjectName("command-palette")
+        self.act_shortcuts = a("&Keyboard Shortcuts…", self.show_shortcuts, None, None, False)
+        self.act_shortcuts.setObjectName("keyboard-shortcuts")
         self.act_print = a(
             "&Print…", self.print_document, QKeySequence.StandardKey.Print, sp.SP_FileIcon
         )
@@ -589,6 +605,8 @@ class MainWindow(QMainWindow):
             edit_menu.addAction(act)
         edit_menu.addSeparator()
         edit_menu.addAction(self.act_prefs)
+        edit_menu.addAction(self.act_shortcuts)
+        edit_menu.addAction(self.act_palette)
 
         view_menu = mb.addMenu("&View")
         for act in (
@@ -765,11 +783,22 @@ class MainWindow(QMainWindow):
             self._forget_recent(path)
             return None
         self._add_recent(path)
-        return self._add_session(session)
+        view = self._add_session(session)
+        with session.lock:
+            repaired = session.document.info().is_repaired
+        if repaired:
+            self.statusBar().showMessage(
+                f"“{path.name}” was damaged and has been repaired. "
+                "Save it to keep the repaired version.",
+                15000,
+            )
+        return view
 
     def _add_session(self, session: DocumentSession) -> DocumentView:
         session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
         view = DocumentView(session, self.renderer)
+        view.setAccessibleName(f"Pages of {session.display_name}")
+        view.viewport().setAccessibleName("Page area")
         view.current_page_changed.connect(lambda _p: self._update_ui())
         view.zoom_changed.connect(
             lambda z: self.zoom_box.show_zoom(z) if view is self.current_view() else None
@@ -926,6 +955,12 @@ class MainWindow(QMainWindow):
         for view in self.views():
             view.session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
             view.author = self.prefs.author
+
+    def show_command_palette(self) -> None:
+        CommandPalette(self.shortcuts, self).exec()
+
+    def show_shortcuts(self) -> None:
+        ShortcutsDialog(self.shortcuts, self).exec()
 
     def show_preferences(self) -> None:
         if PreferencesDialog(self.prefs, self).exec():

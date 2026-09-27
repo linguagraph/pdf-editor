@@ -44,6 +44,7 @@ class Ribbon(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.bar = QTabBar(self)
+        self.bar.setAccessibleName("Ribbon tabs")
         self.bar.setDrawBase(False)
         self.bar.setExpanding(False)
         self.stack = QStackedWidget(self)

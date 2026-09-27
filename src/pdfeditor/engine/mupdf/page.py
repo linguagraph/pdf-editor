@@ -291,6 +291,9 @@ class MuPage:
     def add_text_layer(self, layer: bytes) -> None:
         ocr.add_text_layer(self, layer)
 
+    def to_svg(self) -> str:
+        return str(self.fz.get_svg_image(text_as_path=True))
+
     def find_tables(self) -> list[TableData]:
         # MuPDF prints a hint about an optional layout package; keep the console clean.
         with contextlib.redirect_stdout(io.StringIO()):

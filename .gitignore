@@ -19,3 +19,4 @@ htmlcov/
 .vscode/
 dist/
 src/pdfeditor/data/tessdata/
+.claude/
