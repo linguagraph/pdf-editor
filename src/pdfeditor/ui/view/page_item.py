@@ -81,6 +81,19 @@ class PageItem(QGraphicsItem):
                 painter.fillRect(qrect(rect.transform(m).inflated(0.5)), color)
             painter.restore()
 
+        outlines = view.object_outlines(self.index)
+        if outlines:
+            m = view_matrix(self.page_rect, view.rotation, 1.0)
+            painter.save()
+            faint = QPen(QColor(120, 120, 120, 150))
+            faint.setCosmetic(True)
+            faint.setStyle(Qt.PenStyle.DotLine)
+            painter.setPen(faint)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for rect in outlines:
+                painter.drawRect(qrect(rect.transform(m)))
+            painter.restore()
+
         frames = view.selection_frames(self.index)
         previews = view.annotation_preview.get(self.index, [])
         if frames or previews:

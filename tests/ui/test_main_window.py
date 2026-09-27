@@ -44,7 +44,7 @@ def test_starts_empty(window: MainWindow) -> None:
     assert window.welcome.isVisible()
     assert not window.act_zoom_in.isEnabled()
     assert window.act_open.isEnabled()
-    assert window.ribbon.tab_names() == ["Home", "Organize", "Comment", "View"]
+    assert window.ribbon.tab_names() == ["Home", "Edit", "Organize", "Comment", "View"]
 
 
 def test_open_and_close_tabs(window: MainWindow, fixture_pdf) -> None:

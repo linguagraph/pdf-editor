@@ -17,6 +17,7 @@ from pdfeditor.model.annotations import AnnotationModel
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Quad, Rect
 from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, LayerInfo, Metadata
+from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
 from pdfeditor.model.text import TextPage
@@ -196,6 +197,34 @@ class Page(Protocol):
     def stamp_image(self, stamp: ImageStamp) -> None: ...
 
     def fill_background(self, color: Color, opacity: float = 1.0) -> None: ...
+
+    # Optional (``capabilities.content_edit``). Object keys are valid for one page revision.
+    def content_objects(self) -> list[PageObject]:
+        """Editable content: text blocks, images, form XObjects and vector paths."""
+        ...
+
+    def delete_objects(self, keys: Sequence[str]) -> None: ...
+
+    def transform_objects(self, keys: Sequence[str], matrix: Matrix) -> None:
+        """Move/resize objects by ``matrix`` (visible page space). Text blocks are re-typeset
+        at their new place with their own style."""
+        ...
+
+    def replace_text(
+        self, key: str, text: str, style: TextStyle | None = None
+    ) -> FontChoice | None:
+        """Replace a text block's content (empty text deletes it). Returns the font used."""
+        ...
+
+    def add_text(self, rect: Rect, text: str, style: TextStyle) -> FontChoice: ...
+
+    def add_shape(self, spec: ShapeSpec) -> None: ...
+
+    def image_data(self, key: str) -> tuple[bytes, str]:
+        """Encoded image bytes and file extension ("png", "jpeg", ...)."""
+        ...
+
+    def replace_image(self, key: str, data: bytes) -> None: ...
 
 
 @runtime_checkable

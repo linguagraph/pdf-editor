@@ -113,6 +113,22 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         doc.select_pages([0])
         return "duplicate, footer, margin detection"
 
+    def content_editing() -> str:
+        from pdfeditor.model.objects import ObjectType
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        page = session.document.page(0)
+        objects = page.content_objects()
+        text = next(
+            o for o in objects if o.type is ObjectType.TEXT and o.text.startswith("pdfeditor")
+        )
+        page.replace_text(text.key, "pdfeditor self-test (edited)")
+        if "(edited)" not in session.document.page(0).text_page(with_chars=False).text:
+            raise AssertionError("text replacement failed")
+        paths = [o for o in session.document.page(0).content_objects() if o.type is ObjectType.PATH]
+        return f"{len(objects)} objects, text replaced, {len(paths)} path(s) intact"
+
     def save_copy() -> str:
         session = state["session"]
         assert isinstance(session, DocumentSession)
@@ -166,6 +182,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("undo + redo", undo_redo),
         ("annotations", annotations),
         ("page operations", page_operations),
+        ("content editing", content_editing),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),
