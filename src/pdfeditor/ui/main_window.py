@@ -73,6 +73,7 @@ from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.document_tab import DocumentTab
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.export_controller import ExportController
+from pdfeditor.ui.optimize_controller import OptimizeController
 from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
@@ -333,6 +334,7 @@ class MainWindow(QMainWindow):
         self.protect = ProtectController(self, self.tool_group, self.tool_actions)
         self.tools = ToolsController(self)
         self.export = ExportController(self)
+        self.optimize = OptimizeController(self)
         self.panels.insert(3, self.protect.panel)
         self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -556,6 +558,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.act_save)
         file_menu.addAction(self.act_save_as)
         self.export.fill_menu(file_menu)
+        file_menu.addAction(self.optimize.act_reduce)
         file_menu.addSeparator()
         file_menu.addAction(self.act_properties)
         file_menu.addAction(self.act_print)
@@ -624,6 +627,9 @@ class MainWindow(QMainWindow):
         tools_menu = mb.addMenu("&Tools")
         tools_menu.addAction(self.tools.act_ocr)
         tools_menu.addAction(self.tools.act_batch_ocr)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.optimize.act_reduce)
+        tools_menu.addAction(self.optimize.act_audit)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -674,6 +680,7 @@ class MainWindow(QMainWindow):
         view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night)
         self.tools.ribbon()
         self.export.ribbon()
+        self.optimize.ribbon()
 
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:

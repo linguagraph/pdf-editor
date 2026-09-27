@@ -23,6 +23,7 @@ from pdfeditor.model.metadata import (
     ImageInfo,
     LayerInfo,
     Metadata,
+    SpaceUsage,
 )
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
@@ -118,6 +119,20 @@ class SaveOptions:
     deflate: bool = True
     object_streams: bool = False
     clean_content: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class OptimizeOptions:
+    """In-place size reductions (``capabilities.optimize``); unused objects, duplicates and
+    compression are handled when saving (``SaveOptions(garbage=4, object_streams=True)``)."""
+
+    image_dpi: int | None = 150  # None: keep image resolution
+    downsample_above: float = 1.3  # only images shown above image_dpi * this are downsampled
+    jpeg_quality: int = 75  # photos are recompressed as JPEG at this quality
+    grayscale: bool = False
+    subset_fonts: bool = True
+    remove_thumbnails: bool = True
+    remove_metadata: bool = False  # document info and XMP
 
 
 @runtime_checkable
@@ -327,6 +342,19 @@ class Document(Protocol):
         ...
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes: ...
+
+    def copy(self) -> Document:
+        """An independent in-memory copy of the current state (same password, no path)."""
+        ...
+
+    # Optional (``capabilities.optimize``).
+    def space_usage(self) -> SpaceUsage:
+        """Where the bytes go, by category (for the current in-memory objects)."""
+        ...
+
+    def optimize(self, options: OptimizeOptions) -> None:
+        """Downsample/recompress images, subset fonts, drop thumbnails/metadata (in place)."""
+        ...
 
     # Optional (``capabilities.page_ops``). Bookmarks and links follow moved pages; bookmarks to
     # removed pages are dropped; page-label rules are kept by page index.

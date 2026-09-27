@@ -94,3 +94,28 @@ class ImageInfo:
     height: int
     colorspace: str
     pages: tuple[int, ...]  # pages that show it
+
+
+SPACE_CATEGORIES = (
+    "Images",
+    "Fonts",
+    "Page content",
+    "Comments and forms",
+    "Structure (tags)",
+    "Bookmarks and links",
+    "Embedded files",
+    "Metadata and thumbnails",
+    "Other objects",
+    "File overhead",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SpaceUsage:
+    """Bytes per category (stored, i.e. compressed, sizes) for an audit report."""
+
+    total: int
+    categories: dict[str, int]
+
+    def share(self, category: str) -> float:
+        return self.categories.get(category, 0) / self.total if self.total else 0.0

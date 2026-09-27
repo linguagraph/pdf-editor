@@ -17,12 +17,14 @@ from pdfeditor.engine.base import (
     Document,
     EngineError,
     OpenError,
+    OptimizeOptions,
     PasswordCallback,
     PasswordRequired,
     SaveError,
     SaveOptions,
 )
 from pdfeditor.engine.mupdf import convert as cv
+from pdfeditor.engine.mupdf import optimize as opt
 from pdfeditor.engine.mupdf import pages
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
@@ -35,6 +37,7 @@ from pdfeditor.model.metadata import (
     LayerInfo,
     Metadata,
     Permissions,
+    SpaceUsage,
 )
 from pdfeditor.model.outline import Destination, OutlineItem, flatten
 from pdfeditor.model.pages import PageLabelRule
@@ -564,6 +567,17 @@ class MuDocument:
             report.append("form field values")
         self._reset_pages()
         return report
+
+    def copy(self) -> MuDocument:
+        data = self._fz.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_KEEP)
+        return open_document(bytes(data), self._password)
+
+    def space_usage(self) -> SpaceUsage:
+        return opt.space_usage(self._fz)
+
+    def optimize(self, options: OptimizeOptions) -> None:
+        opt.optimize(self._fz, options)
+        self._reset_pages()
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes:
         options = options or SaveOptions()

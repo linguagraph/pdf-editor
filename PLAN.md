@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 11 (Optimize and compress).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: E (text editing fixes).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -199,11 +199,17 @@ Problem (user feedback): once a tool such as Sticky Note is active there's no vi
 - [x] Extract all images and fonts
 - [x] From Office files: optional extra, used only when LibreOffice is installed (`soffice --convert-to pdf`); the menu item explains the requirement otherwise. Core conversions never depend on it
 
-### Phase 11: Optimize and compress (M)
-- [ ] Space-usage audit report (images / fonts / content / other, by bytes)
-- [ ] Downsample and recompress images (target DPI, JPEG quality, grayscale option, via Pillow), subset fonts, drop unused objects and duplicates, object streams, deflate everything
-- [ ] Linearize for fast web view (a pikepdf/qpdf post-process)
-- [ ] Presets (screen / ebook / print / custom) with a before/after size preview
+### Phase 11: Optimize and compress (M), done
+- [x] Space-usage audit report (images / fonts / content / other, by bytes). *(Tools ▸ Space Usage: images, fonts, page content, comments/forms, tags, bookmarks/links, embedded files, metadata/thumbnails, other, file overhead)*
+- [x] Downsample and recompress images (target DPI, JPEG quality, grayscale option, via Pillow), subset fonts, drop unused objects and duplicates, object streams, deflate everything. *(MuPDF's image rewriter instead of Pillow; it halves resolution in power-of-two steps, never going below the target)*
+- [x] Linearize for fast web view (a pikepdf/qpdf post-process). *(Skipped with a note for encrypted files, since qpdf would drop the encryption)*
+- [x] Presets (screen / ebook / print / custom) with a before/after size preview. *(Plus a lossless preset; the result is saved as a new file and the open document is left alone)*
+
+### Phase E: Text editing fixes (S–M), from user testing, done next, before Phase 12
+Reported on a two-column manual (icons plus labels in two columns):
+- [ ] Clicking a text line in a two-column layout opens an edit box that contains the text of both columns. Paragraph detection must split blocks at large horizontal gaps (column gutters) and never merge lines that don't overlap horizontally
+- [ ] Closing the edit box after editing existing text leaves the original place blank and creates a new text box elsewhere with the formatting lost. The edit must be re-typeset in the original block's position with its font, size and color, and closing without changes must leave the page untouched
+- [ ] No way to format edited text: add a style bar to the inline editor (font family, size, bold, italic, color, alignment) that applies to the whole block and is kept when saving the edit
 
 ### Phase 12: Compare documents (M)
 - [ ] Page alignment (text-similarity matching, to handle inserted and deleted pages)

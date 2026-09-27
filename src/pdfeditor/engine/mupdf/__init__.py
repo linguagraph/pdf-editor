@@ -31,6 +31,7 @@ class MuPDFEngine:
         redact=True,
         ocr=True,
         export=True,
+        optimize=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

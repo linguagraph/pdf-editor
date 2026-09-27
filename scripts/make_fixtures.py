@@ -327,7 +327,40 @@ def report() -> None:
     _save(doc, "report.pdf")
 
 
+def heavy() -> None:
+    """Wasteful on purpose: a 600-dpi photo-like image, a full embedded font, a thumbnail."""
+    import random
+
+    w, h = 2400, 1600
+    img = Image.new("RGB", (w, h))
+    draw = ImageDraw.Draw(img)
+    for y in range(h):
+        draw.line([(0, y), (w, y)], fill=(y * 255 // h, 90, 255 - y * 255 // h))
+    rnd = random.Random(1)
+    for _ in range(300):
+        x, y, r = rnd.randrange(w), rnd.randrange(h), rnd.randrange(10, 120)
+        fill = (rnd.randrange(256), rnd.randrange(256), rnd.randrange(256))
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=fill)
+    img = Image.blend(img, Image.effect_noise((w, h), 30).convert("RGB"), 0.15)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_image(pymupdf.Rect(72, 72, 360, 264), stream=buf.getvalue())  # 4 x 2.67 in
+    page.insert_font(fontname="F0", fontbuffer=pymupdf.Font("cjk").buffer)  # not subset
+    page.insert_text((72, 320), "Heavy document text", fontname="F0", fontsize=14)
+    page.insert_text((72, 350), "Second line in Helvetica", fontsize=11)
+    thumb = io.BytesIO()
+    img.resize((120, 80)).save(thumb, format="JPEG")
+    xref = doc.get_new_xref()
+    doc.update_object(xref, "<< /Type /XObject /Subtype /Image /Width 120 /Height 80 >>")
+    doc.update_stream(xref, thumb.getvalue(), new=True)
+    doc.xref_set_key(page.xref, "Thumb", f"{xref} 0 R")
+    _save(doc, "heavy.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "heavy": heavy,
     "report": report,
     "sensitive": sensitive,
     "mixed_content": mixed_content,
