@@ -9,6 +9,7 @@ from pdfeditor.core.commands.base import Change, ChangeKind, Command
 from pdfeditor.engine.base import Document
 from pdfeditor.model.metadata import Metadata
 from pdfeditor.model.outline import OutlineItem
+from pdfeditor.model.pages import PageLabelRule
 
 
 class SetMetadataCommand(Command):
@@ -57,3 +58,23 @@ class SetOutlineCommand(Command):
 
     def changes(self) -> list[Change]:
         return [Change(ChangeKind.OUTLINE)]
+
+
+class SetPageLabelsCommand(Command):
+    label = "Edit Page Labels"
+
+    def __init__(self, rules: Sequence[PageLabelRule]) -> None:
+        self.new = list(rules)
+        self.old: list[PageLabelRule] | None = None
+
+    def do(self, doc: Document) -> None:
+        if self.old is None:
+            self.old = doc.page_label_rules()
+        doc.set_page_label_rules(self.new)
+
+    def undo(self, doc: Document) -> None:
+        assert self.old is not None
+        doc.set_page_label_rules(self.old)
+
+    def changes(self) -> list[Change]:
+        return [Change(ChangeKind.STRUCTURE)]  # labels show in thumbnails and the navigator

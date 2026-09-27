@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 6 (Page organization and document assembly).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 7 (Content editing).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -147,13 +147,13 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Round-trip tests: create → save → reopen (and check it opens in pdfium via `pypdfium2` in tests) → compare models
 
 ### Phase 6: Page organization and document assembly (L)
-- [ ] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert
-- [ ] Insert blank / from file / from clipboard image; delete; duplicate; rotate; replace pages; extract to new file
-- [ ] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (dialog with order and ranges, bookmarks merged)
-- [ ] Crop tool (CropBox) with apply-to-range, and remove white margins automatically
-- [ ] Page labels editor; bookmarks editing (add from current view or selection, rename, nest by drag, delete, set destination)
-- [ ] Header/footer, Bates numbering, text/image watermark, and background (tokens: page, total, date, file name; position, font, opacity, page ranges)
-- [ ] Create a PDF from images or from multiple files
+- [x] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert
+- [x] Insert blank / from file / from clipboard image; delete; duplicate; rotate; replace pages; extract to new file
+- [x] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (dialog with order and ranges, bookmarks merged)
+- [x] Crop (CropBox) with apply-to-range via the Crop dialog (margins), and remove white margins automatically (interactive drag-to-crop tool deferred to Phase 16)
+- [x] Page labels editor; bookmarks editing (add from current view or selection, rename, nest by drag, delete, set destination)
+- [x] Header/footer, Bates numbering, text/image watermark, and background (tokens: page, total, date, file name; position, font, opacity, page ranges)
+- [x] Create a PDF from images or from multiple files
 
 ### Phase 7: Content editing (XL, the hardest part)
 - [ ] `engine/contentstream`: lexer and parser for content streams (operators, operands, inline images), tracking graphics and text state, and a serializer. Hypothesis round-trip tests (parse → write → parse is identical)

@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Any
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
-from pdfeditor.engine.mupdf import annots
+from pdfeditor.engine.mupdf import annots, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 from pdfeditor.model.outline import Destination, Link, LinkKind
+from pdfeditor.model.pages import ImageStamp, TextStamp
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TextPage
 
 if TYPE_CHECKING:
@@ -232,6 +233,21 @@ class MuPage:
 
     def flatten_annotations(self, ids: Sequence[int] | None = None) -> int:
         return annots.flatten(self, ids)
+
+    def set_rotation(self, degrees: int) -> None:
+        pages.set_rotation(self, degrees)
+
+    def set_crop(self, rect: Rect) -> None:
+        pages.set_crop(self, rect)
+
+    def stamp_text(self, stamp: TextStamp) -> None:
+        pages.stamp_text(self, stamp)
+
+    def stamp_image(self, stamp: ImageStamp) -> None:
+        pages.stamp_image(self, stamp)
+
+    def fill_background(self, color: Color, opacity: float = 1.0) -> None:
+        pages.fill_background(self, color.rgb(), opacity)
 
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]

@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from pdfeditor.model.annotations import AnnotationModel
+from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Quad, Rect
 from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, LayerInfo, Metadata
 from pdfeditor.model.outline import Link, OutlineItem
+from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
 from pdfeditor.model.text import TextPage
 
 
@@ -53,7 +55,7 @@ class Capabilities:
     metadata_write: bool = False
     xmp: bool = False
     layers: bool = False
-    page_ops: bool = False
+    page_ops: bool = False  # insert/delete/reorder/rotate/crop/labels/stamps
     content_edit: bool = False
     redact: bool = False
     ocr: bool = False
@@ -180,6 +182,21 @@ class Page(Protocol):
         """Burn annotations (all, or ``ids``) into the page content; returns how many."""
         ...
 
+    # Optional (``capabilities.page_ops``); visible-space geometry as everywhere else.
+    def set_rotation(self, degrees: int) -> None:
+        """Set the page's own /Rotate (persistent, unlike view rotation)."""
+        ...
+
+    def set_crop(self, rect: Rect) -> None:
+        """Crop the page to ``rect`` (current visible space)."""
+        ...
+
+    def stamp_text(self, stamp: TextStamp) -> None: ...
+
+    def stamp_image(self, stamp: ImageStamp) -> None: ...
+
+    def fill_background(self, color: Color, opacity: float = 1.0) -> None: ...
+
 
 @runtime_checkable
 class Document(Protocol):
@@ -236,6 +253,24 @@ class Document(Protocol):
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes: ...
 
+    # Optional (``capabilities.page_ops``). Bookmarks and links follow moved pages; bookmarks to
+    # removed pages are dropped; page-label rules are kept by page index.
+    def select_pages(self, order: Sequence[int]) -> None:
+        """Keep exactly ``order`` (reorder, delete, or duplicate by repeating an index)."""
+        ...
+
+    def insert_blank_page(self, at: int, width: float, height: float) -> None: ...
+
+    def insert_pages(self, source: Document, pages: Sequence[int], at: int) -> None:
+        """Copy pages (with annotations and links) from another open document."""
+        ...
+
+    def insert_image_page(self, at: int, image: bytes) -> None: ...
+
+    def page_label_rules(self) -> list[PageLabelRule]: ...
+
+    def set_page_label_rules(self, rules: Sequence[PageLabelRule]) -> None: ...
+
     def can_save_incrementally(self) -> bool:
         """True if ``save(options=SaveOptions(incremental=True))`` to ``path`` can work."""
         ...
@@ -268,3 +303,7 @@ class Engine(Protocol):
     ) -> Document: ...
 
     def new_document(self) -> Document: ...
+
+    def text_width(self, text: str, font: str, size: float) -> float:
+        """Width in points of ``text`` in a base-14 ``font`` (for aligning stamps)."""
+        ...

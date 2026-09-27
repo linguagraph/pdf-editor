@@ -44,7 +44,7 @@ def test_starts_empty(window: MainWindow) -> None:
     assert window.welcome.isVisible()
     assert not window.act_zoom_in.isEnabled()
     assert window.act_open.isEnabled()
-    assert window.ribbon.tab_names() == ["Home", "Comment", "View"]
+    assert window.ribbon.tab_names() == ["Home", "Organize", "Comment", "View"]
 
 
 def test_open_and_close_tabs(window: MainWindow, fixture_pdf) -> None:
@@ -63,7 +63,7 @@ def test_open_and_close_tabs(window: MainWindow, fixture_pdf) -> None:
     assert v1.session.closed and v2.session.closed
 
 
-def test_recent_files(window: MainWindow, fixture_pdf, tmp_path: Path) -> None:
+def test_recent_files(window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) -> None:
     window.open_path(fixture_pdf("images"))
     window.open_path(fixture_pdf("outline"))
     recent = window._recent_files()
@@ -77,7 +77,9 @@ def test_recent_files(window: MainWindow, fixture_pdf, tmp_path: Path) -> None:
     window.open_path(gone)
     window.close_current()
     gone.unlink()
-    QMessageBox.warning = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
+    )
     assert window.open_path(gone) is None
     assert str(gone.resolve()) not in window._recent_files()
 

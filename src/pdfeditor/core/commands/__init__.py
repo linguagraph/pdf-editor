@@ -7,7 +7,11 @@ from pdfeditor.core.commands.annotation_cmds import (
     UpdateAnnotationCommand,
 )
 from pdfeditor.core.commands.base import Change, ChangeKind, Command, MacroCommand, UndoStack
-from pdfeditor.core.commands.document_cmds import SetMetadataCommand, SetOutlineCommand
+from pdfeditor.core.commands.document_cmds import (
+    SetMetadataCommand,
+    SetOutlineCommand,
+    SetPageLabelsCommand,
+)
 from pdfeditor.core.commands.snapshot import SnapshotCommand, SnapshotStore
 
 __all__ = [
@@ -20,6 +24,7 @@ __all__ = [
     "ReorderAnnotationCommand",
     "SetMetadataCommand",
     "SetOutlineCommand",
+    "SetPageLabelsCommand",
     "SnapshotCommand",
     "SnapshotStore",
     "UndoStack",

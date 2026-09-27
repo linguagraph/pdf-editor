@@ -56,6 +56,7 @@ class DocumentSession:
         self.undo_stack = UndoStack()
         self.undo_stack.on_change(lambda: self._emit(SessionEvent(EventKind.DIRTY)))
         self.save_path_hint: Path | None = None  # e.g. original path of a recovered document
+        self.name_hint = ""  # shown for unsaved new documents, e.g. "Combined.pdf"
         self._snapshots: SnapshotStore | None = None
         self._listeners: list[Listener] = []
 
@@ -79,7 +80,9 @@ class DocumentSession:
     @property
     def display_name(self) -> str:
         path = self.path or self.save_path_hint
-        return path.name if path is not None else f"Untitled-{self.id}"
+        if path is not None:
+            return path.name
+        return self.name_hint or f"Untitled-{self.id}"
 
     @property
     def page_count(self) -> int:
