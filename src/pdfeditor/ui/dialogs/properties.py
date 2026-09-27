@@ -47,6 +47,7 @@ class PropertiesDialog(QDialog):
             meta = doc.metadata()
             info = doc.info()
             fonts = doc.fonts()
+            pending = doc.pending_security()
             path = doc.path
 
         tabs = QTabWidget(self)
@@ -95,6 +96,14 @@ class PropertiesDialog(QDialog):
                 if ok
             ]
             form.addRow("Allowed:", _selectable(", ".join(allowed) or "nothing"))
+        if pending is not None:
+            change = (
+                "removed"
+                if pending.method is EncryptionMethod.NONE
+                else f"set to {pending.method.value}"
+                + (" with an open password" if pending.user_password else "")
+            )
+            form.addRow("On next save:", _selectable(f"Security will be {change}"))
         form.addRow("Tagged PDF:", _selectable(_yes_no(info.is_tagged)))
         form.addRow("Has forms:", _selectable(_yes_no(info.has_forms)))
         form.addRow("Digitally signed:", _selectable(_yes_no(info.has_signatures)))

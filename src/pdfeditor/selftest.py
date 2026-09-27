@@ -266,6 +266,27 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("optimized copy is broken")
         return f"{result.before} -> {result.after} bytes, linearized"
 
+    def security() -> str:
+        from pdfeditor.engine.base import PasswordRequired
+        from pdfeditor.model.metadata import EncryptionMethod, SecuritySettings
+
+        doc = get_engine().open(data_path("selftest.pdf"))
+        doc.set_pending_security(SecuritySettings(EncryptionMethod.AES_256, "u", "o"))
+        out = doc.save(workdir / "secured.pdf")
+        doc.close()
+        try:
+            get_engine().open(out).close()
+        except PasswordRequired:
+            pass
+        else:
+            raise AssertionError("the encrypted copy opened without a password")
+        check = get_engine().open(out, "o")
+        method, owner = check.info().encryption, check.has_owner_access()
+        check.close()
+        if method is not EncryptionMethod.AES_256 or not owner:
+            raise AssertionError(f"unexpected security after save: {method}")
+        return "AES-256 encrypt, reopen with password"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -283,6 +304,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("OCR", ocr),
         ("export", export),
         ("optimize", optimize),
+        ("security", security),
     ]
 
 

@@ -11,6 +11,7 @@ from pdfeditor.core.commands.document_cmds import (
     SetMetadataCommand,
     SetOutlineCommand,
     SetPageLabelsCommand,
+    SetSecurityCommand,
 )
 from pdfeditor.core.commands.snapshot import SnapshotCommand, SnapshotStore
 
@@ -25,6 +26,7 @@ __all__ = [
     "SetMetadataCommand",
     "SetOutlineCommand",
     "SetPageLabelsCommand",
+    "SetSecurityCommand",
     "SnapshotCommand",
     "SnapshotStore",
     "UndoStack",

@@ -37,6 +37,7 @@ from pdfeditor.model.metadata import (
     LayerInfo,
     Metadata,
     Permissions,
+    SecuritySettings,
     SpaceUsage,
 )
 from pdfeditor.model.outline import Destination, OutlineItem, flatten
@@ -120,6 +121,7 @@ class MuDocument:
         self._page_count = int(fz.page_count)
         self._backing_tmp: Path | None = None  # set when a failed save left us on a temp file
         self._force_dirty = False
+        self._security: SecuritySettings | None = None  # applied on the next full save
 
     # -- internal ---------------------------------------------------------------------------
     @property
@@ -360,13 +362,49 @@ class MuDocument:
 
     # -- saving -----------------------------------------------------------------------------
     def _save_kwargs(self, options: SaveOptions) -> dict[str, Any]:
-        return {
+        kwargs: dict[str, Any] = {
             "garbage": options.garbage,
             "deflate": options.deflate,
             "use_objstms": 1 if options.object_streams else 0,
             "clean": options.clean_content,
             "encryption": pymupdf.PDF_ENCRYPT_KEEP,
         }
+        s = self._security
+        if s is not None:
+            kwargs["encryption"] = _ENCRYPT_METHODS[s.method]
+            if s.method is not EncryptionMethod.NONE:
+                kwargs["user_pw"] = s.user_password
+                kwargs["owner_pw"] = s.owner_password or s.user_password
+                kwargs["permissions"] = _permission_bits(s.permissions)
+        return kwargs
+
+    # -- security -------------------------------------------------------------------------------
+    def pending_security(self) -> SecuritySettings | None:
+        return self._security
+
+    def set_pending_security(self, settings: SecuritySettings | None) -> None:
+        if settings is not None and settings.method not in _ENCRYPT_METHODS:
+            raise EngineError(f"can't encrypt with {settings.method.value}")
+        self._security = settings
+
+    def has_owner_access(self) -> bool:
+        if not (self._fz.metadata or {}).get("encryption"):
+            return True
+        # re-authenticating with the password that already worked is safe
+        return int(self._fz.authenticate(self._password or "")) in (1, 4, 6)
+
+    def unlock_owner(self, password: str) -> bool:
+        # A wrong password leaves an already-open MuPDF document unreadable, so try it on a
+        # scratch copy first.
+        probe = pymupdf.open("pdf", self._fz.tobytes(encryption=pymupdf.PDF_ENCRYPT_KEEP))
+        try:
+            ok = int(probe.authenticate(password)) in (4, 6)
+        finally:
+            probe.close()
+        if ok:
+            self._fz.authenticate(password)
+            self._password = password
+        return ok
 
     def _verify(self, path: Path, expected_pages: int) -> None:
         """Reopen a freshly written file and check it's sound before we trust it."""
@@ -433,10 +471,19 @@ class MuDocument:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(f".{target.name}.{uuid.uuid4().hex[:8]}.tmp")
         pages = self.page_count
+        old_password = self._password
+        security = self._security
+        if security is not None:  # the saved file opens with the new passwords
+            self._password = (
+                None
+                if security.method is EncryptionMethod.NONE
+                else security.owner_password or security.user_password
+            )
         try:
             self._fz.save(tmp, **self._save_kwargs(options))
             self._verify(tmp, pages)
         except Exception as exc:
+            self._password = old_password
             with contextlib.suppress(OSError):
                 tmp.unlink()
             if isinstance(exc, SaveError):
@@ -455,13 +502,15 @@ class MuDocument:
             raise SaveError(f"cannot replace {target}: {exc}") from exc
         self._reopen(target)
         self._backing_tmp = None
+        self._security = None  # now part of the file
         if old_backing is not None:
             with contextlib.suppress(OSError):
                 old_backing.unlink()
 
     def can_save_incrementally(self) -> bool:
         return (
-            self._path is not None
+            self._security is None  # encryption can only change in a full rewrite
+            and self._path is not None
             and self._backing_tmp is None
             and bool(self._fz.name)
             and bool(self._fz.can_save_incrementally())
@@ -601,6 +650,30 @@ def _encryption_method(value: str | None) -> EncryptionMethod:
     if "rc4" in v:
         return EncryptionMethod.RC4_40 if "40" in v else EncryptionMethod.RC4_128
     return EncryptionMethod.UNKNOWN
+
+
+_ENCRYPT_METHODS = {
+    EncryptionMethod.NONE: pymupdf.PDF_ENCRYPT_NONE,
+    EncryptionMethod.AES_128: pymupdf.PDF_ENCRYPT_AES_128,
+    EncryptionMethod.AES_256: pymupdf.PDF_ENCRYPT_AES_256,
+}
+
+
+def _permission_bits(p: Permissions) -> int:
+    bits = 0
+    for flag, on in (
+        (pymupdf.PDF_PERM_PRINT, p.print),
+        (pymupdf.PDF_PERM_MODIFY, p.modify),
+        (pymupdf.PDF_PERM_COPY, p.copy),
+        (pymupdf.PDF_PERM_ANNOTATE, p.annotate),
+        (pymupdf.PDF_PERM_FORM, p.fill_forms),
+        (pymupdf.PDF_PERM_ACCESSIBILITY, p.accessibility),
+        (pymupdf.PDF_PERM_ASSEMBLE, p.assemble),
+        (pymupdf.PDF_PERM_PRINT_HQ, p.print_high_quality),
+    ):
+        if on:
+            bits |= flag
+    return bits
 
 
 def _permissions(bits: int) -> Permissions:

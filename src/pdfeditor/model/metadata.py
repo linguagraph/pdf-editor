@@ -119,3 +119,13 @@ class SpaceUsage:
 
     def share(self, category: str) -> float:
         return self.categories.get(category, 0) / self.total if self.total else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class SecuritySettings:
+    """Password protection to apply on the next save. ``method`` NONE removes security."""
+
+    method: EncryptionMethod = EncryptionMethod.AES_256
+    user_password: str = ""  # needed to open the document ("" = opens without a password)
+    owner_password: str = ""  # needed to change security or lift the permissions
+    permissions: Permissions = field(default_factory=Permissions)
