@@ -146,7 +146,12 @@ class MuPage:
                 spans: list[Span] = []
                 for s in ln.get("spans", []):
                     chars = tuple(
-                        Char(ch["c"], self._vrect(ch["bbox"], m), self._vpoint(ch["origin"], m))
+                        Char(
+                            ch["c"],
+                            self._vrect(ch["bbox"], m),
+                            self._vpoint(ch["origin"], m),
+                            bool(ch.get("synthetic", False)),
+                        )
                         for ch in s.get("chars", ())
                     )
                     text = s["text"] if "text" in s else "".join(ch.c for ch in chars)
