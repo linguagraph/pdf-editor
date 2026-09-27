@@ -92,6 +92,27 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("annotation was not created")
         return "square comment created"
 
+    def page_operations() -> str:
+        from pdfeditor.services.stamping import (
+            HeaderFooter,
+            Slot,
+            apply_header_footer,
+            trimmed_rect,
+        )
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        doc = session.document
+        doc.select_pages([0, 0])
+        spec = HeaderFooter(texts={Slot.FOOTER_CENTER: "<<page>>/<<pages>>"})
+        apply_header_footer(session.engine, doc, spec, [0, 1])
+        if "2/2" not in doc.page(1).text_page(with_chars=False).text:
+            raise AssertionError("footer text missing")
+        if trimmed_rect(doc, 0) is None:  # needs Pillow in the bundle
+            raise AssertionError("content bounds not found")
+        doc.select_pages([0])
+        return "duplicate, footer, margin detection"
+
     def save_copy() -> str:
         session = state["session"]
         assert isinstance(session, DocumentSession)
@@ -144,6 +165,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("text + search", text_and_search),
         ("undo + redo", undo_redo),
         ("annotations", annotations),
+        ("page operations", page_operations),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),

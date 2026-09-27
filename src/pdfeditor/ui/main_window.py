@@ -55,7 +55,8 @@ from pdfeditor.core.layout import LayoutMode
 from pdfeditor.core.paths import recovery_dir
 from pdfeditor.core.render_cache import RenderCache
 from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
-from pdfeditor.engine.base import Document, OpenError, PasswordRequired, SaveError
+from pdfeditor.engine.base import Document, Engine, OpenError, PasswordRequired, SaveError
+from pdfeditor.engine.registry import get_engine
 from pdfeditor.model.annotations import (
     STANDARD_STAMPS,
     AnnotationModel,
@@ -69,6 +70,8 @@ from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.dialogs.print_dialog import PrintDialog
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.dialogs.recovery import RecoveryDialog
+from pdfeditor.ui.document_tab import DocumentTab
+from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.panels.bookmarks import BookmarksPanel
@@ -306,6 +309,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.zoom_box)
 
         self._create_actions()
+        self.organize = OrganizeController(self)
         self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
@@ -519,6 +523,7 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         file_menu = mb.addMenu("&File")
         file_menu.addAction(self.act_open)
+        file_menu.addAction(self.organize.act_combine)
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         file_menu.addAction(self.act_close)
@@ -572,6 +577,13 @@ class MainWindow(QMainWindow):
         self.act_inspector.setShortcut(QKeySequence("Ctrl+E"))
         view_menu.addAction(self.act_inspector)
 
+        pages_menu = mb.addMenu("&Pages")
+        for action in self.organize.menu_actions():
+            if action is None:
+                pages_menu.addSeparator()
+            else:
+                pages_menu.addAction(action)
+
         go_menu = mb.addMenu("&Go")
         for act in (self.act_first, self.act_prev, self.act_next, self.act_last, self.act_goto):
             go_menu.addAction(act)
@@ -593,6 +605,7 @@ class MainWindow(QMainWindow):
         home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
         home.add_group(self.act_prev, self.act_next)
+        self.organize.ribbon()
         comment = self.ribbon.add_tab("Comment")
         comment.add_group(
             *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
@@ -617,16 +630,34 @@ class MainWindow(QMainWindow):
         view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night)
 
     # -- documents ------------------------------------------------------------------------
-    def views(self) -> list[DocumentView]:
+    def document_tabs(self) -> list[DocumentTab]:
         return [
-            w
-            for i in range(self.tabs.count())
-            if isinstance(w := self.tabs.widget(i), DocumentView)
+            w for i in range(self.tabs.count()) if isinstance(w := self.tabs.widget(i), DocumentTab)
         ]
 
-    def current_view(self) -> DocumentView | None:
+    def views(self) -> list[DocumentView]:
+        return [t.view for t in self.document_tabs()]
+
+    def current_tab(self) -> DocumentTab | None:
         w = self.tabs.currentWidget()
-        return w if isinstance(w, DocumentView) else None
+        return w if isinstance(w, DocumentTab) else None
+
+    def current_view(self) -> DocumentView | None:
+        tab = self.current_tab()
+        return tab.view if tab is not None else None
+
+    def _tab_index(self, view: DocumentView) -> int:
+        return next((i for i, t in enumerate(self.document_tabs()) if t.view is view), -1)
+
+    def engine(self) -> Engine:
+        return get_engine()
+
+    def add_document(self, doc: Document, name: str) -> DocumentView:
+        """Open an in-memory document (combined, extracted...) as a new unsaved tab."""
+        session = DocumentSession(doc, self.engine())
+        session.name_hint = name
+        session.undo_stack.mark_dirty()
+        return self._add_session(session)
 
     def _with_view(self, fn: Callable[[DocumentView], object]) -> None:
         view = self.current_view()
@@ -673,7 +704,7 @@ class MainWindow(QMainWindow):
         view.author = self.prefs.author
         view.set_tool(self._make_tool(self.current_tool))
         session.subscribe(lambda event: self._on_session_event(view, event))
-        index = self.tabs.addTab(view, session.display_name)
+        index = self.tabs.addTab(DocumentTab(view), session.display_name)
         target = session.save_target()
         self.tabs.setTabToolTip(index, str(target) if target else session.display_name)
         self.tabs.setCurrentIndex(index)
@@ -695,23 +726,25 @@ class MainWindow(QMainWindow):
             self.autosaver.forget(view.session)
 
     def _update_tab_title(self, view: DocumentView) -> None:
-        index = self.tabs.indexOf(view)
+        index = self._tab_index(view)
         if index >= 0:
             mark = "*" if view.session.is_dirty else ""
             self.tabs.setTabText(index, view.session.display_name + mark)
 
     def close_tab(self, index: int, ask: bool = True) -> bool:
         """Close a tab; with unsaved changes, ask first. Returns False if the user cancelled."""
-        view = self.tabs.widget(index)
-        if not isinstance(view, DocumentView):
+        tab = self.tabs.widget(index)
+        if not isinstance(tab, DocumentTab):
             return True
+        view = tab.view
         if ask and not self._confirm_discard(view):
             return False
         self.tabs.removeTab(index)
+        tab.close_tab()
         self.autosaver.forget(view.session)  # saved or deliberately discarded
         view.close_view()
         view.session.close()
-        view.deleteLater()
+        tab.deleteLater()
         self._update_ui()
         return True
 
@@ -734,7 +767,7 @@ class MainWindow(QMainWindow):
     def _confirm_discard(self, view: DocumentView) -> bool:
         if not view.session.is_dirty:
             return True
-        self.tabs.setCurrentWidget(view)
+        self.tabs.setCurrentIndex(self._tab_index(view))
         answer = self.ask_save_changes(view.session)
         if answer == QMessageBox.StandardButton.Save:
             return self.save(view)
@@ -777,7 +810,7 @@ class MainWindow(QMainWindow):
             )
             return False
         self._add_recent(saved)
-        index = self.tabs.indexOf(view)
+        index = self._tab_index(view)
         self.tabs.setTabToolTip(index, str(saved))
         self._update_tab_title(view)
         self._update_ui()
@@ -859,6 +892,7 @@ class MainWindow(QMainWindow):
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
         self.navigator.update_state(view)
+        self.organize.update_state()
         if view is not None:
             dirty = view.session.is_dirty
             self.setWindowTitle(f"{view.session.display_name}{'*' if dirty else ''} — pdfeditor")

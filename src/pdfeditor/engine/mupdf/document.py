@@ -14,6 +14,8 @@ from typing import Any
 import pymupdf
 
 from pdfeditor.engine.base import (
+    Document,
+    EngineError,
     OpenError,
     PasswordCallback,
     PasswordRequired,
@@ -21,6 +23,7 @@ from pdfeditor.engine.base import (
     SaveOptions,
 )
 from pdfeditor.engine.mupdf import convert as cv
+from pdfeditor.engine.mupdf import pages
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
 from pdfeditor.model.metadata import (
@@ -33,6 +36,7 @@ from pdfeditor.model.metadata import (
     Permissions,
 )
 from pdfeditor.model.outline import Destination, OutlineItem, flatten
+from pdfeditor.model.pages import PageLabelRule
 
 log = logging.getLogger(__name__)
 
@@ -428,6 +432,26 @@ class MuDocument:
         self._fz.close()
         self._fz = new
         self._reset_pages()
+
+    def select_pages(self, order: Sequence[int]) -> None:
+        pages.select(self, order)
+
+    def insert_blank_page(self, at: int, width: float, height: float) -> None:
+        pages.insert_blank(self, at, width, height)
+
+    def insert_pages(self, source: Document, pages_: Sequence[int], at: int) -> None:
+        if not isinstance(source, MuDocument):
+            raise EngineError("can only copy pages between documents of the same engine")
+        pages.insert_document(self, source, pages_, at)
+
+    def insert_image_page(self, at: int, image: bytes) -> None:
+        pages.insert_image_page(self, at, image)
+
+    def page_label_rules(self) -> list[PageLabelRule]:
+        return pages.label_rules(self)
+
+    def set_page_label_rules(self, rules: Sequence[PageLabelRule]) -> None:
+        pages.set_label_rules(self, rules)
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes:
         options = options or SaveOptions()

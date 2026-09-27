@@ -26,6 +26,7 @@ class MuPDFEngine:
         annotations_read=True,
         annotations_write=True,
         annotations_flatten=True,
+        page_ops=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,
@@ -43,6 +44,11 @@ class MuPDFEngine:
 
     def new_document(self) -> MuDocument:
         return MuDocument(pymupdf.open(), None, None)
+
+    def text_width(self, text: str, font: str, size: float) -> float:
+        from pdfeditor.engine.mupdf.pages import text_width
+
+        return text_width(text, font, size)
 
 
 def create_engine() -> MuPDFEngine:

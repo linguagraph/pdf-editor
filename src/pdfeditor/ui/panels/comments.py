@@ -10,6 +10,7 @@ from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QLineEdit,
     QMenu,
@@ -72,6 +73,11 @@ class CommentsPanel(ViewPanel):
         self.status_filter.addItems([ALL, *(s.value for s in ReviewState)])
         for combo in (self.type_filter, self.author_filter, self.status_filter):
             combo.currentIndexChanged.connect(self._fill)
+            # let the navigation pane stay narrow: filters shrink instead of widening it
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(3)
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
         self.tree.setWordWrap(True)
@@ -90,9 +96,10 @@ class CommentsPanel(ViewPanel):
         import_button = QPushButton("Import…", self)
         import_button.clicked.connect(self.import_xfdf)
 
-        filters = QHBoxLayout()
-        for w in (self.type_filter, self.author_filter, self.status_filter):
-            filters.addWidget(w)
+        filters = QGridLayout()  # two rows keep the navigation pane narrow
+        filters.addWidget(self.type_filter, 0, 0)
+        filters.addWidget(self.author_filter, 0, 1)
+        filters.addWidget(self.status_filter, 1, 0, 1, 2)
         buttons = QHBoxLayout()
         for button in (self.reply_button, import_button, export):
             buttons.addWidget(button)
