@@ -42,6 +42,7 @@ packages = ["src/pdfeditor"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = [".claude"]  # agent worktrees live here
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]

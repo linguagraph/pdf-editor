@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 16 (Polish, robustness, performance).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 17 (Packaging).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -232,13 +232,13 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Fix-ups: set language/title/DisplayDocTitle; edit alt text in the struct tree (pikepdf); a Tags tree panel (read, rename, reorder). *(Fix… in the Accessibility panel for language, title, title bar, tab order and alt text; a Tags panel to change tag types and alt text and move tags up/down. All undoable. Done through the engine (MuPDF objects plus our own PDF object parser), not pikepdf, so edits apply to the open document)*
 - [ ] Stretch: basic auto-tagging (paragraphs/headings/figures from block analysis). Marked experimental. _(not started: it needs marked-content rewriting of every page's content stream plus a ParentTree)_
 
-### Phase 16: Polish, robustness, performance (M)
-- [ ] Keyboard shortcuts that match Acrobat conventions, customizable; a command palette (Ctrl+Shift+P)
-- [ ] Localization scaffolding (Qt translations), high-DPI and multi-monitor checks, app accessibility (focus order, screen-reader names)
-- [ ] Hard cases: corrupt or broken files (repair), huge files (streaming thumbnails, memory caps), encrypted files with unknown handlers
-- [ ] Profiling pass: open-to-first-paint under 300 ms for typical docs; scrolling at 60 fps on 1000 pages
+### Phase 16: Polish, robustness, performance (M), done
+- [x] Keyboard shortcuts that match Acrobat conventions, customizable; a command palette (Ctrl+Shift+P). *(Edit ▸ Keyboard Shortcuts: filter, assign, remove, reset, with conflict detection; overrides persist. Acrobat keys added where Qt's defaults differ: Ctrl+W, Ctrl+Q, Ctrl+6. Edit ▸ Command Palette runs any enabled command by name)*
+- [x] Localization scaffolding (Qt translations), high-DPI and multi-monitor checks, app accessibility (focus order, screen-reader names). *(Preferences ▸ Language loads Qt's own translations and app catalogues from `data/i18n`; UI strings still need to be moved to `tr()` and translated. Qt 6's pass-through DPI scaling is used and tiles render at each screen's device pixel ratio. Every focusable widget has a screen-reader name, checked by a test)*
+- [x] Hard cases: corrupt or broken files (repair), huge files (streaming thumbnails, memory caps), encrypted files with unknown handlers. *(Damaged files are repaired and announced in the status bar; empty and non-PDF files get plain-language errors; certificate or rights-management security (e.g. Adobe.PubSec) is refused with an explanation. Thumbnails render on demand, the tile cache is capped (Preferences), and the text-index cache is now an LRU of 300 pages)*
+- [x] Profiling pass: open-to-first-paint under 300 ms for typical docs; scrolling at 60 fps on 1000 pages. *(Measured: 1000-page file ~275 ms to first paint, small files ~20-35 ms; scrolling ~190 steps/s. Select-all on 1000 pages went from 913 ms to 10 ms, because highlight boxes are now computed per page when painted)*
 
-- [ ] Vector printing (native print path instead of 300 dpi raster), and running `select_all` off the GUI thread for very large documents (follow-ups from the Phase 3 review)
+- [x] Vector printing (native print path instead of 300 dpi raster), and running `select_all` off the GUI thread for very large documents (follow-ups from the Phase 3 review). *(Pages print as vectors through the engine's SVG and QtSvg, with a workaround for QtSvg's handling of MuPDF glyph outlines; output matches the screen within anti-aliasing. Grayscale, printing without comments, pages QtSvg can't draw (masks, blend modes, patterns), and "Print as image" use the 300 dpi raster path. select_all no longer needs a thread: it's now instant)*
 
 ### Phase 17: Packaging and distribution (S–M)
 - [ ] Release build of the self-contained one-file `pdfeditor.exe` (from Phase P), with all optional-feature data bundled (tessdata, ICC, fonts) and final size/startup tuning

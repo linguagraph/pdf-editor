@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.ui.i18n import available_languages
 from pdfeditor.ui.settings import AppSettings
 
 
@@ -42,6 +43,12 @@ class PreferencesDialog(QDialog):
         self.keep_tools.setToolTip("Off: comment and drawing tools go back to Select after one use")
         self.keep_tools.setChecked(settings.keep_tools)
         form.addRow("", self.keep_tools)
+        self.language = QComboBox()
+        self.language.addItem("System default", "")
+        for code, name in available_languages().items():
+            self.language.addItem(name, code)
+        self.language.setCurrentIndex(max(0, self.language.findData(settings.language)))
+        form.addRow("Language (after restart):", self.language)
 
         documents = QGroupBox("Documents", self)
         form = QFormLayout(documents)
@@ -82,6 +89,7 @@ class PreferencesDialog(QDialog):
         s.default_zoom = str(self.zoom.currentData())
         s.default_tool = str(self.tool.currentData())
         s.keep_tools = self.keep_tools.isChecked()
+        s.language = str(self.language.currentData())
         s.autosave_minutes = self.autosave.value()
         s.undo_disk_mb = self.undo_disk.value()
         s.cache_mb = self.cache.value()
