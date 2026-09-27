@@ -26,6 +26,7 @@ from pdfeditor.engine.base import (
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.engine.mupdf import optimize as opt
 from pdfeditor.engine.mupdf import pages
+from pdfeditor.engine.mupdf import sanitize as scrub
 from pdfeditor.engine.mupdf import structure as struct
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
@@ -635,6 +636,24 @@ class MuDocument:
             report.append(f"{hidden} hidden text run(s)")
         if options.form_data and fz.is_form_pdf:
             report.append("form field values")
+        layers: list[str] = []
+        if options.hidden_layers:
+            sections, layers = scrub.remove_hidden_layers(self)
+            if layers or sections:
+                names = ", ".join(f'"{n}"' for n in layers)
+                report.append(
+                    f"{len(layers)} hidden layer(s)"
+                    + (f" ({names})" if names else "")
+                    + f" with {sections} content section(s)"
+                )
+        if options.off_page_text:
+            glyphs = scrub.remove_off_page_text(self)
+            if glyphs:
+                report.append(f"{glyphs} off-page text character(s)")
+        if options.hidden_layers and layers:
+            # MuPDF reads /OCProperties once, at open: reload so the layer list is current
+            self.load_state(bytes(self._fz.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_KEEP)))
+            self._force_dirty = True
         self._reset_pages()
         return report
 

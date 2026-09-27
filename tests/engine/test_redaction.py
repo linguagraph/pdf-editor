@@ -181,3 +181,116 @@ def test_text_edit_preserves_pending_marks(redactor: Engine, fixture_pdf, tmp_pa
     assert len(after) == len(before) == 1
     assert after[0].rect.intersects(before[0].rect)
     doc.close()
+
+
+# -- hidden layers and off-page text ------------------------------------------------------------
+def _pdfium_text(path: Path) -> str:
+    import pypdfium2 as pdfium
+
+    pd = pdfium.PdfDocument(path)
+    try:
+        return "\n".join(page.get_textpage().get_text_range() for page in pd)
+    finally:
+        pd.close()
+
+
+def _pdfium_renders(path: Path) -> list:
+    import pypdfium2 as pdfium
+
+    pd = pdfium.PdfDocument(path)
+    try:
+        return [page.render(scale=1, draw_annots=False).to_pil().convert("L") for page in pd]
+    finally:
+        pd.close()
+
+
+def _same_pixels(a, b) -> bool:
+    from PIL import ImageChops
+
+    if a.size != b.size:
+        return False
+    diff = ImageChops.difference(a, b)
+    return max(diff.getextrema()) <= 8  # antialiasing noise only
+
+
+def _streams_mention(path: Path, needle: bytes) -> bool:
+    """Any decoded stream holds ``needle`` as a literal or hex string (independent of MuPDF)."""
+    with pikepdf.open(path) as pdf:
+        for obj in pdf.objects:
+            if isinstance(obj, pikepdf.Stream):
+                try:
+                    data = obj.read_bytes().lower()
+                except pikepdf.PdfError:
+                    continue
+                if needle.lower() in data or needle.hex().encode() in data:
+                    return True
+    return False
+
+
+def test_sanitize_removes_hidden_layers(redactor: Engine, fixture_pdf, tmp_path: Path) -> None:
+    doc, path = _open(redactor, fixture_pdf, tmp_path, "hidden_layers")
+    original = fixture_pdf("hidden_layers")
+    assert "secret" in _pdfium_text(original)  # pdfium extracts hidden-layer text
+    before = _pdfium_renders(original)
+    report = doc.sanitize(SanitizeOptions(comments=False))
+    layer_line = next(r for r in report if "hidden layer" in r)
+    assert '"Secret layer"' in layer_line and "6 content section(s)" in layer_line
+    assert [layer.name for layer in doc.layers()] == ["Shown layer"]
+    doc.save(options=SaveOptions(garbage=4))
+    doc.close()
+    text = _pdfium_text(path)
+    assert "secret" not in text.lower()
+    for visible in ("Always visible", "On the shown layer", "Visible form text", "Visible footer"):
+        assert visible in text
+    assert not _streams_mention(path, b"secret")
+    assert b"Secret layer" not in path.read_bytes()
+    after = _pdfium_renders(path)
+    assert all(_same_pixels(a, b) for a, b in zip(before, after, strict=True))
+    with pikepdf.open(path) as pdf:
+        assert len(pdf.Root.OCProperties.OCGs) == 1
+    again = redactor.open(path)
+    assert "Always visible" in _text(again)
+    again.close()
+
+
+def test_sanitize_removes_off_page_text(redactor: Engine, fixture_pdf, tmp_path: Path) -> None:
+    doc, path = _open(redactor, fixture_pdf, tmp_path, "off_page_text")
+    original = fixture_pdf("off_page_text")
+    assert "Far left secret" in _pdfium_text(original)
+    before = _pdfium_renders(original)
+    report = doc.sanitize(SanitizeOptions())
+    assert any("off-page text" in r for r in report), report
+    doc.save(options=SaveOptions(garbage=4))
+    doc.close()
+    text = _pdfium_text(path)
+    assert "secret" not in text.lower()
+    assert text.count("Visible text stays") == 2
+    assert text.count("Stradd") == 2  # glyphs partly inside the crop box stay
+    assert "Straddle" not in text
+    assert not _streams_mention(path, b"secret")
+    after = _pdfium_renders(path)
+    assert all(_same_pixels(a, b) for a, b in zip(before, after, strict=True))
+    with pikepdf.open(path) as pdf:
+        assert len(pdf.pages) == 2
+
+
+def test_sanitize_options_keep_layers_and_off_page_text(
+    redactor: Engine, fixture_pdf, tmp_path: Path
+) -> None:
+    keep = SanitizeOptions(hidden_layers=False, off_page_text=False)
+    for name, needle in (("hidden_layers", "Hidden layer secret"), ("off_page_text", "Far left")):
+        doc, path = _open(redactor, fixture_pdf, tmp_path, name)
+        report = doc.sanitize(keep)
+        assert not any("hidden layer" in r or "off-page" in r for r in report)
+        doc.save(options=SaveOptions(garbage=4))
+        doc.close()
+        assert needle in _pdfium_text(path)
+
+
+def test_sanitize_without_layers_or_off_page_text_reports_nothing(
+    redactor: Engine, fixture_pdf, tmp_path: Path
+) -> None:
+    doc, _ = _open(redactor, fixture_pdf, tmp_path, "sensitive")
+    report = doc.sanitize(SanitizeOptions())
+    assert not any("hidden layer" in r or "off-page" in r for r in report)
+    doc.close()

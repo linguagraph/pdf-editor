@@ -36,3 +36,5 @@ class SanitizeOptions:
     comments: bool = True  # every annotation except form fields
     form_data: bool = True  # reset form field values
     thumbnails: bool = True
+    hidden_layers: bool = True  # content of optional-content layers that are off by default
+    off_page_text: bool = True  # text lying entirely outside the page's crop box

@@ -134,3 +134,21 @@ def test_redaction_properties_persist(qtbot, window: MainWindow, view) -> None:
     (mark,) = marks(view)
     assert mark.overlay_text == "WITHHELD"
     assert window.protect._load_style().overlay_text == "WITHHELD"
+
+
+def test_sanitize_hidden_layers_and_undo(qtbot, window: MainWindow, fixture_pdf, tmp_path) -> None:
+    path = tmp_path / "hidden_layers.pdf"
+    shutil.copy2(fixture_pdf("hidden_layers"), path)
+    view = window.open_path(path)
+    dialog = SanitizeDialog(window)
+    assert dialog.boxes["hidden_layers"].isChecked() and dialog.boxes["off_page_text"].isChecked()
+    dialog.boxes["off_page_text"].setChecked(False)
+    assert not dialog.options().off_page_text and dialog.options().hidden_layers
+    removed = window.protect.sanitize(accepted(dialog))
+    assert any('"Secret layer"' in r for r in removed)
+    with view.session.lock:
+        assert [layer.name for layer in view.session.document.layers()] == ["Shown layer"]
+    view.session.undo()
+    with view.session.lock:
+        names = [layer.name for layer in view.session.document.layers()]
+    assert names == ["Shown layer", "Secret layer"]
