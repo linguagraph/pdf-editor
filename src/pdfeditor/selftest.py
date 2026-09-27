@@ -201,6 +201,37 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("print to PDF produced no output")
         return f"printed {count} page to PDF"
 
+    def ocr() -> str:
+        import io
+
+        from PIL import Image
+
+        from pdfeditor.engine.base import ColorMode
+        from pdfeditor.model.pages import ImageStamp
+        from pdfeditor.services.ocr import OcrOptions, apply, installed_languages, recognize
+
+        if "eng" not in installed_languages():
+            raise AssertionError("bundled English OCR data is missing")
+        src = get_engine().open(data_path("selftest.pdf"))
+        shot = src.page(0).render(RenderRequest(matrix=Matrix.scale(2), color=ColorMode.RGB))
+        buf = io.BytesIO()
+        Image.frombytes(
+            "RGB", (shot.width, shot.height), shot.samples, "raw", "RGB", shot.stride
+        ).save(buf, format="PNG")
+        png = buf.getvalue()
+        rect = src.page(0).rect
+        src.close()
+        doc = get_engine().new_document()
+        doc.insert_blank_page(0, rect.width, rect.height)
+        doc.page(0).stamp_image(ImageStamp(png, doc.page(0).rect))  # a "scan" of the sample
+        start = time.perf_counter()
+        apply(doc, recognize(doc, [0], OcrOptions(dpi=150)))
+        text = doc.page(0).text_page(with_chars=False).text
+        doc.close()
+        if "lazy dog" not in text:
+            raise AssertionError(f"OCR did not read the sample: {text[:80]!r}")
+        return f"read the scanned sample in {time.perf_counter() - start:.2f}s"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -215,6 +246,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),
+        ("OCR", ocr),
     ]
 
 

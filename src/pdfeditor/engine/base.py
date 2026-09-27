@@ -227,6 +227,17 @@ class Page(Protocol):
 
     def replace_image(self, key: str, data: bytes) -> None: ...
 
+    # Optional (``capabilities.ocr``). Two steps so recognition can run in a background job.
+    def ocr_text_layer(
+        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+    ) -> bytes:
+        """Recognize the page and return an invisible-text layer (read-only; slow)."""
+        ...
+
+    def add_text_layer(self, layer: bytes) -> None:
+        """Overlay a layer from :meth:`ocr_text_layer` so the page becomes searchable."""
+        ...
+
     # Optional (``capabilities.redact``). Marks are REDACT annotations (add_annotation).
     def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
         """Permanently remove content under redaction marks (all, or ``ids``). Returns the

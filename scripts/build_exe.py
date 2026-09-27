@@ -27,6 +27,9 @@ def exe_path() -> Path:
 
 
 def build() -> Path:
+    subprocess.run(  # bundle English OCR data (not committed)
+        [sys.executable, str(ROOT / "scripts" / "fetch_tessdata.py"), "eng"], cwd=ROOT, check=True
+    )
     shutil.rmtree(ROOT / "build" / "pdfeditor", ignore_errors=True)
     start = time.perf_counter()
     subprocess.run(

@@ -71,7 +71,7 @@ DEV_EXCLUDES = [
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    datas=collect_data_files("pdfeditor", includes=["data/*"]),
+    datas=collect_data_files("pdfeditor", includes=["data/*", "data/tessdata/*"]),
     # Loaded lazily through the engine registry, so static analysis can't see it.
     hiddenimports=["pdfeditor.engine.mupdf"],
     excludes=QT_EXCLUDES + DEV_EXCLUDES,
