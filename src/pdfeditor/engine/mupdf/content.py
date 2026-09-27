@@ -29,6 +29,7 @@ from pdfeditor.engine.contentstream.objects import (
 )
 from pdfeditor.engine.contentstream.parser import ContentSyntaxError, Operation, parse, write
 from pdfeditor.engine.mupdf import annots
+from pdfeditor.engine.mupdf.flatten import flatten_inserted_forms
 from pdfeditor.engine.textlayout import editable_blocks
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Rect
@@ -340,6 +341,8 @@ def insert_text(
     fz = page.fz
     page_bottom = fz.rect.height
     height = max(rect.height, style.size * style.line_height)
+    before_contents = set(fz.get_contents())  # insert_htmlbox rolls back on failure: safe to
+    # capture once, outside the retry loop below
     while True:
         box = Rect(rect.x0, rect.y0, rect.x1, min(page_bottom, rect.y0 + height))
         unrot = (pymupdf.Rect(*box.as_tuple()) * fz.derotation_matrix).normalize()
@@ -351,6 +354,9 @@ def insert_text(
         if box.y1 >= page_bottom:
             raise EngineError("the text doesn't fit on the page")
         height *= 1.6
+    # insert_htmlbox always draws through a Form XObject; inline it so content_objects() doesn't
+    # report a spurious empty "form" sitting on top of the text we just placed.
+    flatten_inserted_forms(fz, before_contents)
     page._doc.mark_page_changed(page.index)
     return choice
 
