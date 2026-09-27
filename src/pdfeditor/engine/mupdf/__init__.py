@@ -33,6 +33,7 @@ class MuPDFEngine:
         export=True,
         optimize=True,
         encrypt=True,
+        structure=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

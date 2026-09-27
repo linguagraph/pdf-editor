@@ -11,6 +11,7 @@ from pdfeditor.engine.base import Document
 from pdfeditor.model.metadata import Metadata, SecuritySettings
 from pdfeditor.model.outline import OutlineItem
 from pdfeditor.model.pages import PageLabelRule
+from pdfeditor.model.structure import AccessibilitySettings
 
 
 class SetMetadataCommand(Command):
@@ -108,6 +109,68 @@ class SetSecurityCommand(Command):
 
     def undo(self, doc: Document) -> None:
         doc.set_pending_security(self.old)
+
+    def changes(self) -> list[Change]:
+        return [Change(ChangeKind.METADATA)]
+
+
+class SetStructElementCommand(Command):
+    """Change a tag's type or alternate text."""
+
+    def __init__(
+        self, ref: int, old_type: str, old_alt: str, type: str | None, alt: str | None
+    ) -> None:
+        self.ref = ref
+        self.old = (old_type, old_alt)
+        self.new = (type, alt)
+        self.label = "Change Alternate Text" if type is None else "Change Tag"
+
+    def do(self, doc: Document) -> None:
+        doc.set_struct_element(self.ref, *self.new)
+
+    def undo(self, doc: Document) -> None:
+        new_type, new_alt = self.new
+        doc.set_struct_element(
+            self.ref,
+            self.old[0] if new_type is not None else None,
+            self.old[1] if new_alt is not None else None,
+        )
+
+    def changes(self) -> list[Change]:
+        return [Change(ChangeKind.METADATA)]
+
+
+class ReorderStructCommand(Command):
+    label = "Reorder Tags"
+
+    def __init__(self, parent: int | None, old: Sequence[int], new: Sequence[int]) -> None:
+        self.parent, self.old, self.new = parent, list(old), list(new)
+
+    def do(self, doc: Document) -> None:
+        doc.reorder_struct_children(self.parent, self.new)
+
+    def undo(self, doc: Document) -> None:
+        doc.reorder_struct_children(self.parent, self.old)
+
+    def changes(self) -> list[Change]:
+        return [Change(ChangeKind.METADATA)]
+
+
+class SetAccessibilityCommand(Command):
+    label = "Change Accessibility Settings"
+
+    def __init__(self, new: AccessibilitySettings) -> None:
+        self.new = new
+        self.old: AccessibilitySettings | None = None
+
+    def do(self, doc: Document) -> None:
+        if self.old is None:
+            self.old = doc.accessibility_settings()
+        doc.set_accessibility_settings(self.new)
+
+    def undo(self, doc: Document) -> None:
+        assert self.old is not None
+        doc.set_accessibility_settings(self.old)
 
     def changes(self) -> list[Change]:
         return [Change(ChangeKind.METADATA)]

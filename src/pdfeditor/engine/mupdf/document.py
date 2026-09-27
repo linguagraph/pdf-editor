@@ -26,6 +26,7 @@ from pdfeditor.engine.base import (
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.engine.mupdf import optimize as opt
 from pdfeditor.engine.mupdf import pages
+from pdfeditor.engine.mupdf import structure as struct
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
 from pdfeditor.model.metadata import (
@@ -43,6 +44,7 @@ from pdfeditor.model.metadata import (
 from pdfeditor.model.outline import Destination, OutlineItem, flatten
 from pdfeditor.model.pages import PageLabelRule
 from pdfeditor.model.redaction import SanitizeOptions
+from pdfeditor.model.structure import AccessibilitySettings, StructNode
 
 log = logging.getLogger(__name__)
 
@@ -380,6 +382,22 @@ class MuDocument:
                 kwargs["owner_pw"] = s.owner_password or s.user_password
                 kwargs["permissions"] = _permission_bits(s.permissions)
         return kwargs
+
+    # -- structure (tags) -------------------------------------------------------------------------
+    def structure_tree(self) -> list[StructNode]:
+        return struct.structure_tree(self._fz)
+
+    def set_struct_element(self, ref: int, type: str | None = None, alt: str | None = None) -> None:
+        struct.set_struct_element(self._fz, ref, type, alt)
+
+    def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
+        struct.reorder_children(self._fz, parent, order)
+
+    def accessibility_settings(self) -> AccessibilitySettings:
+        return struct.accessibility_settings(self._fz)
+
+    def set_accessibility_settings(self, settings: AccessibilitySettings) -> None:
+        struct.set_accessibility_settings(self._fz, settings)
 
     # -- security -------------------------------------------------------------------------------
     def pending_security(self) -> SecuritySettings | None:

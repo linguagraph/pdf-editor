@@ -30,6 +30,7 @@ from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
 from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
+from pdfeditor.model.structure import AccessibilitySettings, StructNode
 from pdfeditor.model.text import TableData, TextPage
 
 
@@ -72,6 +73,7 @@ class Capabilities:
     ocr: bool = False
     export: bool = False  # tables, image areas, image/font extraction
     encrypt: bool = False
+    structure: bool = False  # read/edit tags and accessibility settings
     optimize: bool = False
 
 
@@ -320,6 +322,23 @@ class Document(Protocol):
     def has_owner_access(self) -> bool:
         """True when the document isn't encrypted or was unlocked with its owner password."""
         ...
+
+    # Optional (``capabilities.structure``).
+    def structure_tree(self) -> list[StructNode]:
+        """The tag tree (children of the structure tree root); empty if untagged."""
+        ...
+
+    def set_struct_element(self, ref: int, type: str | None = None, alt: str | None = None) -> None:
+        """Change a tag's type and/or alternate text ("" removes the alt text)."""
+        ...
+
+    def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
+        """Put the element children of ``parent`` (None: the root) in the given order."""
+        ...
+
+    def accessibility_settings(self) -> AccessibilitySettings: ...
+
+    def set_accessibility_settings(self, settings: AccessibilitySettings) -> None: ...
 
     def unlock_owner(self, password: str) -> bool:
         """Check an owner password (without disturbing the open document if it's wrong) and,
