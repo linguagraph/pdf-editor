@@ -110,5 +110,6 @@ source_modules = [
     "pdfeditor.engine.base",
     "pdfeditor.engine.registry",
     "pdfeditor.engine.contentstream",
+    "pdfeditor.engine.deskew",
 ]
 forbidden_modules = ["fitz", "pymupdf"]

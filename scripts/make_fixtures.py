@@ -192,17 +192,35 @@ def large_doc(pages: int = 1000) -> None:
     _save(doc, "large_1000.pdf")
 
 
-def scanned() -> None:
-    """Image-only page (no text layer), like a scanner produces; used by OCR tests."""
+SKEW_DEGREES = 4.0  # skewed_scan: counterclockwise as displayed, about the page center
+
+
+def _scan_png() -> bytes:
     src = pymupdf.open()
     page = src.new_page(width=A4.width, height=A4.height)
     page.insert_text((72, 100), "Scanned document text", fontsize=24)
     page.insert_textbox(pymupdf.Rect(72, 140, A4.width - 72, 400), LOREM, fontsize=14)
-    png = page.get_pixmap(dpi=200, colorspace=pymupdf.csGRAY).tobytes("png")
+    png: bytes = page.get_pixmap(dpi=200, colorspace=pymupdf.csGRAY).tobytes("png")
     src.close()
+    return png
+
+
+def scanned() -> None:
+    """Image-only page (no text layer), like a scanner produces; used by OCR tests."""
     doc = pymupdf.open()
-    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=png)
+    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=_scan_png())
     _save(doc, "scanned.pdf")
+
+
+def skewed_scan() -> None:
+    """The ``scanned`` page fed into the scanner crooked (SKEW_DEGREES); deskew tests."""
+    img = Image.open(io.BytesIO(_scan_png()))
+    img = img.rotate(SKEW_DEGREES, resample=Image.Resampling.BICUBIC, fillcolor=255)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    doc = pymupdf.open()
+    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=buf.getvalue())
+    _save(doc, "skewed_scan.pdf")
 
 
 def broken_xref() -> None:
@@ -462,6 +480,7 @@ GENERATORS: dict[str, Callable[[], None]] = {
     "mixed_content": mixed_content,
     "layers": layers,
     "scanned": scanned,
+    "skewed_scan": skewed_scan,
     "broken_xref": broken_xref,
     "text_multipage": text_multipage,
     "images": images,

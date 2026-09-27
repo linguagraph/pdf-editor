@@ -261,9 +261,16 @@ class Page(Protocol):
 
     # Optional (``capabilities.ocr``). Two steps so recognition can run in a background job.
     def ocr_text_layer(
-        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+        self,
+        language: str,
+        dpi: int,
+        tessdata: Path,
+        preprocess: bool = False,
+        deskew: bool = False,
     ) -> bytes:
-        """Recognize the page and return an invisible-text layer (read-only; slow)."""
+        """Recognize the page and return an invisible-text layer (read-only; slow).
+        ``deskew`` straightens the image for recognition only; the layer still lines up with
+        the page as scanned."""
         ...
 
     def add_text_layer(self, layer: bytes) -> None:
