@@ -9,6 +9,7 @@ from enum import Enum
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QKeyEvent,
     QMouseEvent,
     QResizeEvent,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsScene,
     QGraphicsView,
+    QMenu,
     QToolTip,
     QWidget,
 )
@@ -82,8 +84,11 @@ class DocumentView(QGraphicsView):
     annotation_selection_changed = Signal()
     object_selection_changed = Signal()
     escape_pressed = Signal()  # the window switches back to the Select tool
+    back_to_select = Signal()  # chosen from the right-click menu of a tool
+    tool_used = Signal()  # a creation tool made something (one-shot tools end)
     annotation_activated = Signal(object)  # AnnotationModel double-clicked
     annotation_context_menu = Signal(object, object)  # AnnotationModel, global QPoint
+    note_clicked = Signal(object, object)  # AnnotationModel (sticky note), global QPoint
     document_changed = Signal(object)  # tuple[Change, ...] after the view has updated itself
 
     def __init__(
@@ -127,6 +132,7 @@ class DocumentView(QGraphicsView):
         self._objects: dict[int, tuple[int, list[PageObject]]] = {}
         self.selected_objects: list[tuple[int, str]] = []  # (page, object key)
         self.show_object_outlines = False
+        self._tip_for: str | None = None
         self.selected_annotations: list[tuple[int, str]] = []  # (page, /NM name)
         self.annotation_preview: dict[int, list[Rect]] = {}  # drag outlines per page
         self.author = ""
@@ -579,6 +585,7 @@ class DocumentView(QGraphicsView):
                 QToolTip.hideText()
         if link is None:
             self.tool.hover(self, event)
+            self._annotation_tip(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -587,10 +594,25 @@ class DocumentView(QGraphicsView):
                 self.activate_link(link)
                 event.accept()
                 return
+        if self._select_existing(event):
+            event.accept()
+            return
         if self.tool.press(self, event):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def _select_existing(self, event: QMouseEvent) -> bool:
+        """With a creation tool, a click on an existing comment selects it (no new comment)."""
+        if not self.tool.respects_existing or self.tool.busy:
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        annot = self.annotation_at(self.mapToScene(event.position().toPoint()))
+        if annot is None:
+            return False
+        self.set_annotation_selection([(annot.page_index, annot.name)])
+        return True
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self.tool.release(self, event):
@@ -600,10 +622,39 @@ class DocumentView(QGraphicsView):
         self.tool.after_release(self)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self.tool.respects_existing and not self.tool.busy:
+            annot = self.annotation_at(self.mapToScene(event.position().toPoint()))
+            if annot is not None:
+                self.annotation_activated.emit(annot)
+                event.accept()
+                return
         if self.tool.double_click(self, event):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def _annotation_tip(self, event: QMouseEvent) -> None:
+        """Hovering a comment shows its text and replies (any tool)."""
+        annot = self.annotation_at(self.mapToScene(event.position().toPoint()))
+        if annot is None:
+            if self._tip_for is not None:
+                self._tip_for = None
+                QToolTip.hideText()
+            return
+        if self._tip_for == annot.name:
+            return
+        self._tip_for = annot.name
+        text = annotation_tip_text(annot, self.page_annotations(annot.page_index))
+        if text:
+            QToolTip.showText(event.globalPosition().toPoint(), text, self)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        if self.tool.name in ("select", "hand"):
+            super().contextMenuEvent(event)
+            return
+        menu = QMenu(self)
+        menu.addAction("Back to Select Tool", self.back_to_select.emit)
+        menu.exec(event.globalPos())
 
     # -- tools ----------------------------------------------------------------------------
     def set_tool(self, tool: Tool) -> None:
@@ -882,3 +933,18 @@ def annotation_bounds(a: AnnotationModel) -> Rect:
     if points:
         return Rect.from_points(points)
     return a.rect.normalized()
+
+
+def annotation_tip_text(annot: AnnotationModel, page_annots: list[AnnotationModel]) -> str:
+    """Tooltip text for a comment: author, text and replies (HTML-escaped plain text)."""
+    import html
+
+    lines: list[str] = []
+    if annot.contents:
+        who = f"<b>{html.escape(annot.author)}</b>: " if annot.author else ""
+        lines.append(who + html.escape(annot.contents).replace("\n", "<br>"))
+    for reply in page_annots:
+        if reply.in_reply_to == annot.id and reply.contents:
+            who = html.escape(reply.author or "Reply")
+            lines.append(f"&nbsp;&nbsp;↳ <b>{who}</b>: {html.escape(reply.contents)}")
+    return "<br>".join(lines)

@@ -18,6 +18,9 @@ class Tool:
     """
 
     name = "tool"
+    # Creation tools set this: clicking an existing comment selects it instead of creating one.
+    respects_existing = False
+    busy = False  # mid-gesture (e.g. a polygon being drawn): don't hijack double-clicks
 
     def activate(self, view: DocumentView) -> None:
         pass

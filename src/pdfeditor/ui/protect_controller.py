@@ -47,6 +47,7 @@ class RedactTool(Tool):
     """Drag a box over anything (text, images, graphics) to mark it for redaction."""
 
     name = "redact"
+    respects_existing = True  # clicking an existing mark selects it
 
     def __init__(self, controller: ProtectController) -> None:
         self.controller = controller
@@ -87,6 +88,7 @@ class RedactTool(Tool):
             [mark_for_area(page, rect, self.controller.style, view.author)],
             "Mark for Redaction",
         )
+        view.tool_used.emit()
         return True
 
 
@@ -155,7 +157,11 @@ class ProtectController:
         view.session.execute(commands[0] if len(commands) == 1 else MacroCommand(label, commands))
 
     def start_redact_tool(self) -> None:
-        """With text selected, mark the selection at once; otherwise switch to the box tool."""
+        """With text selected, mark the selection at once; otherwise switch to the box tool
+        (or, if it's already active, back to Select)."""
+        if self.w.current_tool == "redact":
+            self.w.set_tool("select")
+            return
         view = self.w.current_view()
         if view is not None and view.has_selection() and view.selection is not None:
             marks = []

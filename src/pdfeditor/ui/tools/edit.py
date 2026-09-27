@@ -56,6 +56,12 @@ def run_edit(view: DocumentView, label: str, operation: Callable[[Document], obj
     return True
 
 
+def _used(view: DocumentView, ok: bool) -> None:
+    """Tell the window a creation tool finished (one-shot tools go back to Select)."""
+    if ok:
+        view.tool_used.emit()
+
+
 def _fit(old: Rect, new: Rect) -> Matrix:
     sx = new.width / old.width if old.width else 1.0
     sy = new.height / old.height if old.height else 1.0
@@ -319,6 +325,17 @@ class _RectTool(Tool):
 class AddTextTool(_RectTool):
     name = "add_text"
 
+    def press(self, view: DocumentView, event: QMouseEvent) -> bool:
+        """Clicking existing text edits that paragraph instead of starting a new text box."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            scene = view.mapToScene(event.position().toPoint())
+            obj = view.object_at(scene)
+            hit = view.page_point_at(scene)
+            if obj is not None and hit is not None and obj.type is ObjectType.TEXT and obj.editable:
+                EditObjectsTool().edit_text(view, hit[0], obj)
+                return True
+        return super().press(view, event)
+
     def __init__(self) -> None:
         super().__init__()
         self.editor: InlineTextEditor | None = None
@@ -334,7 +351,12 @@ class AddTextTool(_RectTool):
         def commit(text: str) -> None:
             self.editor = None
             if text.strip():
-                run_edit(view, "Add Text", lambda doc: doc.page(page).add_text(rect, text, style))
+                _used(
+                    view,
+                    run_edit(
+                        view, "Add Text", lambda doc: doc.page(page).add_text(rect, text, style)
+                    ),
+                )
 
         def cancel() -> None:
             self.editor = None
@@ -361,7 +383,12 @@ class AddImageTool(_RectTool):
         if path is None:
             return
         data = path.read_bytes()
-        run_edit(view, "Add Image", lambda doc: doc.page(page).stamp_image(ImageStamp(data, rect)))
+        _used(
+            view,
+            run_edit(
+                view, "Add Image", lambda doc: doc.page(page).stamp_image(ImageStamp(data, rect))
+            ),
+        )
 
 
 class AddShapeTool(_RectTool):
@@ -390,7 +417,7 @@ class AddShapeTool(_RectTool):
             ShapeKind.ELLIPSE: "Add Ellipse",
             ShapeKind.LINE: "Add Line",
         }[self.kind]
-        run_edit(view, label, lambda doc: doc.page(page).add_shape(spec))
+        _used(view, run_edit(view, label, lambda doc: doc.page(page).add_shape(spec)))
 
 
 def delete_selected(view: DocumentView) -> bool:

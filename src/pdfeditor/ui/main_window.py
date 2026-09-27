@@ -90,6 +90,7 @@ from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.hand import HandTool
 from pdfeditor.ui.tools.select import SelectTool
 from pdfeditor.ui.view.document_view import DocumentView
+from pdfeditor.ui.view.note_popup import NotePopup
 from pdfeditor.ui.view.renderer import TileRenderer
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,8 @@ COMMENT_TOOLS = (
     ("pen", "&Pen", None),
 )
 EDIT_TOOL_NAMES = {name for name, _t, _k in EDIT_TOOLS}
+# Tools that aren't "make one thing" tools: they don't switch back after use.
+STAY_ACTIVE = {"select", "hand", "edit"}
 MARKUP_TOOLS = {
     "highlight": AnnotationType.HIGHLIGHT,
     "underline": AnnotationType.UNDERLINE,
@@ -304,10 +307,21 @@ class MainWindow(QMainWindow):
         self.inspector_dock.hide()  # opened on demand: the page needs the width
         self.panels.append(self.inspector)
         self._annotation_clipboard: list[AnnotationModel] = []
+        self._note_popup: NotePopup | None = None
         self._state_restored = False
 
         self.navigator = PageNavigator(self)
         self.zoom_box = ZoomBox(self)
+        self.tool_label = QLabel(self)
+        self.tool_exit = QToolButton(self)
+        self.tool_exit.setText("✕")
+        self.tool_exit.setToolTip("Stop using this tool (Esc)")
+        self.tool_exit.setAutoRaise(True)
+        self.tool_exit.clicked.connect(lambda: self.set_tool("select"))
+        self.statusBar().addWidget(self.tool_label)
+        self.statusBar().addWidget(self.tool_exit)
+        self.tool_label.hide()
+        self.tool_exit.hide()
         self.statusBar().addPermanentWidget(self.navigator)
         self.statusBar().addPermanentWidget(self.zoom_box)
 
@@ -408,7 +422,7 @@ class MainWindow(QMainWindow):
             act.setShortcut(QKeySequence(key))
             act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             act.setProperty("needs_doc", True)
-            act.triggered.connect(lambda _=False, n=name: self.set_tool(n))
+            act.triggered.connect(lambda _=False, n=name: self.tool_clicked(n))
             self.tabs.addAction(act)
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
@@ -418,7 +432,7 @@ class MainWindow(QMainWindow):
             if icon is not None:
                 act.setIcon(self.style().standardIcon(getattr(sp_note, icon)))
             act.setProperty("needs_doc", True)
-            act.triggered.connect(lambda _=False, n=name: self.set_tool(n))
+            act.triggered.connect(lambda _=False, n=name: self.tool_clicked(n))
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
         self.stamp_name = STANDARD_STAMPS[0]
@@ -612,6 +626,17 @@ class MainWindow(QMainWindow):
         home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
         home.add_group(self.act_prev, self.act_next)
+        self.tool_actions["select"].setIconText("Select")
+        self.tool_actions["hand"].setIconText("Hand")
+        self.ribbon.set_quick_actions(
+            [
+                self.tool_actions["select"],
+                self.tool_actions["hand"],
+                self.act_undo,
+                self.act_redo,
+                self.act_save,
+            ]
+        )
         self.edit.ribbon()
         self.organize.ribbon()
         self.protect.ribbon()
@@ -710,6 +735,9 @@ class MainWindow(QMainWindow):
         view.annotation_activated.connect(self.edit_annotation)
         view.annotation_context_menu.connect(self.annotation_menu)
         view.escape_pressed.connect(lambda: self.set_tool("select"))
+        view.back_to_select.connect(lambda: self.set_tool("select"))
+        view.tool_used.connect(self.tool_used)
+        view.note_clicked.connect(self.open_note)
         view.object_selection_changed.connect(self._update_ui)
         view.author = self.prefs.author
         view.set_tool(self._make_tool(self.current_tool))
@@ -1037,7 +1065,7 @@ class MainWindow(QMainWindow):
 
     def choose_stamp(self, stamp: str) -> None:
         self.stamp_name = stamp
-        self.set_tool("stamp")
+        self.set_tool("stamp")  # a stamp picked from the menu always (re)starts the tool
 
     def edit_annotation(self, model: AnnotationModel) -> None:
         """Double-click: edit a comment's text (or save an attached file)."""
@@ -1161,6 +1189,28 @@ class MainWindow(QMainWindow):
         tool.name = name
         return tool
 
+    def tool_clicked(self, name: str) -> None:
+        """A tool button was clicked: clicking the active tool again turns it off."""
+        if name == self.current_tool and name != "select":
+            self.set_tool("select")
+        else:
+            self.set_tool(name)
+
+    def open_note(self, note: AnnotationModel, pos: QPoint) -> NotePopup | None:
+        view = self.current_view()
+        if view is None:
+            return None
+        if self._note_popup is not None:
+            self._note_popup.close()
+        self._note_popup = NotePopup(view, note, self)
+        self._note_popup.show_at(pos + QPoint(12, 12))
+        return self._note_popup
+
+    def tool_used(self) -> None:
+        """A creation tool finished its job: back to Select unless tools should stay."""
+        if not self.prefs.keep_tools and self.current_tool not in STAY_ACTIVE:
+            self.set_tool("select")
+
     def set_tool(self, name: str) -> None:
         view = self.current_view()
         markup = MARKUP_TOOLS.get(name)
@@ -1176,6 +1226,22 @@ class MainWindow(QMainWindow):
         for v in self.views():
             v.set_tool(self._make_tool(name))
         self.tool_actions[name].setChecked(True)
+        self._update_tool_indicator()
+
+    def _update_tool_indicator(self) -> None:
+        name = self.current_tool
+        active = name not in ("select", "hand")
+        if active:
+            text = (
+                self.tool_actions[name]
+                .text()
+                .replace("&&", "\0")
+                .replace("&", "")
+                .replace("\0", "&")
+            )
+            self.tool_label.setText(f"Tool: {text}  (Esc: back to Select)")
+        self.tool_label.setVisible(active)
+        self.tool_exit.setVisible(active)
 
     def print_document(self) -> None:
         view = self.current_view()

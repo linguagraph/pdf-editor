@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: T (Tool modes and discoverability), then 9 (OCR).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 9 (OCR).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -176,14 +176,14 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 
 ### Phase T: Tool modes and discoverability (S–M), done next, before Phase 9
 Problem (user feedback): once a tool such as Sticky Note is active there's no visible way to turn it off, and clicking an existing comment creates another one instead of showing it. Escape and the Select tool (V, Home tab) exist but aren't discoverable, and creation tools ignore what's already on the page.
-- [ ] Clicking the active tool's button again turns it off and returns to the Select tool (every tool: comment, edit, redact, hand)
-- [ ] Quick-access toolbar next to the ribbon tabs with Select, Hand, Undo, Redo and Save, so the Select tool is one click away on every tab
-- [ ] Status-bar indicator of the active tool with an "×" to exit it, and the hint "Esc: back to Select"
-- [ ] Creation tools respect existing content: clicking an existing comment with any comment tool selects it (double-click opens it) instead of creating a new one; the same for Edit tools over existing objects
-- [ ] Notes are readable without switching tools: hovering a sticky note (or any comment with text) shows a popup with its text and replies; clicking it in the Select tool opens it for reading and editing
-- [ ] Creation tools return to Select after one use by default; a Preferences option "Keep tools selected after use" restores the sticky behavior
-- [ ] Right-click in any creation tool offers "Back to Select"
-- [ ] GUI tests for each behavior (toggle-off, Esc, status-bar exit, click-existing-comment, hover popup, one-shot vs sticky preference)
+- [x] Clicking the active tool's button again turns it off and returns to the Select tool (every tool: comment, edit, redact, hand)
+- [x] Quick-access toolbar next to the ribbon tabs with Select, Hand, Undo, Redo and Save, so the Select tool is one click away on every tab
+- [x] Status-bar indicator of the active tool with an "×" to exit it, and the hint "Esc: back to Select"
+- [x] Creation tools respect existing content: clicking an existing comment with any comment tool selects it (double-click opens it) instead of creating a new one; the same for Edit tools over existing objects
+- [x] Notes are readable without switching tools: hovering a sticky note (or any comment with text) shows a popup with its text and replies; clicking it in the Select tool opens it for reading and editing
+- [x] Creation tools return to Select after one use by default; a Preferences option "Keep tools selected after use" restores the sticky behavior
+- [x] Right-click in any creation tool offers "Back to Select"
+- [x] GUI tests for each behavior (toggle-off, Esc, status-bar exit, click-existing-comment, hover popup, one-shot vs sticky preference)
 
 ### Phase 9: OCR (M)
 - [ ] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed
