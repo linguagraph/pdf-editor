@@ -19,9 +19,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# OCR uses MuPDF's built-in Tesseract; this only adds image preprocessing.
-ocr = ["opencv-python-headless>=4.8"]
-export = ["pdf2docx>=0.5.8", "openpyxl>=3.1"]
 build = ["pyinstaller>=6.10"]
 dev = [
     "pytest>=8.0",

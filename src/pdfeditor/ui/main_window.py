@@ -72,6 +72,7 @@ from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.document_tab import DocumentTab
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
+from pdfeditor.ui.export_controller import ExportController
 from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
@@ -331,6 +332,7 @@ class MainWindow(QMainWindow):
         self.edit = EditController(self, self.tool_group, self.tool_actions)
         self.protect = ProtectController(self, self.tool_group, self.tool_actions)
         self.tools = ToolsController(self)
+        self.export = ExportController(self)
         self.panels.insert(3, self.protect.panel)
         self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -547,11 +549,13 @@ class MainWindow(QMainWindow):
         file_menu = mb.addMenu("&File")
         file_menu.addAction(self.act_open)
         file_menu.addAction(self.organize.act_combine)
+        file_menu.addAction(self.export.act_from_office)
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         file_menu.addAction(self.act_close)
         file_menu.addAction(self.act_save)
         file_menu.addAction(self.act_save_as)
+        self.export.fill_menu(file_menu)
         file_menu.addSeparator()
         file_menu.addAction(self.act_properties)
         file_menu.addAction(self.act_print)
@@ -669,6 +673,7 @@ class MainWindow(QMainWindow):
         view.add_group(*self.layout_actions.values())
         view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night)
         self.tools.ribbon()
+        self.export.ribbon()
 
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:

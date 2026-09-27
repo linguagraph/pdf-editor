@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,7 +20,7 @@ from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Destination, Link, LinkKind
 from pdfeditor.model.pages import ImageStamp, TextStamp
 from pdfeditor.model.redaction import RedactOptions
-from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TextPage
+from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TableData, TextPage
 
 if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.document import MuDocument
@@ -285,6 +287,24 @@ class MuPage:
 
     def add_text_layer(self, layer: bytes) -> None:
         ocr.add_text_layer(self, layer)
+
+    def find_tables(self) -> list[TableData]:
+        # MuPDF prints a hint about an optional layout package; keep the console clean.
+        with contextlib.redirect_stdout(io.StringIO()):
+            found = self.fz.find_tables()
+        # find_tables already reports visible (rotated) coordinates
+        return [
+            TableData(self.index, cv.rect(t.bbox), tuple(tuple(row) for row in t.extract()))
+            for t in found.tables
+        ]
+
+    def image_areas(self) -> list[Rect]:
+        m = self._vis_matrix()
+        return [
+            self._vrect(info["bbox"], m)
+            for info in self.fz.get_image_info()
+            if pymupdf.Rect(info["bbox"]).is_valid and not pymupdf.Rect(info["bbox"]).is_empty
+        ]
 
     def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
         return annots.apply_redactions(self, ids, options)

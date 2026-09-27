@@ -6,7 +6,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QObject, QThreadPool, Signal
+from PySide6.QtCore import QEventLoop, QObject, Qt, QThreadPool, Signal
+from PySide6.QtWidgets import QProgressDialog, QWidget
 
 from pdfeditor.core.jobs import Cancelled, CancelToken
 
@@ -78,3 +79,37 @@ def job_pool() -> QThreadPool:
         _pool = QThreadPool()
         _pool.setMaxThreadCount(2)
     return _pool
+
+
+def run_modal(parent: QWidget, label: str, work: JobFn, total: int = 0) -> object:
+    """Run ``work`` on a worker thread behind a window-modal, cancellable progress dialog.
+
+    Returns the result, or None if the user cancelled; raises RuntimeError if ``work`` failed.
+    """
+    progress = QProgressDialog(label, "Cancel", 0, total, parent)
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setMinimumDuration(300)
+    job = Job(work)
+    outcome: dict[str, object] = {}
+    loop = QEventLoop()
+
+    def on_progress(done: int, t: int) -> None:
+        progress.setMaximum(t)
+        progress.setValue(done)
+
+    def finish(key: str, value: object) -> None:
+        outcome[key] = value
+        loop.quit()
+
+    progress.canceled.connect(job.cancel)
+    job.progress_changed.connect(on_progress)
+    job.finished.connect(lambda result: finish("result", result))
+    job.failed.connect(lambda msg: finish("error", msg))
+    job.cancelled.connect(lambda: finish("cancelled", True))
+    job.start()
+    loop.exec()  # results arrive as queued signals, so none can be missed
+    progress.close()
+    progress.deleteLater()
+    if "error" in outcome:
+        raise RuntimeError(str(outcome["error"]))
+    return None if outcome.get("cancelled") else outcome.get("result")

@@ -69,20 +69,20 @@ pdf-editor/
 ```
 
 **Key design rules**
-1. **Engine isolation.** `ui` → `services`/`core` → `engine.base` protocols, and the rule is enforced by an **import-linter** contract in CI. Only `engine/mupdf` imports `pymupdf`. Libraries that depend on PyMuPDF (`pdf2docx`, `pymupdf4llm`) sit behind the mupdf backend as optional exporters.
+1. **Engine isolation.** `ui` → `services`/`core` → `engine.base` protocols, and the rule is enforced by an **import-linter** contract in CI. Only `engine/mupdf` imports `pymupdf`. Word/Excel/HTML/Markdown export uses our own writers on top of engine-neutral text, table and image data (no `pdf2docx`/`openpyxl`/OpenCV: they would double the executable).
 2. **Capabilities.** Each engine publishes `Capabilities` (e.g. `edit_text`, `redact`, `ocr`), and the UI turns actions on or off from these flags. This keeps a future permissive backend workable.
 3. **Undo/redo is a hybrid.** Operations that can be reversed exactly (annotations, page ops, bookmarks, metadata) get their own inverse commands. Destructive operations (content edits, redaction, OCR, optimize) use `SnapshotCommand`, which serializes the document to a temp file (`tobytes(garbage=0)`) before applying the change. Undo depth and disk usage are configurable.
 4. **Threading.** A MuPDF `Document` is not thread-safe. Each session has one lock, and rendering runs on worker threads with cached per-page display lists. Every mutation bumps `page.revision`, which invalidates cached tiles. Long jobs (OCR, compare, export) run as `Job`s that report progress and can be cancelled.
 5. **Saving.** The editor uses incremental save when the file is signed or when the user chooses it, and a full rewrite (garbage collection and deflate) otherwise. It never overwrites the source file until the temp file has been written and verified, then swaps them atomically.
 
-**Core dependencies:** `pymupdf`, `PySide6`, `pikepdf` (linearize, low-level repair, struct tree), `fontTools` (glyph coverage, subsetting), `Pillow`, `numpy`. Bundled in the executable as well: `pdf2docx`, `openpyxl`, `opencv-python-headless` (deskew), Tesseract language data (`tessdata`; MuPDF has the Tesseract engine built in, so no Tesseract install is needed), and an sRGB ICC profile. Optional external tools that are used only if found and never required: LibreOffice (Office import), Ghostscript and veraPDF (extra PDF/A validation). **Build:** PyInstaller one-file (evaluate Nuitka for startup time).
+**Core dependencies:** `pymupdf`, `PySide6`, `pikepdf` (linearize, low-level repair, struct tree), `fontTools` (glyph coverage, subsetting), `Pillow`, `numpy`. Bundled in the executable as well: Tesseract language data (`tessdata`; MuPDF has the Tesseract engine built in, so no Tesseract install is needed), and an sRGB ICC profile. Optional external tools that are used only if found and never required: LibreOffice (Office import), Ghostscript and veraPDF (extra PDF/A validation). **Build:** PyInstaller one-file (evaluate Nuitka for startup time).
 **Dev dependencies:** `pytest`, `pytest-qt`, `pytest-benchmark`, `hypothesis`, `ruff`, `mypy`, `import-linter`, `pre-commit`, `pyinstaller`.
 
 ---
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 10 (Export and conversion).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 11 (Optimize and compress).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -192,12 +192,12 @@ Problem (user feedback): once a tool such as Sticky Note is active there's no vi
 - [x] Batch OCR of many files through the same in-process engine (no `ocrmypdf` dependency)
 - [x] Accuracy check against fixture scans (text similarity threshold), plus an OCR check in the exe `--self-test`
 
-### Phase 10: Export and conversion (M)
-- [ ] To images: PNG/JPEG/TIFF (multi-page), with DPI, color space and page range
-- [ ] To text / HTML / Markdown (reading order via blocks, or `pymupdf4llm` when available)
-- [ ] To Word via `pdf2docx`; to Excel via table detection (`page.find_tables`) → `openpyxl`, with a table-picking UI
-- [ ] Extract all images and fonts
-- [ ] From Office files: optional extra, used only when LibreOffice is installed (`soffice --convert-to pdf`); the menu item explains the requirement otherwise. Core conversions never depend on it
+### Phase 10: Export and conversion (M), done
+- [x] To images: PNG/JPEG/TIFF (multi-page), with DPI, color space and page range. *(RGB or grayscale; TIFF as one multi-page file or one file per page; comments optional)*
+- [x] To text / HTML / Markdown (reading order via blocks, or `pymupdf4llm` when available). *(Our own converters on a neutral structure model: headings by font size, styled runs, tables, pictures; `pymupdf4llm` isn't used)*
+- [x] To Word via `pdf2docx`; to Excel via table detection (`page.find_tables`) → `openpyxl`, with a table-picking UI. *(Own minimal OOXML writers instead of `pdf2docx`/`openpyxl`, which would pull in OpenCV/numpy: Word gets headings, styled paragraphs, tables, pictures and page breaks; Excel gets one sheet per chosen table with numbers as numbers)*
+- [x] Extract all images and fonts
+- [x] From Office files: optional extra, used only when LibreOffice is installed (`soffice --convert-to pdf`); the menu item explains the requirement otherwise. Core conversions never depend on it
 
 ### Phase 11: Optimize and compress (M)
 - [ ] Space-usage audit report (images / fonts / content / other, by bytes)

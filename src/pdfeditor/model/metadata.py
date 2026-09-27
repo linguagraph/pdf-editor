@@ -83,3 +83,14 @@ class LayerInfo:
     visible: bool
     depth: int = 0
     locked: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ImageInfo:
+    """An image resource of the document (each distinct image once)."""
+
+    ref: int  # engine object id
+    width: int
+    height: int
+    colorspace: str
+    pages: tuple[int, ...]  # pages that show it

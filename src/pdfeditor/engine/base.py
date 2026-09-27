@@ -16,12 +16,19 @@ from typing import Protocol, runtime_checkable
 from pdfeditor.model.annotations import AnnotationModel
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Quad, Rect
-from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, LayerInfo, Metadata
+from pdfeditor.model.metadata import (
+    DocumentInfo,
+    EmbeddedFile,
+    FontInfo,
+    ImageInfo,
+    LayerInfo,
+    Metadata,
+)
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
 from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
-from pdfeditor.model.text import TextPage
+from pdfeditor.model.text import TableData, TextPage
 
 
 class EngineError(Exception):
@@ -61,6 +68,7 @@ class Capabilities:
     content_edit: bool = False
     redact: bool = False
     ocr: bool = False
+    export: bool = False  # tables, image areas, image/font extraction
     encrypt: bool = False
     optimize: bool = False
 
@@ -238,6 +246,15 @@ class Page(Protocol):
         """Overlay a layer from :meth:`ocr_text_layer` so the page becomes searchable."""
         ...
 
+    # Optional (``capabilities.export``).
+    def find_tables(self) -> list[TableData]:
+        """Tables detected from ruling lines and text alignment (visible page space)."""
+        ...
+
+    def image_areas(self) -> list[Rect]:
+        """Where images are shown on the page, in drawing order (visible page space)."""
+        ...
+
     # Optional (``capabilities.redact``). Marks are REDACT annotations (add_annotation).
     def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
         """Permanently remove content under redaction marks (all, or ``ids``). Returns the
@@ -290,6 +307,17 @@ class Document(Protocol):
         ...
 
     def fonts(self) -> list[FontInfo]: ...
+
+    # Optional (``capabilities.export``).
+    def extract_font(self, ref: int) -> tuple[str, bytes]:
+        """An embedded font program as (file name with extension, bytes)."""
+        ...
+
+    def images(self) -> list[ImageInfo]: ...
+
+    def extract_image(self, ref: int) -> tuple[bytes, str]:
+        """Encoded image bytes and file extension ("png", "jpeg", ...)."""
+        ...
 
     def save(self, path: Path | None = None, options: SaveOptions | None = None) -> Path:
         """Save safely (temp file + verify + atomic replace). ``path=None`` saves in place.
