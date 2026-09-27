@@ -17,8 +17,10 @@ from pdfeditor.model.annotations import AnnotationModel
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Quad, Rect
 from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, LayerInfo, Metadata
+from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
+from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
 from pdfeditor.model.text import TextPage
 
 
@@ -197,6 +199,40 @@ class Page(Protocol):
 
     def fill_background(self, color: Color, opacity: float = 1.0) -> None: ...
 
+    # Optional (``capabilities.content_edit``). Object keys are valid for one page revision.
+    def content_objects(self) -> list[PageObject]:
+        """Editable content: text blocks, images, form XObjects and vector paths."""
+        ...
+
+    def delete_objects(self, keys: Sequence[str]) -> None: ...
+
+    def transform_objects(self, keys: Sequence[str], matrix: Matrix) -> None:
+        """Move/resize objects by ``matrix`` (visible page space). Text blocks are re-typeset
+        at their new place with their own style."""
+        ...
+
+    def replace_text(
+        self, key: str, text: str, style: TextStyle | None = None
+    ) -> FontChoice | None:
+        """Replace a text block's content (empty text deletes it). Returns the font used."""
+        ...
+
+    def add_text(self, rect: Rect, text: str, style: TextStyle) -> FontChoice: ...
+
+    def add_shape(self, spec: ShapeSpec) -> None: ...
+
+    def image_data(self, key: str) -> tuple[bytes, str]:
+        """Encoded image bytes and file extension ("png", "jpeg", ...)."""
+        ...
+
+    def replace_image(self, key: str, data: bytes) -> None: ...
+
+    # Optional (``capabilities.redact``). Marks are REDACT annotations (add_annotation).
+    def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
+        """Permanently remove content under redaction marks (all, or ``ids``). Returns the
+        number of marks applied; the marks themselves are replaced by their fill boxes."""
+        ...
+
 
 @runtime_checkable
 class Document(Protocol):
@@ -270,6 +306,11 @@ class Document(Protocol):
     def page_label_rules(self) -> list[PageLabelRule]: ...
 
     def set_page_label_rules(self, rules: Sequence[PageLabelRule]) -> None: ...
+
+    def sanitize(self, options: SanitizeOptions) -> list[str]:
+        """Remove hidden or sensitive information; returns what was removed, for the report.
+        Save with ``SaveOptions(garbage=4)`` afterwards so nothing stays in unused objects."""
+        ...
 
     def can_save_incrementally(self) -> bool:
         """True if ``save(options=SaveOptions(incremental=True))`` to ``path`` can work."""

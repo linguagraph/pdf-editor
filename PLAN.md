@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 7 (Content editing).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 9 (OCR).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -156,23 +156,23 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Create a PDF from images or from multiple files
 
 ### Phase 7: Content editing (XL, the hardest part)
-- [ ] `engine/contentstream`: lexer and parser for content streams (operators, operands, inline images), tracking graphics and text state, and a serializer. Hypothesis round-trip tests (parse → write → parse is identical)
-- [ ] Object model: enumerate `TextObj` (from rawdict spans, grouped into editable paragraphs), `ImageObj` (xref, placement matrix), `PathObj` (from drawings) per page, and link each to its content-stream operator ranges
-- [ ] **Add content:** text box (rich: font, size, color, alignment, line spacing), images (PNG/JPEG, keep aspect), shapes/lines as real page content (not annotations)
-- [ ] **Edit existing images:** move/resize/rotate (rewrite the `cm` matrix before `Do`), replace (swap XObject stream), delete (remove operator), extract/save
-- [ ] **Edit existing text** (paragraph-level, the way Acrobat does it):
-  - [ ] Detect paragraph blocks and show an inline `QGraphicsTextItem` overlay with the original font, size and color
-  - [ ] Font strategy in `services/fonts.py`: extract the embedded font, check glyph coverage with fontTools, reuse it if it covers all glyphs, otherwise fall back to the closest system font (family/weight/italic/metrics match) and tell the user it was substituted
-  - [ ] Apply the edit by removing the original glyphs precisely (a redaction limited to text, which keeps images and vectors), then reinserting the text with `insert_htmlbox`/`TextWriter` reflowed inside the original block width, and embed a font subset
-  - [ ] Handle rotated text, character spacing and word spacing; decline CJK vertical and Type3 fonts for now, with a clear message
-- [ ] Delete/move whole objects (text blocks, images, paths); marquee selection
-- [ ] Snapshot-based undo for every content command; golden tests before and after editing
+- [x] `engine/contentstream`: lexer and parser for content streams (operators, operands, inline images), tracking graphics and text state, and a serializer. Hypothesis round-trip tests (parse → write → parse is identical)
+- [x] Object model: text blocks (MuPDF blocks in reading order, with the dominant style detected), images, form XObjects and paths (from the content-stream tracker, with operator ranges and page-space boxes)
+- [ ] **Add content:** text box (rich: font, size, color, alignment, line spacing), images (PNG/JPEG, keep aspect), shapes/lines as real page content (not annotations) _(partial: engine takes a full `TextStyle`; the Add Text tool uses a default style until a style bar is added)_
+- [x] **Edit existing images:** move/resize (the `cm` is rewritten around `Do`, computed from the CTM), replace, delete, extract/save _(rotation works through the API; there's no rotate handle in the UI yet)_
+- [x] **Edit existing text** (paragraph-level, the way Acrobat does it):
+  - [x] Detect paragraph blocks and show an inline editor over them with a matching screen font, size and color
+  - [x] Font strategy: extract the embedded font, check glyph coverage with fontTools, reuse it if it covers all glyphs, otherwise fall back to the closest standard family (weight/italic kept) and tell the user it was substituted
+  - [x] Apply the edit by removing the original glyphs precisely (a text-only redaction that keeps images, vector art and the user's pending redaction marks), then re-typesetting with `insert_htmlbox` inside the block width (the box grows downward instead of shrinking the font)
+  - [ ] Handle rotated text, character spacing and word spacing; decline CJK vertical and Type3 fonts for now, with a clear message _(partial: rotated/vertical and Type3 text are declined with a clear reason; original character/word spacing isn't reproduced)_
+- [x] Delete/move whole objects (text blocks, images, forms, paths); marquee selection; Delete key
+- [x] Snapshot-based undo for every content command; render/pixel and text-extraction checks before and after editing (instead of golden images)
 
 ### Phase 8: Redaction and sanitization (M)
-- [ ] Redact tool: mark area / text selection / whole page; search-and-redact with presets (email, phone, IBAN, credit card, national ID patterns, custom regex)
-- [ ] Review mode: list of marks, per-mark accept/reject, overlay text and fill color
-- [ ] Apply: true removal of text, image pixels and vector graphics under each mark (configurable), then a **verification pass** that re-extracts text and checks image pixels in every redacted area and reports any leak
-- [ ] Sanitize document: metadata/XMP, JavaScript, embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection)
+- [x] Redact tool: mark area / text selection / whole page; search-and-redact with presets (email, phone, IBAN, credit card (Luhn-checked), US SSN, dates, custom regex)
+- [x] Review mode: Redactions panel listing marks, jump-to, apply selected / remove / apply all; overlay text and fill color (Redaction Properties, remembered)
+- [x] Apply: true removal of text, image pixels (blank or remove images) and vector graphics (covered or touched) under each mark, then a **verification pass** that re-extracts text and inspects image pixels in every redacted area and reports any leak; the next save is forced to be a full, garbage-collected rewrite (an incremental save would keep the old content)
+- [ ] Sanitize document: metadata/XMP, JavaScript (incl. open actions and triggers), embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection) _(partial: all done except hidden-layer content and off-page text)_
 
 ### Phase 9: OCR (M)
 - [ ] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed

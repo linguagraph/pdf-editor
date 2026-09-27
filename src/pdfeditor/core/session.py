@@ -57,6 +57,9 @@ class DocumentSession:
         self.undo_stack.on_change(lambda: self._emit(SessionEvent(EventKind.DIRTY)))
         self.save_path_hint: Path | None = None  # e.g. original path of a recovered document
         self.name_hint = ""  # shown for unsaved new documents, e.g. "Combined.pdf"
+        # Set after redaction/sanitizing: an incremental save would keep the removed content
+        # in earlier revisions of the file, so the next save must be a full rewrite.
+        self.require_full_save = False
         self._snapshots: SnapshotStore | None = None
         self._listeners: list[Listener] = []
 
@@ -153,8 +156,17 @@ class DocumentSession:
         with self.lock:
             doc = self.document
             in_place = doc.path is not None and target == doc.path
-            incremental = in_place and doc.info().has_signatures and doc.can_save_incrementally()
-            saved = doc.save(target, SaveOptions(incremental=incremental))
+            incremental = (
+                in_place
+                and not self.require_full_save
+                and doc.info().has_signatures
+                and doc.can_save_incrementally()
+            )
+            options = SaveOptions(
+                incremental=incremental, garbage=4 if self.require_full_save else 3
+            )
+            saved = doc.save(target, options)
+        self.require_full_save = False
         self.save_path_hint = None
         self.undo_stack.set_clean()
         log.info("saved %s%s", saved, " (incremental)" if incremental else "")

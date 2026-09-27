@@ -113,6 +113,49 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         doc.select_pages([0])
         return "duplicate, footer, margin detection"
 
+    def content_editing() -> str:
+        from pdfeditor.model.objects import ObjectType
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        page = session.document.page(0)
+        objects = page.content_objects()
+        text = next(
+            o for o in objects if o.type is ObjectType.TEXT and o.text.startswith("pdfeditor")
+        )
+        page.replace_text(text.key, "pdfeditor self-test (edited)")
+        if "(edited)" not in session.document.page(0).text_page(with_chars=False).text:
+            raise AssertionError("text replacement failed")
+        paths = [o for o in session.document.page(0).content_objects() if o.type is ObjectType.PATH]
+        return f"{len(objects)} objects, text replaced, {len(paths)} path(s) intact"
+
+    def redaction() -> str:
+        from pdfeditor.model.redaction import RedactOptions
+        from pdfeditor.services.redaction import mark_for_area, verify
+
+        session = state["session"]
+        assert isinstance(session, DocumentSession)
+        page = session.document.page(0)
+        target = next(b for b in page.text_page().blocks if "lazy dog" in b.text)
+        area = target.lines[0].bbox
+        page.add_annotation(mark_for_area(0, area))
+        session.document.page(0).apply_redactions(None, RedactOptions())
+        report = verify(session.document, {0: [area]})
+        if not report.ok:
+            raise AssertionError("; ".join(report.leaks))
+        return "marked, applied, verified"
+
+    def fonts() -> str:
+        import io
+
+        from fontTools.ttLib import TTFont  # bundled for the text editor's glyph checks
+
+        font = TTFont(io.BytesIO(_sample_ttf()))
+        cmap = font.getBestCmap() or {}
+        if ord("A") not in cmap:
+            raise AssertionError("fontTools couldn't read a font")
+        return f"fontTools read {len(cmap)} glyph mappings"
+
     def save_copy() -> str:
         session = state["session"]
         assert isinstance(session, DocumentSession)
@@ -166,10 +209,20 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("undo + redo", undo_redo),
         ("annotations", annotations),
         ("page operations", page_operations),
+        ("content editing", content_editing),
+        ("redaction", redaction),
+        ("fonts", fonts),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
         ("print to PDF", printing),
     ]
+
+
+def _sample_ttf() -> bytes:
+    """A TrueType font MuPDF can hand us without any system fonts (its built-in fallback)."""
+    import pymupdf
+
+    return bytes(pymupdf.Font("cjk").buffer)
 
 
 def run_self_test(report_path: Path | None = None) -> int:

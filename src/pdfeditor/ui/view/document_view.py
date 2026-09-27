@@ -37,6 +37,7 @@ from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
 from pdfeditor.core.session import DocumentSession, EventKind, SessionEvent
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.geometry import Point, Rect
+from pdfeditor.model.objects import PageObject
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.model.text import SearchHit
 from pdfeditor.services.text import TextIndexCache, TextPos, TextSelection
@@ -79,6 +80,7 @@ class DocumentView(QGraphicsView):
     link_activated = Signal(object)  # Link that isn't an internal jump (URI, launch, ...)
     selection_changed = Signal()
     annotation_selection_changed = Signal()
+    object_selection_changed = Signal()
     escape_pressed = Signal()  # the window switches back to the Select tool
     annotation_activated = Signal(object)  # AnnotationModel double-clicked
     annotation_context_menu = Signal(object, object)  # AnnotationModel, global QPoint
@@ -122,6 +124,9 @@ class DocumentView(QGraphicsView):
         self._search_rects: dict[int, list[Rect]] = {}
         self._current_hit: SearchHit | None = None
         self._annots: dict[int, tuple[int, list[AnnotationModel]]] = {}
+        self._objects: dict[int, tuple[int, list[PageObject]]] = {}
+        self.selected_objects: list[tuple[int, str]] = []  # (page, object key)
+        self.show_object_outlines = False
         self.selected_annotations: list[tuple[int, str]] = []  # (page, /NM name)
         self.annotation_preview: dict[int, list[Rect]] = {}  # drag outlines per page
         self.author = ""
@@ -147,6 +152,8 @@ class DocumentView(QGraphicsView):
         self._search_rects = {}
         self._current_hit = None
         self._annots.clear()
+        self._objects.clear()
+        self.selected_objects = []
         self.selected_annotations = []
         for item in self._items:
             self._scene.removeItem(item)
@@ -177,6 +184,8 @@ class DocumentView(QGraphicsView):
                     if 0 <= page < len(self._items):
                         self._items[page].update()
                 self.content_changed.emit()
+        if self.selected_objects:
+            self.set_object_selection([])  # object keys belong to the previous page revision
         if self.selected_annotations:
             alive = [
                 (page, name)
@@ -488,8 +497,14 @@ class DocumentView(QGraphicsView):
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.selected_annotations:
             self.delete_selected_annotations()
             return
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.selected_objects:
+            from pdfeditor.ui.tools.edit import delete_selected
+
+            delete_selected(self)
+            return
         if key == Qt.Key.Key_Escape:
             self.set_annotation_selection([])
+            self.set_object_selection([])
             self.clear_selection()
             if self.tool.name != "select":
                 self.escape_pressed.emit()
@@ -747,8 +762,76 @@ class DocumentView(QGraphicsView):
                 self._items[page].update()
 
     def selection_frames(self, index: int) -> list[Rect]:
-        """Bounds of selected annotations on a page (PageItem draws frames and handles)."""
-        return [annotation_bounds(a) for a in self.selected_models() if a.page_index == index]
+        """Bounds of selected annotations and content objects on a page (PageItem draws frames
+        and handles)."""
+        frames = [annotation_bounds(a) for a in self.selected_models() if a.page_index == index]
+        keys = {key for page, key in self.selected_objects if page == index}
+        if keys:
+            frames.extend(o.bbox for o in self.page_objects(index) if o.key in keys)
+        return frames
+
+    # -- content objects (Edit mode) ------------------------------------------------------
+    def page_objects(self, index: int) -> list[PageObject]:
+        """Editable content on a page (cached per page revision)."""
+        if not self.session.engine.capabilities.content_edit:
+            return []
+        with self.session.lock:
+            page = self.session.document.page(index)
+            rev = page.revision
+            cached = self._objects.get(index)
+            if cached is None or cached[0] != rev:
+                try:
+                    cached = (rev, page.content_objects())
+                except Exception:  # malformed content: nothing editable on this page
+                    log.exception("can't list content objects on page %d", index)
+                    cached = (rev, [])
+                self._objects[index] = cached
+        return cached[1]
+
+    def object_at(self, scene_pos: QPointF) -> PageObject | None:
+        """The smallest object under ``scene_pos`` (so an image wins over a big text block)."""
+        hit = self.page_point_at(scene_pos)
+        if hit is None:
+            return None
+        index, point = hit
+        tol = 2 / max(self.transform().m11(), 0.01)
+        under = [o for o in self.page_objects(index) if o.bbox.inflated(tol).contains(point)]
+        return min(under, key=lambda o: o.bbox.width * o.bbox.height, default=None)
+
+    def selected_page_objects(self) -> list[PageObject]:
+        out = []
+        for page, key in self.selected_objects:
+            obj = next((o for o in self.page_objects(page) if o.key == key), None)
+            if obj is not None:
+                out.append(obj)
+        return out
+
+    def selected_object_pages(self) -> dict[int, list[PageObject]]:
+        by_page: dict[int, list[PageObject]] = {}
+        for page, key in self.selected_objects:
+            obj = next((o for o in self.page_objects(page) if o.key == key), None)
+            if obj is not None:
+                by_page.setdefault(page, []).append(obj)
+        return by_page
+
+    def set_object_selection(self, items: list[tuple[int, str]]) -> None:
+        if items == self.selected_objects:
+            return
+        pages = {p for p, _ in self.selected_objects} | {p for p, _ in items}
+        self.selected_objects = list(items)
+        for page in pages:
+            if 0 <= page < len(self._items):
+                self._items[page].update()
+        self.object_selection_changed.emit()
+
+    def set_object_outlines(self, on: bool) -> None:
+        self.show_object_outlines = on
+        self.viewport().update()
+
+    def object_outlines(self, index: int) -> list[Rect]:
+        if not self.show_object_outlines:
+            return []
+        return [o.bbox for o in self.page_objects(index)]
 
     def page_rect(self, index: int) -> Rect:
         """Visible page rectangle (page space)."""

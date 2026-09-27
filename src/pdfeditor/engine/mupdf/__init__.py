@@ -27,6 +27,8 @@ class MuPDFEngine:
         annotations_write=True,
         annotations_flatten=True,
         page_ops=True,
+        content_edit=True,
+        redact=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

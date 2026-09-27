@@ -102,6 +102,7 @@ class AnnotationModel:
     locked: bool = False
     file_name: str = ""  # FileAttachment: attached file's name
     file_data: bytes | None = None  # FileAttachment: contents (only needed to create one)
+    overlay_text: str = ""  # Redact: text shown in the box after the redaction is applied
     extra: dict[str, str] = field(default_factory=dict)
 
     @property

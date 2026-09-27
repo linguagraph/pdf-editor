@@ -71,6 +71,7 @@ from pdfeditor.ui.dialogs.print_dialog import PrintDialog
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.document_tab import DocumentTab
+from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.attachments import AttachmentsPanel
 from pdfeditor.ui.panels.base import ViewPanel
@@ -80,6 +81,7 @@ from pdfeditor.ui.panels.inspector import InspectorPanel
 from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
+from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.theme import Theme, apply_theme
@@ -110,6 +112,7 @@ COMMENT_TOOLS = (
     ("polyline", "Poly&line", None),
     ("pen", "&Pen", None),
 )
+EDIT_TOOL_NAMES = {name for name, _t, _k in EDIT_TOOLS}
 MARKUP_TOOLS = {
     "highlight": AnnotationType.HIGHLIGHT,
     "underline": AnnotationType.UNDERLINE,
@@ -310,6 +313,10 @@ class MainWindow(QMainWindow):
 
         self._create_actions()
         self.organize = OrganizeController(self)
+        self.edit = EditController(self, self.tool_group, self.tool_actions)
+        self.protect = ProtectController(self, self.tool_group, self.tool_actions)
+        self.panels.insert(3, self.protect.panel)
+        self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
@@ -605,7 +612,9 @@ class MainWindow(QMainWindow):
         home.add_group(self.act_find)
         home.add_group(self.act_back, self.act_forward)
         home.add_group(self.act_prev, self.act_next)
+        self.edit.ribbon()
         self.organize.ribbon()
+        self.protect.ribbon()
         comment = self.ribbon.add_tab("Comment")
         comment.add_group(
             *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
@@ -701,6 +710,7 @@ class MainWindow(QMainWindow):
         view.annotation_activated.connect(self.edit_annotation)
         view.annotation_context_menu.connect(self.annotation_menu)
         view.escape_pressed.connect(lambda: self.set_tool("select"))
+        view.object_selection_changed.connect(self._update_ui)
         view.author = self.prefs.author
         view.set_tool(self._make_tool(self.current_tool))
         session.subscribe(lambda event: self._on_session_event(view, event))
@@ -893,6 +903,7 @@ class MainWindow(QMainWindow):
                 action.setEnabled(has_doc)
         self.navigator.update_state(view)
         self.organize.update_state()
+        self.edit.update_state(view)
         if view is not None:
             dirty = view.session.is_dirty
             self.setWindowTitle(f"{view.session.display_name}{'*' if dirty else ''} — pdfeditor")
@@ -1141,6 +1152,10 @@ class MainWindow(QMainWindow):
             tool: Tool = HandTool()
         elif name == "stamp":
             tool = annotate.StampTool(self.stamp_name)
+        elif (edit_tool := make_edit_tool(name)) is not None:
+            tool = edit_tool
+        elif name == "redact":
+            tool = RedactTool(self.protect)
         else:
             tool = annotate.tool_for(name) or SelectTool()
         tool.name = name
@@ -1152,6 +1167,9 @@ class MainWindow(QMainWindow):
         if markup is not None and view is not None and view.has_selection():
             # Acrobat-style: select text first, then pick Highlight, and it's applied at once.
             annotate.apply_markup(view, markup, self.tool_actions[name].text().replace("&", ""))
+            self.tool_actions[self.current_tool].setChecked(True)
+            return
+        if name in EDIT_TOOL_NAMES and view is not None and not self.edit.confirm_signed(view):
             self.tool_actions[self.current_tool].setChecked(True)
             return
         self.current_tool = name
