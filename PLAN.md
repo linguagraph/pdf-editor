@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: E (text editing fixes).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 12 (Compare documents).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -205,11 +205,11 @@ Problem (user feedback): once a tool such as Sticky Note is active there's no vi
 - [x] Linearize for fast web view (a pikepdf/qpdf post-process). *(Skipped with a note for encrypted files, since qpdf would drop the encryption)*
 - [x] Presets (screen / ebook / print / custom) with a before/after size preview. *(Plus a lossless preset; the result is saved as a new file and the open document is left alone)*
 
-### Phase E: Text editing fixes (S–M), from user testing, done next, before Phase 12
+### Phase E: Text editing fixes (S–M), from user testing, done
 Reported on a two-column manual (icons plus labels in two columns):
-- [ ] Clicking a text line in a two-column layout opens an edit box that contains the text of both columns. Paragraph detection must split blocks at large horizontal gaps (column gutters) and never merge lines that don't overlap horizontally
-- [ ] Closing the edit box after editing existing text leaves the original place blank and creates a new text box elsewhere with the formatting lost. The edit must be re-typeset in the original block's position with its font, size and color, and closing without changes must leave the page untouched
-- [ ] No way to format edited text: add a style bar to the inline editor (font family, size, bold, italic, color, alignment) that applies to the whole block and is kept when saving the edit
+- [x] Clicking a text line in a two-column layout opens an edit box that contains the text of both columns. Paragraph detection must split blocks at large horizontal gaps (column gutters) and never merge lines that don't overlap horizontally. *(`engine/textlayout.py`: lines are cut at gaps wider than 2.5 em (gutters stored as spaces included) and blank margins trimmed; blocks with pieces side by side become one paragraph per piece; running text is unchanged)*
+- [x] Closing the edit box after editing existing text leaves the original place blank and creates a new text box elsewhere with the formatting lost. The edit must be re-typeset in the original block's position with its font, size and color, and closing without changes must leave the page untouched. *(Only the edited column is removed; whitespace is kept; the font is resolved before removal and matched by a loose name, so the document font survives repeated edits; one-line labels widen instead of wrapping; the first baseline is measured and kept, so edits don't drift; duplicate cmap entries are pruned so "(" doesn't copy as U+FD3E; an unchanged close is a no-op)*
+- [x] No way to format edited text: add a style bar to the inline editor (font family, size, bold, italic, color, alignment) that applies to the whole block and is kept when saving the edit. *(The editor previews the embedded font; changing bold/italic of an embedded font falls back to a standard face and says so; Add Text uses the same bar and remembers the last style)*
 
 ### Phase 12: Compare documents (M)
 - [ ] Page alignment (text-similarity matching, to handle inserted and deleted pages)

@@ -46,6 +46,11 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# test data in Cyrillic/other scripts is intentional
+"tests/**" = ["RUF001"]
+"scripts/make_fixtures.py" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"
