@@ -20,6 +20,7 @@ from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import (
     FLAG_HIDDEN,
     FLAG_LOCKED,
+    IMAGE_STAMP,
     STANDARD_STAMPS,
     AnnotationModel,
     AnnotationType,
@@ -112,6 +113,121 @@ def _pdf_date(dt: datetime | None) -> str:
     return cv.format_pdf_date(dt) if dt is not None else ""
 
 
+# -- FreeText callouts ------------------------------------------------------------------------
+def _pdf_rect(geo: _Geo, r: Rect) -> tuple[float, float, float, float]:
+    """A visible-space rectangle in PDF user space (x0, y0, x1, y1), normalized."""
+    a = geo.pdf(Point(r.x0, r.y0))
+    b = geo.pdf(Point(r.x1, r.y1))
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1]))
+
+
+def _write_callout(doc: pymupdf.Document, geo: _Geo, xref: int, model: AnnotationModel) -> None:
+    """Store a callout's geometry: /CL (leader line), /Rect (box plus line) and /RD.
+
+    MuPDF's constructor derives /Rect and /RD itself, but only at creation; writing all three
+    here keeps create and move/resize identical. /RD follows MuPDF's reading of it
+    (left, bottom, right, top in PDF space), since MuPDF generates the appearance stream that
+    every viewer draws.
+    """
+    box = pymupdf.Rect(_pdf_rect(geo, model.rect))
+    points = [geo.pdf(p) for p in model.vertices]
+    # Room for the line width and the arrow head around the line's points.
+    pad = 4.0 + 3.0 * max(model.border_width, 1.0)
+    outer = pymupdf.Rect(box)
+    for x, y in points:
+        outer |= pymupdf.Rect(x - pad, y - pad, x + pad, y + pad)
+    rd = (box.x0 - outer.x0, box.y0 - outer.y0, outer.x1 - box.x1, outer.y1 - box.y1)
+    ending = model.line_endings[0] if model.line_endings[0] in _LINE_END_CODES else "None"
+    doc.xref_set_key(xref, "IT", "/FreeTextCallout")
+    doc.xref_set_key(xref, "CL", _nums([c for p in points for c in p]))
+    doc.xref_set_key(xref, "LE", f"/{ending}")
+    doc.xref_set_key(xref, "Rect", _nums([outer.x0, outer.y0, outer.x1, outer.y1]))
+    doc.xref_set_key(xref, "RD", _nums(rd))
+
+
+def callout_box(doc: pymupdf.Document, annot: pymupdf.Annot) -> pymupdf.Rect | None:
+    """A callout's text box in MuPDF's unrotated page space, or ``None`` if not a callout."""
+    xref = annot.xref
+    if doc.xref_get_key(xref, "CL")[0] != "array":
+        return None
+    r = pymupdf.Rect(annot.rect)
+    rd = _array(doc, xref, "RD")
+    if rd is None or len(rd) != 4:
+        return r
+    # MuPDF's page space runs top-down: PDF "top" (rd[3]) is the smaller y.
+    box = pymupdf.Rect(r.x0 + rd[0], r.y0 + rd[3], r.x1 - rd[2], r.y1 - rd[1])
+    return box if not box.is_empty else r
+
+
+def callout_ending(doc: pymupdf.Document, xref: int) -> str:
+    kind, value = doc.xref_get_key(xref, "LE")
+    if kind == "name" and value.lstrip("/") in _LINE_END_CODES:
+        return value.lstrip("/")
+    return "None"
+
+
+# -- image stamps -----------------------------------------------------------------------------
+def _fit_aspect(r: Rect, aspect: float) -> Rect:
+    """The largest rectangle with height/width ``aspect`` centered in ``r``."""
+    r = r.normalized()
+    w, h = r.width, r.height
+    if h > w * aspect:
+        h = w * aspect
+    else:
+        w = h / aspect
+    c = r.center
+    return Rect(c.x - w / 2, c.y - h / 2, c.x + w / 2, c.y + h / 2)
+
+
+def _upright_image_stamp(doc: pymupdf.Document, page: pymupdf.Page, xref: int) -> None:
+    """Counter-rotate an image stamp's appearance on a rotated page so it reads upright.
+
+    MuPDF draws the image in unrotated page space and resets the appearance /Matrix whenever
+    it regenerates it, so this runs after every update.
+    """
+    if not page.rotation % 360 or doc.xref_get_key(xref, "Name") != ("name", f"/{IMAGE_STAMP}"):
+        return
+    kind, ap = doc.xref_get_key(xref, "AP/N")
+    if kind != "xref" or (match := _REF.match(ap)) is None:
+        return
+    m = pymupdf.Matrix(page.rotation)
+    doc.xref_set_key(int(match.group(1)), "Matrix", _nums([m.a, m.b, m.c, m.d, 0, 0]))
+
+
+def stamp_image(doc: pymupdf.Document, xref: int) -> bytes | None:
+    """The image a stamp's appearance draws (PNG, or the original JPEG), if it draws one.
+
+    Needed to re-create the stamp (undoing a delete, pasting a copy). Only images placed
+    directly in the normal appearance are found; vector custom stamps return ``None``.
+    """
+    kind, ap = doc.xref_get_key(xref, "AP/N")
+    if kind != "xref" or (match := _REF.match(ap)) is None:
+        return None
+    ap_xref = int(match.group(1))
+    kind, value = doc.xref_get_key(ap_xref, "Resources/XObject")
+    if kind == "xref" and (match := _REF.match(value)) is not None:
+        value = doc.xref_object(int(match.group(1)))
+    elif kind != "dict":
+        return None
+    for ref in _REF.findall(value):
+        image_xref = int(ref)
+        if doc.xref_get_key(image_xref, "Subtype") != ("name", "/Image"):
+            continue
+        try:
+            info = doc.extract_image(image_xref)
+            if info and not info.get("smask") and info.get("ext") in ("png", "jpeg", "jpg"):
+                return bytes(info["image"])
+            pix = pymupdf.Pixmap(doc, image_xref)
+            if pix.colorspace is not None and pix.colorspace.n > 3:
+                pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+            if info and info.get("smask") and not pix.alpha:
+                pix = pymupdf.Pixmap(pix, pymupdf.Pixmap(doc, info["smask"]))
+            return bytes(pix.tobytes("png"))
+        except Exception:  # damaged image: keep the stamp readable
+            return None
+    return None
+
+
 # -- lookup ---------------------------------------------------------------------------------
 def find(page: MuPage, annot_id: int | None = None, name: str = "") -> pymupdf.Annot:
     """Load an annotation by /NM name, falling back to object id.
@@ -173,6 +289,24 @@ def add(page: MuPage, model: AnnotationModel) -> AnnotationModel:
     elif t is AnnotationType.INK:
         strokes = [[tuple(geo.point(p)) for p in stroke] for stroke in model.ink]
         annot = fz.add_ink_annot(strokes)
+    elif t is AnnotationType.STAMP and model.image is not None:
+        # MuPDF fits the image into the rect (keeping its aspect ratio) and draws it as the
+        # appearance, so every viewer shows it; the model's rect then shrinks to the image.
+        before = {entry[0] for entry in fz.annot_xrefs()}
+        try:
+            annot = fz.add_stamp_annot(geo.rect(model.rect), stamp=bytes(model.image))
+        except Exception as exc:  # MuPDF raises its own error classes for bad images
+            # MuPDF creates the annotation before decoding the image: drop the empty stamp.
+            for leftover in fz.annots():
+                if leftover.xref not in before:
+                    fz.delete_annot(leftover)
+                    break
+            raise EngineError(f"can't use the stamp image: {exc}") from exc
+        created = annot.rect
+        if fz.rotation % 180 and created.width > 0 and created.height > 0:
+            # MuPDF fitted the image in unrotated space; the appearance is turned upright in
+            # _apply_properties, so fit the image's own aspect ratio in the visible page.
+            annot.set_rect(geo.rect(_fit_aspect(model.rect, created.height / created.width)))
     elif t is AnnotationType.STAMP:
         index = STANDARD_STAMPS.index(model.icon) if model.icon in STANDARD_STAMPS else 0
         annot = fz.add_stamp_annot(geo.rect(model.rect), stamp=index)
@@ -214,6 +348,9 @@ def add(page: MuPage, model: AnnotationModel) -> AnnotationModel:
         raise EngineError(f"MuPDF refused to create a {t.value} annotation")
     name = model.name or f"pdfeditor-{uuid.uuid4().hex}"
     page._doc.fz.xref_set_key(annot.xref, "NM", pymupdf.get_pdf_str(name))
+    if model.is_callout:
+        _write_callout(page._doc.fz, geo, annot.xref, model)
+        annot = find(page, annot.xref)
     _apply_properties(page, annot, model)
     page._doc.mark_page_changed(page.index)
     return page._annot_model(find(page, annot.xref))
@@ -226,8 +363,19 @@ def update(page: MuPage, model: AnnotationModel) -> AnnotationModel:
     geo = _Geo(page.fz)
     t = AnnotationType.from_pdf_name(annot.type[1])
     xref = annot.xref
-    if t in _RECT_TYPES:
-        annot.set_rect(geo.rect(model.rect))
+    if t is AnnotationType.FREE_TEXT and model.is_callout:
+        _write_callout(fz_doc, geo, xref, model)
+        annot = find(page, xref)
+    elif t in _RECT_TYPES:
+        if t is AnnotationType.FREE_TEXT and fz_doc.xref_get_key(xref, "CL")[0] != "null":
+            # The callout line was removed. MuPDF's set_rect would re-create /CL, so the plain
+            # box is written directly.
+            for key in ("CL", "IT", "LE", "RD"):
+                fz_doc.xref_set_key(xref, key, "null")
+            fz_doc.xref_set_key(xref, "Rect", _nums(_pdf_rect(geo, model.rect)))
+            annot = find(page, xref)
+        else:
+            annot.set_rect(geo.rect(model.rect))
     elif t is AnnotationType.LINE and len(model.vertices) >= 2:
         fz_doc.xref_set_key(
             xref, "L", _nums([*geo.pdf(model.vertices[0]), *geo.pdf(model.vertices[1])])
@@ -313,6 +461,8 @@ def _apply_properties(
         )
     else:
         annot.update()
+        if t is AnnotationType.STAMP:
+            _upright_image_stamp(doc, page.fz, annot.xref)
 
 
 # -- delete / order -----------------------------------------------------------------------------

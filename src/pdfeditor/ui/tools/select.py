@@ -15,7 +15,12 @@ from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtWidgets import QApplication, QGraphicsView
 
 from pdfeditor.core.commands import Command, MacroCommand, UpdateAnnotationCommand
-from pdfeditor.model.annotations import AnnotationModel, AnnotationType, transformed
+from pdfeditor.model.annotations import (
+    AnnotationModel,
+    AnnotationType,
+    callout_line,
+    transformed,
+)
 from pdfeditor.model.geometry import Matrix, Point, Rect
 from pdfeditor.services.text import TextPos, TextSelection
 from pdfeditor.ui.tools.base import Tool
@@ -64,6 +69,15 @@ def _fit(old: Rect, new: Rect) -> Matrix:
     return (
         Matrix.translate(-old.x0, -old.y0) @ Matrix.scale(sx, sy) @ Matrix.translate(new.x0, new.y0)
     )
+
+
+def _reshaped(model: AnnotationModel, m: Matrix, resize: bool) -> AnnotationModel:
+    """``model`` moved or resized by ``m``. Resizing a callout resizes its box only: the
+    leader line keeps pointing at the same spot."""
+    out = transformed(model, m)
+    if resize and model.is_callout:
+        out.vertices = callout_line(model.vertices[0], out.rect)
+    return out
 
 
 class SelectTool(Tool):
@@ -170,7 +184,8 @@ class SelectTool(Tool):
             return
         label = "Resize Comment" if handle is not None else "Move Comment"
         commands: list[Command] = [
-            UpdateAnnotationCommand(a, transformed(a, m), label) for a in models
+            UpdateAnnotationCommand(a, _reshaped(a, m, resize=handle is not None), label)
+            for a in models
         ]
         view.session.execute(commands[0] if len(commands) == 1 else MacroCommand(label, commands))
 

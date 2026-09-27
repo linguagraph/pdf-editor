@@ -13,7 +13,12 @@ import pymupdf
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
 from pdfeditor.engine.mupdf import annots, content, ocr, pages
 from pdfeditor.engine.mupdf import convert as cv
-from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
+from pdfeditor.model.annotations import (
+    STANDARD_STAMPS,
+    AnnotationModel,
+    AnnotationType,
+    ReviewState,
+)
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
@@ -353,9 +358,20 @@ class MuPage:
             except ValueError:
                 state = ReviewState.NONE
         ends = annot.line_ends or (0, 0)
+        line_endings = (_line_end_name(ends[0]), _line_end_name(ends[1]))
+        rect = annot.rect
         text_color = None
         if atype is AnnotationType.FREE_TEXT:
             text_color = _freetext_color(self._doc.fz.xref_get_key(annot.xref, "DA")[1])
+            box = annots.callout_box(self._doc.fz, annot)
+            if box is not None and len(vertices) >= 2:
+                rect = box
+                line_endings = (annots.callout_ending(self._doc.fz, annot.xref), "None")
+            else:
+                vertices = []
+        image = None
+        if atype is AnnotationType.STAMP and info.get("name", "") not in STANDARD_STAMPS:
+            image = annots.stamp_image(self._doc.fz, annot.xref)
         file_name, file_data = "", None
         if atype is AnnotationType.FILE_ATTACHMENT:
             try:
@@ -366,7 +382,7 @@ class MuPage:
         return AnnotationModel(
             type=atype,
             page_index=self._index,
-            rect=self._vrect(annot.rect, m),
+            rect=self._vrect(rect, m),
             id=annot.xref,
             name=info.get("id", ""),
             contents=info.get("content", ""),
@@ -384,7 +400,7 @@ class MuPage:
             quads=quads,
             ink=ink,
             vertices=tuple(vertices),
-            line_endings=(_line_end_name(ends[0]), _line_end_name(ends[1])),
+            line_endings=line_endings,
             text_color=text_color,
             icon=info.get("name", ""),
             in_reply_to=annot.irt_xref or None,
@@ -396,6 +412,7 @@ class MuPage:
             overlay_text=_overlay_text(self._doc.fz, annot.xref)
             if atype is AnnotationType.REDACT
             else "",
+            image=image,
         )
 
 

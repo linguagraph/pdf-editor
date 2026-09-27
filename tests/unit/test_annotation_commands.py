@@ -126,3 +126,55 @@ def test_file_attachment_delete_undo_restores_file(session: DocumentSession) -> 
     session.undo()
     restored = session.document.page(0).annotations()[0]
     assert restored.file_data == b"payload" and restored.file_name == "x.txt"
+
+
+def _png() -> bytes:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGBA", (60, 30), (200, 0, 0, 255)).save(out, "PNG")
+    return out.getvalue()
+
+
+def test_delete_undo_recreates_image_stamp_and_callout(session: DocumentSession) -> None:
+    from pdfeditor.model.annotations import callout_line
+    from pdfeditor.model.geometry import Point
+
+    box = Rect(300, 300, 450, 340)
+    stamp = AnnotationModel(AnnotationType.STAMP, 0, Rect(100, 400, 220, 460), image=_png())
+    callout = AnnotationModel(
+        AnnotationType.FREE_TEXT,
+        0,
+        box,
+        contents="Callout",
+        text_color=RED,
+        vertices=callout_line(Point(120, 200), box),
+        line_endings=("OpenArrow", "None"),
+    )
+    session.execute(AddAnnotationCommand(stamp))
+    session.execute(AddAnnotationCommand(callout))
+    before = {a.name: a for a in session.document.page(0).annotations()}
+    session.execute(DeleteAnnotationsCommand(0, list(before)))
+    assert session.document.page(0).annotations() == []
+    session.undo()
+    after = {a.name: a for a in session.document.page(0).annotations()}
+    assert set(after) == set(before)
+    restored_stamp = next(a for a in after.values() if a.type is AnnotationType.STAMP)
+    assert restored_stamp.image is not None
+    assert restored_stamp.rect.x0 == pytest.approx(100, abs=1)
+    restored_callout = next(a for a in after.values() if a.type is AnnotationType.FREE_TEXT)
+    assert restored_callout.is_callout
+    assert restored_callout.vertices[0].x == pytest.approx(120, abs=1)
+    assert restored_callout.rect.x0 == pytest.approx(300, abs=1)
+    # moving the callout is one undoable step that restores the old geometry
+    moved = copy.deepcopy(restored_callout)
+    moved.rect = moved.rect.translated(0, 100)
+    moved.vertices = tuple(p + Point(0, 100) for p in moved.vertices)
+    session.execute(UpdateAnnotationCommand(restored_callout, moved))
+    session.undo()
+    again = next(
+        a for a in session.document.page(0).annotations() if a.name == restored_callout.name
+    )
+    assert again.vertices[0].y == pytest.approx(200, abs=1)

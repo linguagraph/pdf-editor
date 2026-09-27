@@ -7,7 +7,12 @@ import pytest
 
 from pdfeditor.core.commands import AddAnnotationCommand
 from pdfeditor.core.session import DocumentSession
-from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
+from pdfeditor.model.annotations import (
+    AnnotationModel,
+    AnnotationType,
+    ReviewState,
+    callout_line,
+)
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Point, Quad, Rect
 from pdfeditor.services.comments import comment_threads, summary_csv, summary_html
@@ -156,3 +161,33 @@ def test_threads_and_summaries(session: DocumentSession) -> None:
     assert "Agreed" in csv_text and "Rectangle" in csv_text
     html_text = summary_html(threads, "doc.pdf")
     assert "Comments summary: doc.pdf" in html_text and "Page 2" in html_text
+
+
+def test_xfdf_callout_roundtrip(session: DocumentSession, fixture_pdf, tmp_path: Path) -> None:
+    box = Rect(250, 200, 420, 250)
+    session.execute(
+        AddAnnotationCommand(
+            AnnotationModel(
+                AnnotationType.FREE_TEXT,
+                1,
+                box,
+                contents="See this",
+                color=Color(1, 0, 0),
+                text_color=Color(1, 0, 0),
+                vertices=callout_line(Point(90, 120), box),
+                line_endings=("OpenArrow", "None"),
+            )
+        )
+    )
+    xml = export_xfdf(session.document)
+    assert "callout=" in xml
+    fresh_path = tmp_path / "fresh.pdf"
+    shutil.copy2(fixture_pdf("rotated_pages"), fresh_path)
+    fresh = DocumentSession.open(fresh_path)
+    fresh.execute(import_command(xml, fresh.document))
+    (callout,) = fresh.document.page(1).annotations()
+    assert callout.is_callout and callout.line_endings[0] == "OpenArrow"
+    assert callout.vertices[0].x == pytest.approx(90, abs=1.5)
+    assert callout.vertices[0].y == pytest.approx(120, abs=1.5)
+    assert callout.rect.x0 == pytest.approx(250, abs=1.5)
+    fresh.close()

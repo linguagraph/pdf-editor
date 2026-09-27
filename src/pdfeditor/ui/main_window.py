@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import functools
 import logging
-import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -90,6 +89,7 @@ from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
+from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.theme import Theme, apply_theme
 from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
@@ -110,6 +110,7 @@ COMMENT_TOOLS = (
     ("squiggly", "S&quiggly", None),
     ("note", "Sticky &Note", "SP_MessageBoxInformation"),
     ("textbox", "Te&xt Box", None),
+    ("callout", "&Callout", None),
     ("stamp", "Sta&mp", None),
     ("attach", "Attach &File", "SP_FileLinkIcon"),
     ("rectangle", "&Rectangle", None),
@@ -129,10 +130,6 @@ MARKUP_TOOLS = {
     "strikeout": AnnotationType.STRIKEOUT,
     "squiggly": AnnotationType.SQUIGGLY,
 }
-
-
-def _split_camel(name: str) -> str:
-    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
 
 
 def annotate_transform(model: AnnotationModel, m: Matrix) -> AnnotationModel:
@@ -467,10 +464,7 @@ class MainWindow(QMainWindow):
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
         self.stamp_name = STANDARD_STAMPS[0]
-        self.stamp_menu = QMenu("Stamp", self)
-        for stamp in STANDARD_STAMPS:
-            choose = functools.partial(self.choose_stamp, stamp)
-            self.stamp_menu.addAction(_split_camel(stamp), choose)
+        self.stamp_menu = StampMenu(self, self.choose_stamp, self.prefs)
         self.tool_actions["stamp"].setMenu(self.stamp_menu)
         self.current_tool = self.prefs.default_tool
         self.tool_actions[self.current_tool].setChecked(True)
@@ -693,7 +687,9 @@ class MainWindow(QMainWindow):
         comment.add_group(
             *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
         )
-        comment.add_group(*(self.tool_actions[n] for n in ("note", "textbox", "stamp", "attach")))
+        comment.add_group(
+            *(self.tool_actions[n] for n in ("note", "textbox", "callout", "stamp", "attach"))
+        )
         comment.add_group(
             *(
                 self.tool_actions[n]
