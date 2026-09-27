@@ -8,7 +8,6 @@ and page breaks. Headings are recognized by font size relative to the body text.
 from __future__ import annotations
 
 import io
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -16,12 +15,11 @@ from PIL import Image
 
 from pdfeditor.core.jobs import CancelToken, ProgressFn, no_progress
 from pdfeditor.engine.base import ColorMode, Document, RenderRequest
+from pdfeditor.engine.textlayout import body_size, heading_levels
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Rect
 from pdfeditor.model.text import Block, FontFlags, Span, TableData
 
-HEADING_RATIO = 1.15  # a block this much larger than body text is a heading
-MAX_HEADING_LEVEL = 3
 MIN_PICTURE_PT = 8.0
 
 
@@ -135,29 +133,6 @@ def paragraph_runs(block: Block) -> list[Run]:
         runs[0].text = runs[0].text.lstrip()
         runs[-1].text = runs[-1].text.rstrip()
     return [r for r in runs if r.text]
-
-
-def body_size(blocks: Sequence[Block]) -> float:
-    """The most common text size, weighted by characters."""
-    sizes: Counter[float] = Counter()
-    for b in blocks:
-        for line in b.lines:
-            for s in line.spans:
-                sizes[round(s.size * 2) / 2] += len(s.text.strip())
-    return sizes.most_common(1)[0][0] if sizes else 11.0
-
-
-def heading_levels(blocks: Sequence[Block], body: float) -> dict[float, int]:
-    larger = sorted(
-        {
-            round(max(s.size for ln in b.lines for s in ln.spans) * 2) / 2
-            for b in blocks
-            if b.lines and any(ln.spans for ln in b.lines)
-        },
-        reverse=True,
-    )
-    levels = [s for s in larger if s >= body * HEADING_RATIO]
-    return {size: min(i + 1, MAX_HEADING_LEVEL) for i, size in enumerate(levels)}
 
 
 def _inside(block: Block, areas: Sequence[Rect]) -> bool:

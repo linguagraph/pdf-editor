@@ -181,13 +181,45 @@ def test_print_auto_rotates_landscape_pages(qtbot, make_view, tmp_path: Path) ->
     out = tmp_path / "rotated.pdf"
     # page 2 is displayed landscape (/Rotate 90) and gets turned to fit portrait paper
     print_pages(view.session, pdf_printer(str(out)), PrintOptions(pages=(1,), auto_rotate=True))
-    doc = pymupdf.open(out)
-    page = doc[0]
-    images = page.get_images(full=True)
-    assert images
-    bbox = page.get_image_bbox(images[0])
-    assert bbox.height > bbox.width  # rotated to portrait
-    doc.close()
+    raster = tmp_path / "rotated-raster.pdf"
+    print_pages(
+        view.session,
+        pdf_printer(str(raster)),
+        PrintOptions(pages=(1,), auto_rotate=True, as_image=True),
+    )
+    vector_page, raster_page = pymupdf.open(out)[0], pymupdf.open(raster)[0]
+    assert not vector_page.get_images(full=True) and vector_page.get_drawings()  # vectors
+    (image,) = raster_page.get_images(full=True)
+    bbox = raster_page.get_image_bbox(image)
+    assert bbox.height > bbox.width  # the landscape page turned to fit portrait paper
+    # both paths put the page on paper the same way
+    a = vector_page.get_pixmap(dpi=40)
+    b = raster_page.get_pixmap(dpi=40)
+    differing = sum(1 for x, y in zip(a.samples, b.samples, strict=True) if abs(x - y) > 80)
+    assert differing < a.width * a.height * 0.01
+
+
+def test_vector_print_matches_screen(qtbot, make_view, tmp_path: Path) -> None:
+    import pymupdf
+
+    from pdfeditor.ui.printing import qt_friendly_svg
+
+    view = make_view("text_multipage")
+    out = tmp_path / "vector.pdf"
+    printer = pdf_printer(str(out))
+    print_pages(view.session, printer, PrintOptions(pages=(0,), scaling=Scaling.ACTUAL))
+    printed = pymupdf.open(out)[0]
+    assert not printed.get_images(full=True)
+    with view.session.lock:
+        svg = view.session.document.page(0).to_svg()
+    fixed = qt_friendly_svg(svg)
+    assert "font_" in svg and fixed != svg  # glyph outlines were enlarged for QtSvg
+    assert fixed.count("<use") == svg.count("<use")  # same glyphs, only rescaled
+    src = pymupdf.open(view.session.path)[0]
+    a, b = src.get_pixmap(dpi=50), printed.get_pixmap(dpi=50)
+    assert (a.width, a.height) == (b.width, b.height)
+    differing = sum(1 for x, y in zip(a.samples, b.samples, strict=True) if abs(x - y) > 80)
+    assert differing < len(a.samples) * 0.01  # glyphs drawn right (QtSvg workaround)
 
 
 def test_print_dialog_options(

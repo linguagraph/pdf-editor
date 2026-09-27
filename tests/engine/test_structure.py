@@ -46,6 +46,26 @@ def test_read_tree(engine: Engine, fixture_pdf) -> None:
     doc.close()
 
 
+def test_indirect_values_are_read(engine: Engine, fixture_pdf, tmp_path: Path) -> None:
+    """Real files (e.g. IRS forms) store /Lang, /DisplayDocTitle and /Alt as indirect objects."""
+    if not engine.capabilities.structure:
+        pytest.skip("no structure support")
+    path = tmp_path / "indirect.pdf"
+    with pikepdf.open(fixture_pdf("tagged")) as pdf:
+        pdf.Root.Lang = pdf.make_indirect(pikepdf.String("de-DE"))
+        pdf.Root.ViewerPreferences = pikepdf.Dictionary(
+            DisplayDocTitle=pdf.make_indirect(pikepdf.Object.parse(b"true"))
+        )
+        pdf.Root.StructTreeRoot.K.K[3].Alt = pdf.make_indirect(pikepdf.String("A chart"))
+        pdf.save(path)
+    doc = engine.open(path)
+    settings = doc.accessibility_settings()
+    assert settings.language == "de-DE" and settings.display_doc_title
+    (root,) = doc.structure_tree()
+    assert root.children[3].alt == "A chart"
+    doc.close()
+
+
 def test_edit_tags_round_trip(engine: Engine, fixture_pdf, tmp_path: Path) -> None:
     doc = engine.open(fixture_pdf("tagged"))
     (root,) = doc.structure_tree()

@@ -192,17 +192,35 @@ def large_doc(pages: int = 1000) -> None:
     _save(doc, "large_1000.pdf")
 
 
-def scanned() -> None:
-    """Image-only page (no text layer), like a scanner produces; used by OCR tests."""
+SKEW_DEGREES = 4.0  # skewed_scan: counterclockwise as displayed, about the page center
+
+
+def _scan_png() -> bytes:
     src = pymupdf.open()
     page = src.new_page(width=A4.width, height=A4.height)
     page.insert_text((72, 100), "Scanned document text", fontsize=24)
     page.insert_textbox(pymupdf.Rect(72, 140, A4.width - 72, 400), LOREM, fontsize=14)
-    png = page.get_pixmap(dpi=200, colorspace=pymupdf.csGRAY).tobytes("png")
+    png: bytes = page.get_pixmap(dpi=200, colorspace=pymupdf.csGRAY).tobytes("png")
     src.close()
+    return png
+
+
+def scanned() -> None:
+    """Image-only page (no text layer), like a scanner produces; used by OCR tests."""
     doc = pymupdf.open()
-    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=png)
+    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=_scan_png())
     _save(doc, "scanned.pdf")
+
+
+def skewed_scan() -> None:
+    """The ``scanned`` page fed into the scanner crooked (SKEW_DEGREES); deskew tests."""
+    img = Image.open(io.BytesIO(_scan_png()))
+    img = img.rotate(SKEW_DEGREES, resample=Image.Resampling.BICUBIC, fillcolor=255)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    doc = pymupdf.open()
+    doc.new_page(width=A4.width, height=A4.height).insert_image(A4, stream=buf.getvalue())
+    _save(doc, "skewed_scan.pdf")
 
 
 def broken_xref() -> None:
@@ -515,7 +533,34 @@ def tagged() -> None:
     _save(doc, "tagged.pdf")
 
 
+def letter_spacing() -> None:
+    """Text set with character spacing (Tc) and word spacing (Tw), written directly into the
+    content stream: a tracked heading (wide enough that extraction invents spaces between its
+    letters), a spaced single line, a spaced paragraph and a centered spaced line."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((72, 72), "x", fontname="helv", fontsize=1)  # creates the font resource
+    font = page.get_fonts(full=True)[0][4]
+    h = A4.height
+    center = A4.width / 2
+    centered_width = pymupdf.get_text_length("Centered spaced line", "helv", 12) + 0.5 * 19 + 6
+    content = (
+        f"BT /{font} 18 Tf 2 Tc 72 {h - 80} Td (Tracked heading) Tj ET\n"
+        f"BT /{font} 12 Tf 0.6 Tc 4 Tw 72 {h - 140} Td (Spaced words in one line) Tj ET\n"
+        f"BT /{font} 11 Tf 0.4 Tc 2 Tw 14 TL 72 {h - 200} Td (A spaced paragraph with) Tj "
+        "T* (several lines of text that) Tj T* (all share the spacing.) Tj ET\n"
+        f"BT /{font} 12 Tf 0.5 Tc 3 Tw {center - centered_width / 2:.3f} {h - 320} Td "
+        "(Centered spaced line) Tj ET\n"
+    )
+    xref = doc.get_new_xref()
+    doc.update_object(xref, "<<>>")
+    doc.update_stream(xref, content.encode("latin-1"))
+    doc.xref_set_key(page.xref, "Contents", f"{xref} 0 R")
+    _save(doc, "letter_spacing.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "letter_spacing": letter_spacing,
     "tagged": tagged,
     "two_columns": two_columns,
     "heavy": heavy,
@@ -526,6 +571,7 @@ GENERATORS: dict[str, Callable[[], None]] = {
     "hidden_layers": hidden_layers,
     "off_page_text": off_page_text,
     "scanned": scanned,
+    "skewed_scan": skewed_scan,
     "broken_xref": broken_xref,
     "text_multipage": text_multipage,
     "images": images,

@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import html
 import io
+import logging
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pymupdf
@@ -28,9 +30,11 @@ from pdfeditor.engine.contentstream.objects import (
     wrap_ranges,
 )
 from pdfeditor.engine.contentstream.parser import ContentSyntaxError, Operation, parse, write
+from pdfeditor.engine.contentstream.spacing import LineSpacing, Spacing, apply_spacing
 from pdfeditor.engine.mupdf import annots
 from pdfeditor.engine.mupdf.flatten import flatten_inserted_forms
 from pdfeditor.engine.textlayout import editable_blocks
+from pdfeditor.engine.textspacing import detect_spacing, spaced_text
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Rect
 from pdfeditor.model.objects import (
@@ -47,6 +51,8 @@ from pdfeditor.model.text import Block
 
 if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.page import MuPage
+
+log = logging.getLogger(__name__)
 
 # Standard (base-14) font codes by family and (bold, italic)
 _STANDARD = {
@@ -135,8 +141,20 @@ def _block_style(block: Block) -> TextStyle:
     if len(lines) > 1 and size > 0:
         gaps = [lines[i + 1].bbox.y1 - lines[i].bbox.y1 for i in range(len(lines) - 1)]
         line_height = max(0.8, min(3.0, (sum(gaps) / len(gaps)) / size))
+    align = _alignment(block)
+    char_spacing, word_spacing = detect_spacing(block)
+    if align is Align.JUSTIFY:
+        word_spacing = 0.0  # justification sets the word gaps
     return TextStyle(
-        _SUBSET.sub("", font), size, color, bold, italic, _alignment(block), round(line_height, 2)
+        _SUBSET.sub("", font),
+        size,
+        color,
+        bold,
+        italic,
+        align,
+        round(line_height, 2),
+        char_spacing,
+        word_spacing,
     )
 
 
@@ -177,10 +195,9 @@ def list_objects(page: MuPage) -> list[PageObject]:
             reason = "rotated or vertical text can't be edited yet"
         elif style.font in type3:
             reason = "text in Type3 fonts can't be edited"
+        text = spaced_text(block, style.char_spacing)
         out.append(
-            PageObject(
-                ObjectType.TEXT, f"text:{i}", block.bbox, block.text, style, not reason, reason
-            )
+            PageObject(ObjectType.TEXT, f"text:{i}", block.bbox, text, style, not reason, reason)
         )
     to_visible = _pdf_to_visible(page)
     sizes = {str(e[7]): (int(e[2]), int(e[3])) for e in page.fz.get_images(full=True)}
@@ -333,11 +350,24 @@ def insert_text(
     no line wraps: a one-line label stays one line after it gets longer.
     """
     buffer, choice = font or _font_for(page, style, text, reuse_embedded)
-    rect = _widen(page, rect, text, style, buffer, keep_lines)
+    spaced = _Spaced(buffer, style) if style.char_spacing or style.word_spacing else None
+    rect = _widen(page, rect, text, style, buffer, keep_lines, spaced)
     if baseline is not None:
         rect = _on_baseline(rect, baseline, style, buffer)
+    line_spacing: tuple[LineSpacing, ...] = ()
+    if spaced is not None:
+        # MuPDF's HTML layout ignores letter-/word-spacing: break the lines here, lay them out
+        # left-aligned in a box wide enough to never wrap, then space and align them (below)
+        lines = spaced.wrap(text, rect.width, keep_lines)
+        line_spacing = spaced.line_spacing(lines, rect.width)
+        style = replace(style, align=Align.LEFT)
+        need = max((spaced.nominal(t) for t, _soft in lines), default=0.0) * 1.03 + 2
+        right = min(max(rect.x1, rect.x0 + need), page.fz.rect.width)
+        rect = Rect(rect.x0, rect.y0, right, rect.y1)
+        body = "<br>".join(html.escape(t) for t, _soft in lines)
+    else:
+        body = "<br>".join(html.escape(line) for line in text.split("\n"))
     archive, css = _html_setup(buffer, style)
-    body = "<br>".join(html.escape(line) for line in text.split("\n"))
     fz = page.fz
     page_bottom = fz.rect.height
     height = max(rect.height, style.size * style.line_height)
@@ -357,17 +387,112 @@ def insert_text(
     # insert_htmlbox always draws through a Form XObject; inline it so content_objects() doesn't
     # report a spurious empty "form" sitting on top of the text we just placed.
     flatten_inserted_forms(fz, before_contents)
+    if spaced is not None:
+        spaced.apply(page, before_contents, line_spacing)
     page._doc.mark_page_changed(page.index)
     return choice
 
 
+class _Spaced:
+    """Measuring, line breaking and post-layout spacing for text with character/word spacing
+    (PDF ``Tc``/``Tw``), which MuPDF's HTML layout can't do itself."""
+
+    def __init__(self, buffer: bytes, style: TextStyle) -> None:
+        self.font = pymupdf.Font(fontbuffer=buffer)
+        self.style = style
+
+    def nominal(self, text: str) -> float:
+        return float(self.font.text_length(text, fontsize=self.style.size))
+
+    def width(self, text: str) -> float:
+        """Visible width of one line once spaced (the last glyph's spacing is blank)."""
+        text = text.rstrip()
+        s = self.style
+        extra = s.char_spacing * max(0, len(text) - 1) + s.word_spacing * text.count(" ")
+        return self.nominal(text) + extra
+
+    def wrap(self, text: str, width: float, keep_lines: bool) -> list[tuple[str, bool]]:
+        """Lines as ``(text, soft)``: ``soft`` when the line was wrapped (not ended by the
+        user), which is what justification stretches."""
+        out: list[tuple[str, bool]] = []
+        for para in text.split("\n"):
+            if keep_lines:
+                out.append((para, False))
+                continue
+            words = para.split(" ")
+            line = words[0]
+            for word in words[1:]:
+                candidate = f"{line} {word}"
+                if not line.strip() or self.width(candidate) <= width + _WRAP_TOLERANCE:
+                    line = candidate
+                else:
+                    out.append((line, True))
+                    line = word
+            out.append((line, False))
+        return out
+
+    def line_spacing(self, lines: list[tuple[str, bool]], width: float) -> tuple[LineSpacing, ...]:
+        """Shift/fill for each line that will be drawn (blank lines draw nothing)."""
+        align = self.style.align
+        out: list[LineSpacing] = []
+        for text, soft in lines:
+            if not text.strip():
+                continue
+            slack = width - self.width(text)
+            spaces = text.rstrip().count(" ")
+            if align is Align.CENTER:
+                out.append(LineSpacing(shift=slack / 2))
+            elif align is Align.RIGHT:
+                out.append(LineSpacing(shift=slack))
+            elif align is Align.JUSTIFY and soft and spaces:
+                out.append(LineSpacing(fill=slack / spaces))
+            else:
+                out.append(LineSpacing())
+        return tuple(out)
+
+    def apply(
+        self, page: MuPage, before_contents: set[int], lines: tuple[LineSpacing, ...]
+    ) -> None:
+        """Space the text just inserted (the content streams added since ``before_contents``)."""
+        gid = self.font.has_glyph(32)
+        spacing = Spacing(
+            self.style.char_spacing,
+            self.style.word_spacing,
+            gid.to_bytes(2, "big") if gid else None,
+            lines,
+        )
+        doc = page._doc.fz
+        for xref in page.fz.get_contents():
+            if xref in before_contents:
+                continue
+            try:
+                ops = parse(doc.xref_stream(xref) or b"")
+            except ContentSyntaxError:
+                log.debug("inserted text not spaced: unreadable content stream", exc_info=True)
+                continue
+            doc.update_stream(xref, write(apply_spacing(ops, spacing)))
+
+
+_WRAP_TOLERANCE = 0.5  # points: a line as wide as the original box must still fit
+
+
 def _widen(
-    page: MuPage, rect: Rect, text: str, style: TextStyle, buffer: bytes, keep_lines: bool
+    page: MuPage,
+    rect: Rect,
+    text: str,
+    style: TextStyle,
+    buffer: bytes,
+    keep_lines: bool,
+    spaced: _Spaced | None = None,
 ) -> Rect:
-    font = pymupdf.Font(fontbuffer=buffer)
     pieces = text.splitlines() if keep_lines else text.split()
-    need = max((font.text_length(p, fontsize=style.size) for p in pieces), default=0.0)
-    need = need * 1.03 + 2  # rounding in the HTML layout
+    if spaced is not None:
+        # exact: the spaced path breaks lines itself, so no slack for HTML rounding is needed
+        need = max((spaced.width(p) for p in pieces), default=0.0) - _WRAP_TOLERANCE
+    else:
+        font = pymupdf.Font(fontbuffer=buffer)
+        need = max((font.text_length(p, fontsize=style.size) for p in pieces), default=0.0)
+        need = need * 1.03 + 2  # rounding in the HTML layout
     if need <= rect.width:
         return rect
     right = max(rect.x1, min(page.fz.rect.width - 2, rect.x0 + need))
@@ -500,7 +625,7 @@ def transform_objects(page: MuPage, keys: Sequence[str], visible: Matrix) -> Non
             raise UnsupportedFeature(text_styles[key].reason)
     # resolve fonts before removing anything (removal can drop now-unused fonts)
     fonts = {
-        key: _font_for(page, text_styles[key].style or TextStyle(), block.text)
+        key: _font_for(page, text_styles[key].style or TextStyle(), text_styles[key].text)
         for key, block in texts
     }
     if texts:
@@ -509,7 +634,7 @@ def transform_objects(page: MuPage, keys: Sequence[str], visible: Matrix) -> Non
         insert_text(
             page,
             block.bbox.transform(visible),
-            block.text,
+            text_styles[key].text,
             text_styles[key].style or TextStyle(),
             keep_lines=len(block.lines) == 1,
             font=fonts[key],

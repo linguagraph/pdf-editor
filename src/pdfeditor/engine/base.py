@@ -74,6 +74,7 @@ class Capabilities:
     export: bool = False  # tables, image areas, image/font extraction
     encrypt: bool = False
     structure: bool = False  # read/edit tags and accessibility settings
+    auto_tag: bool = False  # tag untagged documents from layout analysis (experimental)
     optimize: bool = False
 
 
@@ -169,6 +170,11 @@ class Page(Protocol):
         """
         ...
 
+    def to_svg(self) -> str:
+        """The page (with annotations) as SVG in visible space, text as outlines: a vector
+        form for printing."""
+        ...
+
     def render(self, request: RenderRequest) -> RenderResult: ...
 
     def text_page(self, with_chars: bool = True) -> TextPage: ...
@@ -261,9 +267,16 @@ class Page(Protocol):
 
     # Optional (``capabilities.ocr``). Two steps so recognition can run in a background job.
     def ocr_text_layer(
-        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+        self,
+        language: str,
+        dpi: int,
+        tessdata: Path,
+        preprocess: bool = False,
+        deskew: bool = False,
     ) -> bytes:
-        """Recognize the page and return an invisible-text layer (read-only; slow)."""
+        """Recognize the page and return an invisible-text layer (read-only; slow).
+        ``deskew`` straightens the image for recognition only; the layer still lines up with
+        the page as scanned."""
         ...
 
     def add_text_layer(self, layer: bytes) -> None:
@@ -334,6 +347,14 @@ class Document(Protocol):
 
     def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
         """Put the element children of ``parent`` (None: the root) in the given order."""
+        ...
+
+    # Optional (``capabilities.auto_tag``). Experimental.
+    def auto_tag(self) -> dict[str, int]:
+        """Tag an untagged document: wrap each paragraph and image in marked content and build
+        a structure tree (Document -> H1..H3 / P / Figure, in reading order) with a ParentTree.
+        Returns the number of elements created per type. Raises :class:`EngineError` if the
+        document is already tagged or has nothing to tag."""
         ...
 
     def accessibility_settings(self) -> AccessibilitySettings: ...

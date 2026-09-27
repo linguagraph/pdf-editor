@@ -30,6 +30,7 @@ dev = [
     "mypy>=1.8",
     "import-linter>=2.0",
     "pre-commit>=3.6",
+    "pyhanko>=0.25",  # scripts/make_signed_sample.py; signature checks in tests
 ]
 
 [project.scripts]
@@ -42,6 +43,7 @@ packages = ["src/pdfeditor"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = [".claude"]  # agent worktrees live here
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
@@ -110,5 +112,6 @@ source_modules = [
     "pdfeditor.engine.base",
     "pdfeditor.engine.registry",
     "pdfeditor.engine.contentstream",
+    "pdfeditor.engine.deskew",
 ]
 forbidden_modules = ["fitz", "pymupdf"]

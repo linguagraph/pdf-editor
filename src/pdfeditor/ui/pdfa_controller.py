@@ -1,4 +1,5 @@
-"""Tools ▸ PDF/A: preflight the open document and save a PDF/A-2b copy."""
+"""Tools ▸ PDF/A and accessibility: preflight the open document, save a PDF/A-2b copy, run the
+accessibility check and (experimental) auto-tag an untagged document."""
 
 from __future__ import annotations
 
@@ -6,8 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
+from pdfeditor.core.commands import SnapshotCommand
+from pdfeditor.core.commands.snapshot import SNAPSHOT_OPTIONS
 from pdfeditor.engine.base import SaveOptions
 from pdfeditor.model.metadata import EncryptionMethod
 from pdfeditor.services.pdfa import (
@@ -40,13 +43,24 @@ class PdfaController:
         self.act_preflight = act("PDF/A &Preflight…", self.preflight)
         self.act_save_pdfa = act("Save as PDF/&A…", self.save_as_pdfa)
         self.act_accessibility = act("Accessibility &Check", window.accessibility_check)
+        self.act_auto_tag = act("Auto-&Tag Document (experimental)", self.auto_tag)
+        self.act_auto_tag.setIconText("Auto-Tag")
+        self.act_auto_tag.setToolTip(
+            "Add tags (headings, paragraphs, figures) to an untagged document from its layout"
+        )
+        self.act_auto_tag.setVisible(window.engine().capabilities.auto_tag)
         self.last_message = ""
         self.dialog: PdfaReportDialog | None = None
 
     def ribbon(self) -> None:
         self.w.ribbon.tab("Tools").add_group(
-            self.act_preflight, self.act_save_pdfa, self.act_accessibility
+            self.act_preflight, self.act_save_pdfa, self.act_accessibility, self.act_auto_tag
         )
+        # the Tools menu is built before the ribbon; list auto-tag next to the accessibility check
+        for menu_action in self.w.menuBar().actions():
+            menu = menu_action.menu()
+            if isinstance(menu, QMenu) and self.act_accessibility in menu.actions():
+                menu.addAction(self.act_auto_tag)
 
     def _session(self) -> DocumentSession | None:
         view = self.w.current_view()
@@ -175,3 +189,47 @@ class PdfaController:
             )
             self.dialog.show()
         return result
+
+    def auto_tag(self) -> dict[str, int] | None:
+        """Tag an untagged document (undoable). The tagging runs on a copy in a background job;
+        the result then replaces the document through a snapshot command."""
+        session = self._session()
+        if session is None:
+            return None
+        title = "Auto-Tag Document"
+        with session.lock:
+            tagged = session.document.info().is_tagged
+        if tagged:
+            self.last_message = (
+                "The document is already tagged. Auto-tagging only works on untagged documents; "
+                "edit the existing tags in the Tags panel instead."
+            )
+            QMessageBox.information(self.w, title, self.last_message)
+            return None
+        doc, lock = session.document, session.lock
+
+        def work(_job: Job) -> tuple[bytes, dict[str, int]]:
+            with lock:
+                copy = doc.copy()
+                try:
+                    counts = copy.auto_tag()
+                    return copy.to_bytes(SNAPSHOT_OPTIONS), counts
+                finally:
+                    copy.close()
+
+        try:
+            outcome = run_modal(self.w, "Tagging the document…", work)
+        except RuntimeError as exc:
+            self.last_message = f"Auto-tagging failed:\n\n{exc}"
+            QMessageBox.warning(self.w, title, self.last_message)
+            return None
+        if not isinstance(outcome, tuple):
+            return None  # cancelled
+        data, counts = outcome
+        session.execute(SnapshotCommand(title, lambda d: d.load_state(data), session.snapshots))
+        summary = ", ".join(f"{n} {tag}" for tag, n in sorted(counts.items()))
+        self.last_message = (
+            f"Tagged the document: {summary}. Review the tags and give figures alternate text."
+        )
+        self.w.statusBar().showMessage(self.last_message, 10000)
+        return counts

@@ -32,6 +32,9 @@ class TextStyle:
     italic: bool = False
     align: Align = Align.LEFT
     line_height: float = 1.2  # multiple of the font size
+    # extra space after every glyph / after every word space, in points (PDF Tc / Tw)
+    char_spacing: float = 0.0
+    word_spacing: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

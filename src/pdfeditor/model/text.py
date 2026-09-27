@@ -22,6 +22,7 @@ class Char:
     c: str
     bbox: Rect
     origin: Point
+    synthetic: bool = False  # a space the extractor inserted for a gap (not in the content)
 
 
 @dataclass(frozen=True, slots=True)
