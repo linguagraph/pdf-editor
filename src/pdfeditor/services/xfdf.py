@@ -153,6 +153,9 @@ def _geometry_out(el: ET.Element, a: AnnotationModel, m: Matrix) -> None:
         el.set("tail", a.line_endings[1])
     elif a.type in (AnnotationType.POLYGON, AnnotationType.POLYLINE):
         ET.SubElement(el, "vertices").text = _pdf_points(a.vertices, m, ";")
+    elif a.is_callout:  # XFDF 'callout': the leader line, tip first
+        el.set("callout", _pdf_points(a.vertices, m))
+        el.set("head", a.line_endings[0])
     elif a.type is AnnotationType.INK:
         inklist = ET.SubElement(el, "inklist")
         for stroke in a.ink:
@@ -253,6 +256,9 @@ def _geometry_in(el: ET.Element, model: AnnotationModel, inverse: Matrix) -> Non
         end = _pairs(el.get("end", "0,0"))[0].transform(inverse)
         model.vertices = (start, end)
         model.line_endings = (el.get("head", "None"), el.get("tail", "None"))
+    elif model.type is AnnotationType.FREE_TEXT and el.get("callout"):
+        model.vertices = tuple(p.transform(inverse) for p in _pairs(el.get("callout", "")))
+        model.line_endings = (el.get("head", "None"), "None")
     elif model.type in (AnnotationType.POLYGON, AnnotationType.POLYLINE):
         vertices = find("vertices")
         if vertices is not None and vertices.text:

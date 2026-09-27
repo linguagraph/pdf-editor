@@ -91,7 +91,8 @@ class AnnotationModel:
     dashes: tuple[float, ...] = ()
     quads: tuple[Quad, ...] = ()  # text markup
     ink: tuple[tuple[Point, ...], ...] = ()  # ink strokes
-    vertices: tuple[Point, ...] = ()  # line (2 pts) / polygon / polyline
+    # line (2 pts) / polygon / polyline; FreeText callout line (tip first, ends at the box)
+    vertices: tuple[Point, ...] = ()
     line_endings: tuple[str, str] = ("None", "None")
     font_size: float = 11.0
     text_color: Color | None = None  # FreeText
@@ -103,11 +104,17 @@ class AnnotationModel:
     file_name: str = ""  # FileAttachment: attached file's name
     file_data: bytes | None = None  # FileAttachment: contents (only needed to create one)
     overlay_text: str = ""  # Redact: text shown in the box after the redaction is applied
+    image: bytes | None = None  # Stamp: PNG/JPEG drawn as a custom stamp's appearance
     extra: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_reply(self) -> bool:
         return self.in_reply_to is not None
+
+    @property
+    def is_callout(self) -> bool:
+        """A FreeText callout: ``rect`` is the text box, ``vertices`` the leader line."""
+        return self.type is AnnotationType.FREE_TEXT and len(self.vertices) >= 2
 
 
 # Standard stamp names (PDF 32000 12.5.6.12), in the order MuPDF numbers them.
@@ -129,6 +136,33 @@ STANDARD_STAMPS = (
 )
 
 NOTE_ICONS = ("Note", "Comment", "Key", "Help", "NewParagraph", "Paragraph", "Insert")
+
+# /Name MuPDF gives stamps whose appearance is an image.
+IMAGE_STAMP = "ImageStamp"
+
+CALLOUT_KNEE = 18.0  # length of the leader line's horizontal "landing" next to the box
+
+
+def callout_line(tip: Point, box: Rect) -> tuple[Point, ...]:
+    """Leader line from ``tip`` to ``box``, Acrobat style: it lands on the middle of the box's
+    side facing the tip with a short horizontal knee (or on the top/bottom middle when the tip
+    is straight above or below the box)."""
+    box = box.normalized()
+    mid_y = (box.y0 + box.y1) / 2
+    mid_x = (box.x0 + box.x1) / 2
+    if tip.x < box.x0 or tip.x > box.x1:
+        left = tip.x < box.x0
+        end = Point(box.x0 if left else box.x1, mid_y)
+        knee_x = end.x - CALLOUT_KNEE if left else end.x + CALLOUT_KNEE
+        if (tip.x < knee_x) == left:  # there is room for the knee
+            return (tip, Point(knee_x, mid_y), end)
+        return (tip, end)
+    if tip.y < box.y0:
+        return (tip, Point(mid_x, box.y0))
+    if tip.y > box.y1:
+        return (tip, Point(mid_x, box.y1))
+    return (tip, Point(box.x0, mid_y))  # tip inside the box: degenerate but valid
+
 
 # Annotation flags (PDF 32000 12.5.3)
 FLAG_HIDDEN = 2

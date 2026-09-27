@@ -95,3 +95,16 @@ class AppSettings:
     @cache_mb.setter
     def cache_mb(self, value: int) -> None:
         self.qs.setValue("prefs/cache_mb", int(value))
+
+    # comments
+    @property
+    def custom_stamps(self) -> list[str]:
+        """Custom stamp keys (file names in the stamp library), in menu order."""
+        value = self.qs.value("stamps/custom", [])
+        if isinstance(value, str):  # QSettings returns a one-item list as a plain string
+            return [value] if value else []
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+    @custom_stamps.setter
+    def custom_stamps(self, value: list[str]) -> None:
+        self.qs.setValue("stamps/custom", list(value))

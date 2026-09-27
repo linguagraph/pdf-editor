@@ -12,12 +12,18 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFileDialog, QGraphicsView, QInputDialog
+from PySide6.QtWidgets import QFileDialog, QGraphicsView, QInputDialog, QMessageBox
 
 from pdfeditor.core.commands import AddAnnotationCommand, Command, MacroCommand
-from pdfeditor.model.annotations import AnnotationModel, AnnotationType
+from pdfeditor.model.annotations import (
+    IMAGE_STAMP,
+    AnnotationModel,
+    AnnotationType,
+    callout_line,
+)
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Point, Quad, Rect, simplify
+from pdfeditor.services.custom_stamps import StampLibrary, image_size, stamp_rect
 from pdfeditor.services.text import TextPos, TextSelection
 from pdfeditor.ui.tools.base import Tool
 
@@ -51,6 +57,7 @@ STYLES: dict[AnnotationType, Style] = {
 }
 
 NOTE_SIZE = 20.0
+IMAGE_PREFIX = "image:"  # stamp names that refer to a custom image stamp
 MIN_DRAG = 3.0  # points; smaller drags count as clicks
 
 
@@ -397,11 +404,29 @@ class FreeTextTool(ShapeTool):
 
 
 class StampTool(AnnotationTool):
+    """Click to place a stamp: a standard one by name, or a custom image stamp
+    (``image:<key>`` names an image in the custom stamp library)."""
+
     kind = AnnotationType.STAMP
     label = "Stamp"
 
-    def __init__(self, stamp: str = "Approved") -> None:
+    def __init__(self, stamp: str = "Approved", library: StampLibrary | None = None) -> None:
         self.stamp = stamp
+        self.library = library
+
+    def image(self) -> tuple[bytes, tuple[int, int]] | None:
+        """The custom stamp's image and pixel size, or ``None`` for a standard stamp."""
+        if not self.stamp.startswith(IMAGE_PREFIX):
+            return None
+        stamp = (self.library or StampLibrary()).get(self.stamp[len(IMAGE_PREFIX) :])
+        if stamp is None:
+            return None
+        try:
+            data = stamp.read()
+        except OSError:
+            return None
+        size = image_size(data)
+        return (data, size) if size is not None else None
 
     def press(self, view: DocumentView, event: QMouseEvent) -> bool:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -410,16 +435,127 @@ class StampTool(AnnotationTool):
         if hit is None:
             return True
         page, p = hit
-        w, h = 160.0, 50.0
-        model = new_model(
-            view,
-            AnnotationType.STAMP,
-            page,
-            Rect(p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2),
-        )
-        model.icon = self.stamp
+        custom = self.image()
+        if self.stamp.startswith(IMAGE_PREFIX) and custom is None:
+            QMessageBox.warning(view, "Stamp", "The custom stamp's image can't be read.")
+            return True
+        if custom is not None:
+            data, size = custom
+            model = new_model(view, AnnotationType.STAMP, page, stamp_rect(p, size))
+            model.image = data
+            model.icon = IMAGE_STAMP
+            model.contents = self.stamp[len(IMAGE_PREFIX) :].rsplit(".", 1)[0]
+        else:
+            w, h = 160.0, 50.0
+            model = new_model(
+                view,
+                AnnotationType.STAMP,
+                page,
+                Rect(p.x - w / 2, p.y - h / 2, p.x + w / 2, p.y + h / 2),
+            )
+            model.icon = self.stamp
         commit(view, [model], "Add Stamp")
         return True
+
+
+class CalloutTool(AnnotationTool):
+    """Text box with a leader line: click the point to call out, drag out the box, then type.
+
+    Dragging straight from the point also works: the box goes where the drag ends.
+    """
+
+    kind = AnnotationType.FREE_TEXT
+    label = "Callout"
+
+    def __init__(self) -> None:
+        self._tip: tuple[int, Point] | None = None
+        self._box_start: Point | None = None
+        self._pressed_at: Point | None = None
+
+    def deactivate(self, view: DocumentView) -> None:
+        self._reset()
+        super().deactivate(view)
+
+    def _reset(self) -> None:
+        self._tip, self._box_start, self._pressed_at = None, None, None
+        self.busy = False
+
+    def press(self, view: DocumentView, event: QMouseEvent) -> bool:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        if self._tip is None:
+            hit = self.page_point(view, event)
+            if hit is not None:
+                self._tip, self._pressed_at = hit, hit[1]
+                self.busy = True
+                self._show(view, None)
+            return True
+        page = self._tip[0]
+        self._box_start = self.clamp_to_page(view, page, event)
+        return True
+
+    def move(self, view: DocumentView, event: QMouseEvent) -> bool:
+        if self._tip is None:
+            return False
+        page = self._tip[0]
+        now = self.clamp_to_page(view, page, event)
+        if self._box_start is not None:
+            self._show(view, Rect.from_points([self._box_start, now]))
+        elif self._pressed_at is not None:  # dragging from the tip
+            self._show(view, _default_box(self._tip[1], now))
+        return True
+
+    def release(self, view: DocumentView, event: QMouseEvent) -> bool:
+        if self._tip is None:
+            return False
+        page, tip = self._tip
+        end = self.clamp_to_page(view, page, event)
+        if self._box_start is None:
+            pressed, self._pressed_at = self._pressed_at, None
+            if pressed is None or _is_click(pressed, end):
+                return True  # the point is set; now drag out the box
+            box = _default_box(tip, end)
+        elif _is_click(self._box_start, end):
+            box = _default_box(tip, end)
+        else:
+            box = Rect.from_points([self._box_start, end])
+        self._reset()
+        view.set_annotation_preview({})
+        text = ask_text(view, "Callout")
+        if not text:
+            return True
+        model = new_model(view, AnnotationType.FREE_TEXT, page, box)
+        model.contents = text
+        model.color = Color(0, 0, 0)  # box border and leader line
+        model.text_color = Color(0, 0, 0)
+        model.font_size = 12
+        model.vertices = callout_line(tip, box)
+        model.line_endings = ("OpenArrow", "None")
+        commit(view, [model], "Add Callout")
+        return True
+
+    def _show(self, view: DocumentView, box: Rect | None) -> None:
+        if self._tip is None:
+            return
+        page, tip = self._tip
+        marker = Rect(tip.x - 2, tip.y - 2, tip.x + 2, tip.y + 2)
+        if box is None:
+            view.set_annotation_preview({page: [marker]})
+            return
+        line = callout_line(tip, box)
+        segments = [Rect.from_points([line[i], line[i + 1]]) for i in range(len(line) - 1)]
+        view.set_annotation_preview({page: [marker, box, *segments]})
+
+
+def _is_click(a: Point, b: Point) -> bool:
+    return abs(b.x - a.x) < MIN_DRAG and abs(b.y - a.y) < MIN_DRAG
+
+
+def _default_box(tip: Point, at: Point) -> Rect:
+    """A default-size box placed at ``at``, extending away from the tip."""
+    w, h = 180.0, 40.0
+    x0 = at.x if at.x >= tip.x else at.x - w
+    return Rect(x0, at.y - h / 2, x0 + w, at.y + h / 2)
 
 
 class AttachTool(AnnotationTool):
@@ -465,6 +601,7 @@ def tool_for(name: str) -> Tool | None:
         "pen": InkTool,
         "note": NoteTool,
         "textbox": FreeTextTool,
+        "callout": CalloutTool,
         "attach": AttachTool,
     }
     if name.startswith("stamp:"):
