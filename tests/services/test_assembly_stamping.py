@@ -174,3 +174,20 @@ def test_trimmed_rect(fixture_pdf) -> None:
     assert trimmed_rect(blank, 0) is None
     blank.close()
     doc.close()
+
+
+def test_size_split_is_log_linear_and_correct() -> None:
+    from pdfeditor.services.assembly import _groups_by_size
+
+    calls: list[int] = []
+
+    def size_of(group: list[int]) -> int:
+        calls.append(len(group))
+        return 1000 + 100 * len(group)  # fixed overhead + 100 bytes per page
+
+    groups = _groups_by_size(1000, 1000 + 100 * 37, size_of)
+    assert all(len(g) == 37 for g in groups[:-1]) and sum(map(len, groups)) == 1000
+    assert [g[0] for g in groups] == list(range(0, 1000, 37))
+    assert len(calls) < 400  # was ~1000 measurements with the linear scan
+    # a page bigger than the limit still ends up in a group of its own
+    assert _groups_by_size(3, 10, lambda g: 50 * len(g)) == [[0], [1], [2]]

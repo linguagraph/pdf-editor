@@ -134,20 +134,43 @@ def plan_split(
     elif mode is SplitMode.MAX_SIZE:
         if max_bytes <= 0 or size_of is None:
             raise ValueError("splitting by size needs a size limit")
-        group: list[int] = []
-        for page in range(count):
-            candidate = [*group, page]
-            if group and size_of(candidate) > max_bytes:
-                plan.groups.append(group)
-                group = [page]
-            else:
-                group = candidate
-        if group:
-            plan.groups.append(group)
+        plan.groups = _groups_by_size(count, max_bytes, size_of)
     if not plan.names:
         width = max(1, int(math.log10(max(1, len(plan.groups)))) + 1)
         plan.names = [f"part{i + 1:0{width}d}" for i in range(len(plan.groups))]
     return plan
+
+
+def _groups_by_size(
+    count: int, max_bytes: int, size_of: Callable[[list[int]], int]
+) -> list[list[int]]:
+    """Greedy groups of consecutive pages under ``max_bytes`` each.
+
+    Each group's end is found by doubling then binary search, so measuring (which writes a
+    temporary document) happens O(log n) times per group instead of once per page. A single
+    page larger than the limit still gets a group of its own.
+    """
+    groups: list[list[int]] = []
+    start = 0
+    while start < count:
+
+        def fits(end: int, start: int = start) -> bool:
+            return size_of(list(range(start, end))) <= max_bytes
+
+        good, step = start + 1, 1  # [start, good) is known to be acceptable
+        while good + step <= count and fits(good + step):
+            good += step
+            step *= 2
+        bad = min(count + 1, good + step)  # first end known (or assumed) to be too big
+        while bad - good > 1:
+            mid = (good + bad) // 2
+            if mid <= count and fits(mid):
+                good = mid
+            else:
+                bad = mid
+        groups.append(list(range(start, good)))
+        start = good
+    return groups
 
 
 def extract(engine: Engine, doc: Document, pages: Sequence[int]) -> Document:
