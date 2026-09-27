@@ -30,6 +30,7 @@ class MuPDFEngine:
         content_edit=True,
         redact=True,
         ocr=True,
+        export=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

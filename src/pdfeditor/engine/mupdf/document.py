@@ -31,6 +31,7 @@ from pdfeditor.model.metadata import (
     EmbeddedFile,
     EncryptionMethod,
     FontInfo,
+    ImageInfo,
     LayerInfo,
     Metadata,
     Permissions,
@@ -317,6 +318,42 @@ class MuDocument:
                     ref=xref,
                 )
         return list(seen.values())
+
+    def extract_font(self, ref: int) -> tuple[str, bytes]:
+        basename, ext, _type, buffer = self._fz.extract_font(ref)
+        if not buffer or ext in ("n/a", ""):
+            raise ValueError("this font is not embedded")
+        name = basename.split("+", 1)[-1] or f"font-{ref}"
+        return f"{name}.{ext}", bytes(buffer)
+
+    def images(self) -> list[ImageInfo]:
+        found: dict[int, tuple[tuple[int, int, str], list[int]]] = {}
+        for pno in range(self.page_count):
+            for xref, _smask, width, height, _bpc, colorspace, *_ in self._fz.get_page_images(pno):
+                if xref <= 0:
+                    continue
+                entry = found.setdefault(xref, ((int(width), int(height), str(colorspace)), []))
+                if pno not in entry[1]:
+                    entry[1].append(pno)
+        return [
+            ImageInfo(xref, w, h, cs, tuple(pages)) for xref, ((w, h, cs), pages) in found.items()
+        ]
+
+    def extract_image(self, ref: int) -> tuple[bytes, str]:
+        info = self._fz.extract_image(ref)
+        if not info:
+            raise ValueError(f"object {ref} is not an image")
+        smask = int(info.get("smask") or 0)
+        data, ext = bytes(info["image"]), str(info["ext"])
+        if smask or ext not in ("png", "jpeg", "jpg", "tiff", "bmp", "gif"):
+            # apply the soft mask / normalize unusual encodings (jbig2, ccitt, ...) to PNG
+            pix = pymupdf.Pixmap(self._fz, ref)
+            if pix.colorspace and pix.colorspace.n > 3:
+                pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+            if smask:
+                pix = pymupdf.Pixmap(pix, pymupdf.Pixmap(self._fz, smask))
+            data, ext = pix.tobytes("png"), "png"
+        return data, "jpeg" if ext == "jpg" else ext
 
     # -- saving -----------------------------------------------------------------------------
     def _save_kwargs(self, options: SaveOptions) -> dict[str, Any]:

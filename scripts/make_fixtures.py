@@ -286,7 +286,49 @@ def sensitive() -> None:
     doc.close()
 
 
+def report() -> None:
+    """Structured content for export: headings, paragraphs, a ruled table and an image."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((72, 80), "Quarterly Report", fontsize=24, fontname="hebo")
+    page.insert_text((72, 120), "Summary", fontsize=16, fontname="hebo")
+    page.insert_textbox(
+        pymupdf.Rect(72, 130, A4.width - 72, 200),
+        "Sales grew in every region. " + LOREM[:160],
+        fontsize=11,
+        fontname="helv",
+    )
+    page.insert_text((72, 230), "Figures", fontsize=16, fontname="hebo")
+    rows = [
+        ["Region", "Units", "Revenue"],
+        ["North", "120", "1,440.00"],
+        ["South", "95", "1,140.50"],
+        ["West", "210", "2,520.75"],
+    ]
+    x0, y0, cw, rh = 72, 245, 140, 22
+    for i, row in enumerate(rows):
+        for j, cell in enumerate(row):
+            font = "hebo" if i == 0 else "helv"
+            page.insert_text((x0 + j * cw + 5, y0 + i * rh + 15), cell, fontsize=11, fontname=font)
+    for i in range(len(rows) + 1):
+        page.draw_line((x0, y0 + i * rh), (x0 + 3 * cw, y0 + i * rh))
+    for j in range(4):
+        page.draw_line((x0 + j * cw, y0), (x0 + j * cw, y0 + len(rows) * rh))
+    page.insert_text((72, 370), "Chart", fontsize=16, fontname="hebo")
+    page.insert_image(pymupdf.Rect(72, 385, 312, 535), stream=_gradient_png())
+    page.insert_textbox(
+        pymupdf.Rect(72, 550, A4.width - 72, 620), "End of report.", fontsize=11, fontname="helv"
+    )
+    page2 = doc.new_page(width=A4.width, height=A4.height)
+    page2.insert_text((72, 80), "Appendix", fontsize=16, fontname="hebo")
+    page2.insert_textbox(
+        pymupdf.Rect(72, 95, A4.width - 72, 300), LOREM, fontsize=11, fontname="helv"
+    )
+    _save(doc, "report.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "report": report,
     "sensitive": sensitive,
     "mixed_content": mixed_content,
     "layers": layers,

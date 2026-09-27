@@ -6,9 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QMessageBox
 
 from pdfeditor.core.commands import SnapshotCommand
 from pdfeditor.services.ocr import (
@@ -21,7 +20,7 @@ from pdfeditor.services.ocr import (
 )
 from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog, OcrOptionsBox
 from pdfeditor.ui.dialogs.pages import checked_pages
-from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.jobs import Job, run_modal
 
 if TYPE_CHECKING:
     from pdfeditor.ui.main_window import MainWindow
@@ -40,7 +39,6 @@ class ToolsController:
 
         self.act_ocr = act("&Recognize Text (OCR)…", self.recognize)
         self.act_batch_ocr = act("&Batch OCR…", self.batch_ocr, needs_doc=False)
-        self.job: Job | None = None
         self.last_message = ""
 
     def ribbon(self) -> None:
@@ -62,38 +60,7 @@ class ToolsController:
         box.download_button.clicked.connect(download)
 
     def run_job(self, label: str, work: Callable[[Job], object], total: int = 0) -> object:
-        """Run ``work`` on a worker thread with a modal, cancellable progress dialog."""
-        from PySide6.QtCore import QEventLoop
-
-        progress = QProgressDialog(label, "Cancel", 0, total, self.w)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(300)
-        job = Job(work)
-        self.job = job
-        outcome: dict[str, object] = {}
-        loop = QEventLoop()
-        progress.canceled.connect(job.cancel)
-
-        def on_progress(done: int, t: int) -> None:
-            progress.setMaximum(t)
-            progress.setValue(done)
-
-        def finish(key: str, value: object) -> None:
-            outcome[key] = value
-            loop.quit()
-
-        job.progress_changed.connect(on_progress)
-        job.finished.connect(lambda result: finish("result", result))
-        job.failed.connect(lambda msg: finish("error", msg))
-        job.cancelled.connect(lambda: finish("cancelled", True))
-        job.start()
-        loop.exec()
-        progress.close()
-        if "error" in outcome:
-            raise RuntimeError(str(outcome["error"]))
-        if outcome.get("cancelled"):
-            return None
-        return outcome.get("result")
+        return run_modal(self.w, label, work, total)
 
     # -- commands ---------------------------------------------------------------------------
     def recognize(self, dialog: OcrDialog | None = None) -> OcrResult | None:

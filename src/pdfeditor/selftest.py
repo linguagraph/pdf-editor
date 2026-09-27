@@ -232,6 +232,23 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"OCR did not read the sample: {text[:80]!r}")
         return f"read the scanned sample in {time.perf_counter() - start:.2f}s"
 
+    def export() -> str:
+        import zipfile
+
+        from pdfeditor.services.export import TextFormat, export_document
+        from pdfeditor.services.export.images import PageImageOptions, export_pages
+
+        doc = get_engine().open(data_path("selftest.pdf"))
+        try:
+            docx = export_document(doc, [0], workdir / "export", TextFormat.WORD)
+            with zipfile.ZipFile(docx) as z:
+                if b"lazy dog" not in z.read("word/document.xml"):
+                    raise AssertionError("Word export lost the text")
+            pngs = export_pages(doc, [0], workdir / "page", PageImageOptions(dpi=36))
+        finally:
+            doc.close()
+        return f"Word ({docx.stat().st_size // 1024} KB) and PNG ({len(pngs)} page)"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -247,6 +264,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("Qt main window", qt_gui),
         ("print to PDF", printing),
         ("OCR", ocr),
+        ("export", export),
     ]
 
 

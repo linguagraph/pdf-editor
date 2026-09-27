@@ -104,3 +104,16 @@ class SearchOptions:
     whole_word: bool = False
     regex: bool = False
     page_indices: tuple[int, ...] | None = None  # None = all pages
+
+
+@dataclass(frozen=True, slots=True)
+class TableData:
+    """A table detected on a page: cell texts row by row (None = merged/empty cell)."""
+
+    page_index: int
+    bbox: Rect
+    rows: tuple[tuple[str | None, ...], ...]
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return len(self.rows), max((len(r) for r in self.rows), default=0)
