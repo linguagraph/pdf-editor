@@ -689,14 +689,28 @@ class DocumentView(QGraphicsView):
     def set_selection(self, selection: TextSelection | None) -> None:
         if selection == self.selection:
             return
-        old_pages = set(self._selection_rects)
+        pages = self._selection_pages(self.selection) | self._selection_pages(selection)
         self.selection = selection
-        self._selection_rects = (
-            {} if selection is None or selection.is_empty else selection.rects(self.text_cache)
-        )
-        for page in old_pages | set(self._selection_rects):
+        # highlight boxes are worked out per page when it's painted: "select all" on a
+        # 1000-page document then costs nothing until pages scroll into view
+        self._selection_rects = {}
+        for page in pages:
             self._items[page].update()
         self.selection_changed.emit()
+
+    @staticmethod
+    def _selection_pages(selection: TextSelection | None) -> set[int]:
+        if selection is None or selection.is_empty:
+            return set()
+        return set(range(selection.start.page, selection.end.page + 1))
+
+    def _selection_rects_for(self, index: int) -> list[Rect]:
+        if self.selection is None or not self.selection.covers(index):
+            return []
+        rects = self._selection_rects.get(index)
+        if rects is None:
+            rects = self._selection_rects[index] = self.selection.page_rects(self.text_cache, index)
+        return rects
 
     def clear_selection(self) -> None:
         self.set_selection(None)
@@ -710,7 +724,11 @@ class DocumentView(QGraphicsView):
         return self.selection.text(self.text_cache)
 
     def copy_selection(self) -> bool:
-        text = self.selected_text()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)  # may extract many pages
+        try:
+            text = self.selected_text()
+        finally:
+            QApplication.restoreOverrideCursor()
         if text:
             QApplication.clipboard().setText(text)
         return bool(text)
@@ -906,7 +924,7 @@ class DocumentView(QGraphicsView):
         out = [(r, SEARCH_HIT_COLOR) for r in self._search_rects.get(index, ())]
         if self._current_hit is not None and self._current_hit.page_index == index:
             out.extend((q.rect, CURRENT_HIT_COLOR) for q in self._current_hit.quads)
-        out.extend((r, SELECTION_COLOR) for r in self._selection_rects.get(index, ()))
+        out.extend((r, SELECTION_COLOR) for r in self._selection_rects_for(index))
         out.extend(self.extra_overlays.get(index, ()))
         return out
 

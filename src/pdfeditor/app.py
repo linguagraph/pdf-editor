@@ -115,6 +115,10 @@ def run(argv: list[str]) -> int:
     from pdfeditor.bundle import data_path
 
     app.setWindowIcon(QIcon(str(data_path("icon.png"))))
+    from pdfeditor.ui.i18n import install_translators
+    from pdfeditor.ui.settings import AppSettings
+
+    translators = install_translators(app, AppSettings().language)  # noqa: F841 - keep alive
 
     if not new_instance and send_to_running_instance(files):
         log.info("handed %d file(s) to the running instance", len(files))

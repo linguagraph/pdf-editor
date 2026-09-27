@@ -79,6 +79,7 @@ class ThumbnailsPanel(ViewPanel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.list = QListView(self)
+        self.list.setAccessibleName("Page thumbnails")
         self.list.setViewMode(QListView.ViewMode.IconMode)
         self.list.setFlow(QListView.Flow.TopToBottom)
         self.list.setWrapping(False)

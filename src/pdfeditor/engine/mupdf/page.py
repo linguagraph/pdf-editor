@@ -151,7 +151,12 @@ class MuPage:
                 spans: list[Span] = []
                 for s in ln.get("spans", []):
                     chars = tuple(
-                        Char(ch["c"], self._vrect(ch["bbox"], m), self._vpoint(ch["origin"], m))
+                        Char(
+                            ch["c"],
+                            self._vrect(ch["bbox"], m),
+                            self._vpoint(ch["origin"], m),
+                            bool(ch.get("synthetic", False)),
+                        )
                         for ch in s.get("chars", ())
                     )
                     text = s["text"] if "text" in s else "".join(ch.c for ch in chars)
@@ -289,12 +294,20 @@ class MuPage:
         return content.font_program(self, name)
 
     def ocr_text_layer(
-        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+        self,
+        language: str,
+        dpi: int,
+        tessdata: Path,
+        preprocess: bool = False,
+        deskew: bool = False,
     ) -> bytes:
-        return ocr.text_layer(self, language, dpi, tessdata, preprocess)
+        return ocr.text_layer(self, language, dpi, tessdata, preprocess, deskew)
 
     def add_text_layer(self, layer: bytes) -> None:
         ocr.add_text_layer(self, layer)
+
+    def to_svg(self) -> str:
+        return str(self.fz.get_svg_image(text_as_path=True))
 
     def find_tables(self) -> list[TableData]:
         # MuPDF prints a hint about an optional layout package; keep the console clean.

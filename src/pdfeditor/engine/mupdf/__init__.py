@@ -34,6 +34,7 @@ class MuPDFEngine:
         optimize=True,
         encrypt=True,
         structure=True,
+        auto_tag=True,
         outline_write=True,
         metadata_write=True,
         xmp=True,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Sequence
@@ -23,9 +24,10 @@ from pdfeditor.engine.base import (
     SaveError,
     SaveOptions,
 )
+from pdfeditor.engine.mupdf import autotag, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.engine.mupdf import optimize as opt
-from pdfeditor.engine.mupdf import pages
+from pdfeditor.engine.mupdf import sanitize as scrub
 from pdfeditor.engine.mupdf import structure as struct
 from pdfeditor.engine.mupdf.page import MuPage
 from pdfeditor.model.color import Color
@@ -68,15 +70,63 @@ def _open_fz(source: Path | bytes) -> pymupdf.Document:
         else:
             if not source.exists():
                 raise OpenError(f"file not found: {source}")
+            if source.stat().st_size == 0:
+                raise OpenError("the file is empty")
             fz = pymupdf.open(source, filetype="pdf")
     except OpenError:
         raise
     except Exception as exc:
-        raise OpenError(f"cannot open PDF: {exc}") from exc
+        log.info("open failed: %s", exc)
+        raw = source if isinstance(source, bytes) else source.read_bytes()
+        handler = _raw_security_handler(raw)
+        if handler not in (None, "Standard"):
+            raise OpenError(_unsupported_security(handler)) from exc
+        raise OpenError("this isn't a PDF file, or it is too damaged to repair") from exc
     if not fz.is_pdf:
         fz.close()
         raise OpenError("not a PDF document")
+    handler = _security_handler(fz)
+    if handler not in (None, "Standard"):
+        fz.close()
+        raise OpenError(_unsupported_security(handler))
     return fz
+
+
+def _unsupported_security(handler: str) -> str:
+    return (
+        f"the document uses a security handler that isn't supported ({handler}). "
+        "It was probably encrypted for specific people with certificates or a rights-management "
+        "server; open it in the application that can use those"
+    )
+
+
+def _raw_security_handler(raw: bytes) -> str | None:
+    """The /Filter of the /Encrypt dictionary, found by scanning the file (for files MuPDF
+    refuses outright)."""
+    ref = re.search(rb"/Encrypt\s+(\d+)\s+\d+\s+R", raw)
+    if ref is not None:
+        body = re.search(rb"\b" + ref.group(1) + rb"\s+\d+\s+obj(.*?)endobj", raw, re.S)
+        text = body.group(1) if body else b""
+    else:
+        inline = re.search(rb"/Encrypt\s*<<(.*?)>>", raw, re.S)
+        text = inline.group(1) if inline else b""
+    found = re.search(rb"/Filter\s*/([\w.#-]+)", text)
+    return found.group(1).decode("latin-1") if found else None
+
+
+def _security_handler(fz: pymupdf.Document) -> str | None:
+    """The /Filter of the trailer's /Encrypt dictionary (None when not encrypted)."""
+    try:
+        kind, value = fz.xref_get_key(-1, "Encrypt")
+        if kind == "null":
+            return None
+        if kind == "xref":
+            kind, value = fz.xref_get_key(int(value.split()[0]), "Filter")
+        else:
+            kind, value = fz.xref_get_key(-1, "Encrypt/Filter")
+    except (ValueError, RuntimeError):  # a dangling /Encrypt in a damaged file
+        return None
+    return value.lstrip("/") if kind == "name" else None
 
 
 def _authenticate(fz: pymupdf.Document, password: str | PasswordCallback | None) -> str | None:
@@ -393,6 +443,9 @@ class MuDocument:
     def reorder_struct_children(self, parent: int | None, order: Sequence[int]) -> None:
         struct.reorder_children(self._fz, parent, order)
 
+    def auto_tag(self) -> dict[str, int]:
+        return autotag.auto_tag(self)
+
     def accessibility_settings(self) -> AccessibilitySettings:
         return struct.accessibility_settings(self._fz)
 
@@ -635,6 +688,24 @@ class MuDocument:
             report.append(f"{hidden} hidden text run(s)")
         if options.form_data and fz.is_form_pdf:
             report.append("form field values")
+        layers: list[str] = []
+        if options.hidden_layers:
+            sections, layers = scrub.remove_hidden_layers(self)
+            if layers or sections:
+                names = ", ".join(f'"{n}"' for n in layers)
+                report.append(
+                    f"{len(layers)} hidden layer(s)"
+                    + (f" ({names})" if names else "")
+                    + f" with {sections} content section(s)"
+                )
+        if options.off_page_text:
+            glyphs = scrub.remove_off_page_text(self)
+            if glyphs:
+                report.append(f"{glyphs} off-page text character(s)")
+        if options.hidden_layers and layers:
+            # MuPDF reads /OCProperties once, at open: reload so the layer list is current
+            self.load_state(bytes(self._fz.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_KEEP)))
+            self._force_dirty = True
         self._reset_pages()
         return report
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from pdfeditor.core.session import DocumentSession
@@ -150,11 +151,16 @@ def _is_word_char(c: str) -> bool:
 
 
 class TextIndexCache:
-    """Per-session cache of page indexes, keyed by page revision. Thread-safe."""
+    """Per-session cache of page indexes, keyed by page revision. Thread-safe.
 
-    def __init__(self, session: DocumentSession) -> None:
+    Least-recently-used pages are dropped beyond ``max_pages``: a search or copy across a
+    huge document would otherwise keep every page's character boxes in memory.
+    """
+
+    def __init__(self, session: DocumentSession, max_pages: int = 300) -> None:
         self.session = session
-        self._cache: dict[int, tuple[int, PageTextIndex]] = {}
+        self.max_pages = max_pages
+        self._cache: OrderedDict[int, tuple[int, PageTextIndex]] = OrderedDict()
         self._mutex = threading.Lock()
 
     def get(self, page_index: int) -> PageTextIndex:
@@ -162,13 +168,20 @@ class TextIndexCache:
         rev = page.revision
         with self._mutex:
             hit = self._cache.get(page_index)
-        if hit is not None and hit[0] == rev:
-            return hit[1]
+            if hit is not None and hit[0] == rev:
+                self._cache.move_to_end(page_index)
+                return hit[1]
         with self.session.lock:
             index = PageTextIndex(page.text_page(with_chars=True))
         with self._mutex:
             self._cache[page_index] = (rev, index)
+            self._cache.move_to_end(page_index)
+            while len(self._cache) > self.max_pages:
+                self._cache.popitem(last=False)
         return index
+
+    def __len__(self) -> int:
+        return len(self._cache)
 
     def clear(self) -> None:
         with self._mutex:
@@ -210,6 +223,18 @@ class TextSelection:
             if e > s:
                 out.append((page, s, e))
         return out
+
+    def covers(self, page: int) -> bool:
+        return not self.is_empty and self.start.page <= page <= self.end.page
+
+    def page_rects(self, cache: TextIndexCache, page: int) -> list[Rect]:
+        """Highlight rectangles on one page (only that page's text is extracted)."""
+        if not self.covers(page):
+            return []
+        start, end = self.start, self.end
+        s = start.index if page == start.page else 0
+        e = end.index if page == end.page else len(cache.get(page))
+        return cache.get(page).rects(s, e) if e > s else []
 
     def text(self, cache: TextIndexCache) -> str:
         return LINE_SEP.join(cache.get(p).extract(s, e) for p, s, e in self.page_spans(cache))

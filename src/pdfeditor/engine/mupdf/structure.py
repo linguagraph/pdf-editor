@@ -39,6 +39,21 @@ def _get(fz: pymupdf.Document, xref: int, key: str) -> Any:
         return None
 
 
+def _direct(fz: pymupdf.Document, xref: int, key: str) -> Any:
+    """Like ``_get``, but follows an indirect reference to a leaf value.
+
+    Real files store even simple values indirectly (IRS forms: ``/Lang 1029 0 R``,
+    ``/DisplayDocTitle 1059 0 R``); MuPDF reports those as "xref" rather than the value.
+    """
+    value = _get(fz, xref, key)
+    if isinstance(value, Ref):
+        try:
+            value = parse(fz.xref_object(value.num, compressed=True))
+        except (PdfSyntaxError, RuntimeError, ValueError):
+            return None
+    return value
+
+
 def _text(value: Any) -> str:
     if isinstance(value, bytes):
         return text_string(value)
@@ -93,10 +108,10 @@ def structure_tree(fz: pymupdf.Document) -> list[StructNode]:
             ref=xref,
             type=str(s),
             role=_resolve_role(str(s), roles) if str(s) in roles else "",
-            title=_text(_get(fz, xref, "T")),
-            alt=_text(_get(fz, xref, "Alt")),
-            actual_text=_text(_get(fz, xref, "ActualText")),
-            lang=_text(_get(fz, xref, "Lang")),
+            title=_text(_direct(fz, xref, "T")),
+            alt=_text(_direct(fz, xref, "Alt")),
+            actual_text=_text(_direct(fz, xref, "ActualText")),
+            lang=_text(_direct(fz, xref, "Lang")),
             page_index=page_of.get(pg.num) if isinstance(pg, Ref) else None,
         )
         for kid in _kids(_get(fz, xref, "K")):
@@ -177,11 +192,18 @@ def _write_value(v: Any) -> str:
 
 def accessibility_settings(fz: pymupdf.Document) -> AccessibilitySettings:
     catalog = fz.pdf_catalog()
-    lang = _text(_get(fz, catalog, "Lang"))
-    kind, value = fz.xref_get_key(catalog, "ViewerPreferences/DisplayDocTitle")
-    display = kind == "bool" and value == "true"
+    lang = _text(_direct(fz, catalog, "Lang"))
+    prefs = _get(fz, catalog, "ViewerPreferences")
+    display = False
+    if isinstance(prefs, Ref):
+        display = _direct(fz, prefs.num, "DisplayDocTitle") is True
+    elif isinstance(prefs, dict):
+        flag = prefs.get("DisplayDocTitle")
+        if isinstance(flag, Ref):
+            flag = parse(fz.xref_object(flag.num, compressed=True))
+        display = flag is True
     with_annots = [p for p in fz if p.annots() is not None and next(p.annots(), None) is not None]
-    tabs = all(_get(fz, p.xref, "Tabs") == "S" for p in with_annots)
+    tabs = all(_direct(fz, p.xref, "Tabs") == "S" for p in with_annots)
     return AccessibilitySettings(lang, display, tabs)
 
 

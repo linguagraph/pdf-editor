@@ -93,6 +93,8 @@ class PrintDialog(QDialog):
         layout.addWidget(self.auto_rotate)
         layout.addWidget(self.annotations)
         layout.addWidget(self.grayscale)
+        self.as_image = QCheckBox("Print as image (for pages that print incorrectly)", self)
+        layout.addWidget(self.as_image)
         layout.addWidget(buttons)
         self._update_printer_label()
 
@@ -124,6 +126,7 @@ class PrintDialog(QDialog):
             auto_rotate=self.auto_rotate.isChecked(),
             annotations=self.annotations.isChecked(),
             grayscale=self.grayscale.isChecked(),
+            as_image=self.as_image.isChecked(),
         )
 
     def _checked_options(self) -> PrintOptions | None:

@@ -88,6 +88,15 @@ class AppSettings:
         self.qs.setValue("prefs/keep_tools", "true" if value else "false")
 
     @property
+    def language(self) -> str:
+        """UI language code ("" = follow the system)."""
+        return self._str("language", "")
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self.qs.setValue("language", value)
+
+    @property
     def cache_mb(self) -> int:
         """Render cache budget; applies on next start."""
         return min(4096, max(64, self._int("prefs/cache_mb", 384)))

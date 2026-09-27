@@ -185,6 +185,8 @@ class SanitizeDialog(QDialog):
         ("attachments", "Attached files"),
         ("links", "Links"),
         ("hidden_text", "Hidden (invisible) text"),
+        ("hidden_layers", "Content on hidden layers"),
+        ("off_page_text", "Text outside the visible page area"),
         ("comments", "Comments and markups"),
         ("form_data", "Form field values"),
         ("thumbnails", "Embedded page thumbnails"),
