@@ -109,3 +109,35 @@ def test_tags_panel_edits(window: MainWindow, view) -> None:
 def test_untagged_document(window: MainWindow, fixture_pdf) -> None:
     window.open_path(fixture_pdf("report"))
     assert window.tags_panel.empty.isVisibleTo(window.tags_panel)
+
+
+def test_auto_tag(window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "report.pdf"
+    shutil.copy2(fixture_pdf("report"), path)
+    view = window.open_path(path)
+    action = window.pdfa.act_auto_tag
+    assert action.isVisible() and "experimental" in action.text()
+    assert action in window.ribbon.tab("Tools").actions()
+    tools_menu = next(a.menu() for a in window.menuBar().actions() if "Tools" in a.text())
+    assert action in tools_menu.actions()
+    tags = window.tags_panel
+    window.nav_tabs.setCurrentWidget(tags)
+    assert not tags.nodes
+    action.trigger()
+    assert "Tagged the document" in window.pdfa.last_message and view.session.is_dirty
+    types = {n.type for n in tags.nodes.values()}
+    assert {"Document", "H1", "H2", "P", "Figure"} <= types
+    window.accessibility_check()
+    tagged = next(f for f in window.accessibility_panel.findings if f.rule == "tagged")
+    assert tagged.status is Status.PASSED
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "pdfeditor.ui.pdfa_controller.QMessageBox.information",
+        lambda _p, _t, msg: shown.append(msg),
+    )
+    assert window.pdfa.auto_tag() is None  # refuses a tagged document
+    assert shown and "already tagged" in shown[0]
+    window.act_undo.trigger()
+    assert not tags.nodes
+    with view.session.lock:
+        assert not view.session.document.info().is_tagged
