@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
-from pdfeditor.engine.mupdf import annots, content, pages
+from pdfeditor.engine.mupdf import annots, content, ocr, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
 from pdfeditor.model.color import Color
@@ -276,6 +277,14 @@ class MuPage:
 
     def replace_image(self, key: str, data: bytes) -> None:
         content.replace_image(self, key, data)
+
+    def ocr_text_layer(
+        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+    ) -> bytes:
+        return ocr.text_layer(self, language, dpi, tessdata, preprocess)
+
+    def add_text_layer(self, layer: bytes) -> None:
+        ocr.add_text_layer(self, layer)
 
     def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
         return annots.apply_redactions(self, ids, options)

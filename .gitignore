@@ -18,3 +18,4 @@ htmlcov/
 .idea/
 .vscode/
 dist/
+src/pdfeditor/data/tessdata/

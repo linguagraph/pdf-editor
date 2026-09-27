@@ -89,6 +89,7 @@ from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.hand import HandTool
 from pdfeditor.ui.tools.select import SelectTool
+from pdfeditor.ui.tools_controller import ToolsController
 from pdfeditor.ui.view.document_view import DocumentView
 from pdfeditor.ui.view.note_popup import NotePopup
 from pdfeditor.ui.view.renderer import TileRenderer
@@ -329,6 +330,7 @@ class MainWindow(QMainWindow):
         self.organize = OrganizeController(self)
         self.edit = EditController(self, self.tool_group, self.tool_actions)
         self.protect = ProtectController(self, self.tool_group, self.tool_actions)
+        self.tools = ToolsController(self)
         self.panels.insert(3, self.protect.panel)
         self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -615,6 +617,10 @@ class MainWindow(QMainWindow):
         go_menu.addAction(self.act_next_tab)
         go_menu.addAction(self.act_prev_tab)
 
+        tools_menu = mb.addMenu("&Tools")
+        tools_menu.addAction(self.tools.act_ocr)
+        tools_menu.addAction(self.tools.act_batch_ocr)
+
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
 
@@ -662,6 +668,7 @@ class MainWindow(QMainWindow):
         )
         view.add_group(*self.layout_actions.values())
         view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night)
+        self.tools.ribbon()
 
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:

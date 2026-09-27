@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 9 (OCR).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 10 (Export and conversion).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -185,12 +185,12 @@ Problem (user feedback): once a tool such as Sticky Note is active there's no vi
 - [x] Right-click in any creation tool offers "Back to Select"
 - [x] GUI tests for each behavior (toggle-off, Esc, status-bar exit, click-existing-comment, hover popup, one-shot vs sticky preference)
 
-### Phase 9: OCR (M)
-- [ ] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed
-- [ ] Preprocessing (optional OpenCV): deskew, denoise, and binarize for OCR only (the visible image stays unchanged)
-- [ ] Make scanned pages searchable by adding an invisible text layer (MuPDF OCR page output overlaid with `show_pdf_page`), with page ranges, skipping pages that already have text, and a `Job` with progress and cancel
-- [ ] Batch OCR of many files through the same in-process engine (no `ocrmypdf` dependency)
-- [ ] Accuracy check against fixture scans (text similarity threshold)
+### Phase 9: OCR (M), done
+- [x] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed. *(The exe bundles English (`tessdata_fast`, fetched by `scripts/fetch_tessdata.py`); the other common languages are one click away in the dialog.)*
+- [ ] Preprocessing (optional OpenCV): deskew, denoise, and binarize for OCR only (the visible image stays unchanged). *(Grayscale, denoise and binarize with Pillow; deskew is not done yet, and OpenCV was dropped to keep the exe small.)*
+- [x] Make scanned pages searchable by adding an invisible text layer (MuPDF OCR page output overlaid with `show_pdf_page`), with page ranges, skipping pages that already have text, and a `Job` with progress and cancel. Undo through one "Recognize Text" snapshot; rotated pages are handled
+- [x] Batch OCR of many files through the same in-process engine (no `ocrmypdf` dependency)
+- [x] Accuracy check against fixture scans (text similarity threshold), plus an OCR check in the exe `--self-test`
 
 ### Phase 10: Export and conversion (M)
 - [ ] To images: PNG/JPEG/TIFF (multi-page), with DPI, color space and page range
