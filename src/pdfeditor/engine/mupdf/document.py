@@ -369,6 +369,9 @@ class MuDocument:
             "clean": options.clean_content,
             "encryption": pymupdf.PDF_ENCRYPT_KEEP,
         }
+        if options.decrypt:
+            kwargs["encryption"] = pymupdf.PDF_ENCRYPT_NONE
+            return kwargs
         s = self._security
         if s is not None:
             kwargs["encryption"] = _ENCRYPT_METHODS[s.method]

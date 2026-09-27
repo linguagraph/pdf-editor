@@ -287,6 +287,19 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"unexpected security after save: {method}")
         return "AES-256 encrypt, reopen with password"
 
+    def pdfa() -> str:
+        from pdfeditor.engine.base import SaveOptions
+        from pdfeditor.services.pdfa import convert_to_pdfa
+
+        e = get_engine()
+        doc = e.open(data_path("selftest.pdf"))
+        data = doc.to_bytes(SaveOptions(decrypt=True))
+        doc.close()
+        result = convert_to_pdfa(data, e.standard_font_program)
+        if not result.conforming:
+            raise AssertionError("; ".join(str(i) for i in result.remaining))
+        return f"PDF/A-2b copy: {len(result.fixed)} fix(es), built-in checks clean"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -305,6 +318,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("export", export),
         ("optimize", optimize),
         ("security", security),
+        ("PDF/A", pdfa),
     ]
 
 

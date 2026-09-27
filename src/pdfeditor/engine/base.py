@@ -120,6 +120,7 @@ class SaveOptions:
     deflate: bool = True
     object_streams: bool = False
     clean_content: bool = False
+    decrypt: bool = False  # write without encryption (export pipelines; never for snapshots)
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,6 +434,12 @@ class Engine(Protocol):
     ) -> Document: ...
 
     def new_document(self) -> Document: ...
+
+    def standard_font_program(self, base_font: str) -> bytes | None:
+        """An embeddable program for a standard (base-14) font or a metric-compatible stand-in
+        (Arial -> Helvetica, Times New Roman -> Times, Courier New -> Courier); None if there
+        is none. Used to embed fonts a PDF only names (PDF/A)."""
+        ...
 
     def text_width(self, text: str, font: str, size: float) -> float:
         """Width in points of ``text`` in a base-14 ``font`` (for aligning stamps)."""
