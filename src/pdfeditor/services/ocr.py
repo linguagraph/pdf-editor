@@ -104,6 +104,7 @@ class OcrOptions:
     dpi: int = 300
     skip_pages_with_text: bool = True
     preprocess: bool = False
+    deskew: bool = False
 
 
 @dataclass
@@ -133,7 +134,7 @@ def recognize(
                 result.skipped.append(index)
             else:
                 result.layers[index] = doc.page(index).ocr_text_layer(
-                    language, options.dpi, tessdata, options.preprocess
+                    language, options.dpi, tessdata, options.preprocess, options.deskew
                 )
         progress(n + 1, len(pages))
     return result

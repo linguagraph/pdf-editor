@@ -71,6 +71,7 @@ class OcrOptionsBox(QWidget):
         self.skip_text = QCheckBox("Skip pages that already have text", self)
         self.skip_text.setChecked(True)
         self.preprocess = QCheckBox("Clean up the image first (grayscale, denoise, binarize)", self)
+        self.deskew = QCheckBox("Straighten skewed scans (deskew)", self)
         download = QHBoxLayout()
         download.addWidget(self.download_combo, 1)
         download.addWidget(self.download_button)
@@ -81,6 +82,7 @@ class OcrOptionsBox(QWidget):
         form.addRow("Resolution:", self.dpi)
         form.addRow("", self.skip_text)
         form.addRow("", self.preprocess)
+        form.addRow("", self.deskew)
 
     def options(self) -> OcrOptions:
         """Raises ValueError when no language is chosen."""
@@ -88,7 +90,11 @@ class OcrOptionsBox(QWidget):
         if not langs:
             raise ValueError("Choose at least one OCR language.")
         return OcrOptions(
-            langs, self.dpi.value(), self.skip_text.isChecked(), self.preprocess.isChecked()
+            langs,
+            self.dpi.value(),
+            self.skip_text.isChecked(),
+            self.preprocess.isChecked(),
+            self.deskew.isChecked(),
         )
 
 

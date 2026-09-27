@@ -284,9 +284,14 @@ class MuPage:
         return content.font_program(self, name)
 
     def ocr_text_layer(
-        self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
+        self,
+        language: str,
+        dpi: int,
+        tessdata: Path,
+        preprocess: bool = False,
+        deskew: bool = False,
     ) -> bytes:
-        return ocr.text_layer(self, language, dpi, tessdata, preprocess)
+        return ocr.text_layer(self, language, dpi, tessdata, preprocess, deskew)
 
     def add_text_layer(self, layer: bytes) -> None:
         ocr.add_text_layer(self, layer)

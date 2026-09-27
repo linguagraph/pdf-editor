@@ -76,3 +76,13 @@ def test_batch_ocr(window: MainWindow, fixture_pdf, tmp_path: Path) -> None:
     written = window.tools.batch_ocr(dialog)
     assert [p.name for p in written] == ["scanned.pdf"]
     assert written[0].exists()
+
+
+def test_options_box_maps_cleanup_and_deskew(qtbot) -> None:
+    dialog = OcrDialog(1, 0, [])
+    qtbot.addWidget(dialog)
+    assert not dialog.box.options().deskew
+    dialog.box.preprocess.setChecked(True)
+    dialog.box.deskew.setChecked(True)
+    options = dialog.box.options()
+    assert options.preprocess and options.deskew
