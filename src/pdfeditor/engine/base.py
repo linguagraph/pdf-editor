@@ -23,6 +23,7 @@ from pdfeditor.model.metadata import (
     ImageInfo,
     LayerInfo,
     Metadata,
+    SecuritySettings,
     SpaceUsage,
 )
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
@@ -307,6 +308,22 @@ class Document(Protocol):
     def xmp(self) -> str: ...
 
     def set_xmp(self, xml: str) -> None: ...
+
+    # Optional (``capabilities.encrypt``). Security changes take effect on the next full save.
+    def pending_security(self) -> SecuritySettings | None:
+        """Security to apply on the next save (None: keep the document's current security)."""
+        ...
+
+    def set_pending_security(self, settings: SecuritySettings | None) -> None: ...
+
+    def has_owner_access(self) -> bool:
+        """True when the document isn't encrypted or was unlocked with its owner password."""
+        ...
+
+    def unlock_owner(self, password: str) -> bool:
+        """Check an owner password (without disturbing the open document if it's wrong) and,
+        if it's right, gain owner access."""
+        ...
 
     def outline(self) -> list[OutlineItem]: ...
 

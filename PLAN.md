@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 13 (Security).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 14 (PDF/A).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -217,10 +217,10 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Visual diff: render both pages, compute a numpy pixel difference, and group differing pixels into region boxes. *(Pillow instead of numpy, which the exe excludes; runs on aligned pages whose text is unchanged, e.g. scans or drawings)*
 - [x] Side-by-side synced view with a change list; export a comparison report PDF. *(Tools ▸ Compare Files: two views that follow each other, coloured change boxes, click a change to show it on both sides; the report has a summary page and each changed page of both versions with outlined changes)*
 
-### Phase 13: Security (S)
-- [ ] Password encryption (AES-256, AES-128), owner and user passwords, permissions (print/copy/modify/annotate)
-- [ ] Remove security (requires the owner password); security summary in Properties
-- [ ] Metadata editor (Info dictionary plus XMP sync)
+### Phase 13: Security (S), done
+- [x] Password encryption (AES-256, AES-128), owner and user passwords, permissions (print/copy/modify/annotate). *(Protect ▸ Encrypt with Password; applied on the next full save, undoable until then; RC4 isn't offered for new files)*
+- [x] Remove security (requires the owner password); security summary in Properties. *(The owner password is checked on a scratch copy, because a wrong password leaves an open MuPDF document unreadable; Properties also shows a security change that is pending until the next save)*
+- [x] Metadata editor (Info dictionary plus XMP sync). *(The existing Properties editor now writes title/author/subject/keywords/creator/producer into XMP too, keeping other XMP content such as the PDF/A identification)*
 
 ### Phase 14: Standards (PDF/A) (M)
 - [ ] Preflight-lite checks: fonts embedded, no encryption, no JS, color spaces with OutputIntent, transparency, XMP present

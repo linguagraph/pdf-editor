@@ -7,19 +7,21 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QActionGroup, QMouseEvent
-from PySide6.QtWidgets import QGraphicsView, QMessageBox
+from PySide6.QtWidgets import QGraphicsView, QInputDialog, QLineEdit, QMessageBox
 
 from pdfeditor.core.commands import (
     AddAnnotationCommand,
     Command,
     DeleteAnnotationsCommand,
     MacroCommand,
+    SetSecurityCommand,
     SnapshotCommand,
 )
 from pdfeditor.engine.base import Document
 from pdfeditor.model.annotations import AnnotationModel
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Point, Quad, Rect
+from pdfeditor.model.metadata import EncryptionMethod, SecuritySettings
 from pdfeditor.services.redaction import (
     MarkStyle,
     VerificationReport,
@@ -35,10 +37,12 @@ from pdfeditor.ui.dialogs.redaction import (
     RedactionPropertiesDialog,
     SanitizeDialog,
 )
+from pdfeditor.ui.dialogs.security import SecurityDialog
 from pdfeditor.ui.panels.redactions import RedactionsPanel
 from pdfeditor.ui.tools.base import Tool
 
 if TYPE_CHECKING:
+    from pdfeditor.core.session import DocumentSession
     from pdfeditor.ui.main_window import MainWindow
     from pdfeditor.ui.view.document_view import DocumentView
 
@@ -118,6 +122,9 @@ class ProtectController:
         self.act_properties = act("Redaction &Properties…", self.edit_properties, needs_doc=False)
         self.act_apply = act("&Apply Redactions…", lambda: self.apply(None))
         self.act_sanitize = act("&Sanitize Document…", self.sanitize)
+        self.act_encrypt = act("&Encrypt with Password…", self.encrypt)
+        self.act_remove_security = act("Remove &Security", self.remove_security)
+        self.last_message = ""
         self.panel = RedactionsPanel()
         self.panel.on_apply = self.apply
         self.panel.on_remove = self.remove_marks
@@ -148,6 +155,8 @@ class ProtectController:
         r.add_group(self.act_redact, self.act_mark_text, self.act_mark_pages, self.act_properties)
         r.add_group(self.act_apply)
         r.add_group(self.act_sanitize)
+        if self.w.engine().capabilities.encrypt:
+            r.add_group(self.act_encrypt, self.act_remove_security)
 
     # -- marking --------------------------------------------------------------------------
     def add_marks(self, view: DocumentView, marks: list[AnnotationModel], label: str) -> None:
@@ -317,3 +326,70 @@ class ProtectController:
         return removed
 
     last_message = ""
+
+    # -- password security --------------------------------------------------------------------
+    def _owner_access(self, session: DocumentSession, owner_password: str | None) -> bool:
+        """Changing security needs the owner password when the document already has one."""
+        with session.lock:
+            if session.document.has_owner_access():
+                return True
+        if owner_password is None:
+            owner_password, ok = QInputDialog.getText(
+                self.w,
+                "Permissions Password",
+                "This document is protected. Enter its permissions (owner) password to change "
+                "its security:",
+                QLineEdit.EchoMode.Password,
+            )
+            if not ok:
+                return False
+        with session.lock:
+            unlocked = session.document.unlock_owner(owner_password)
+        if not unlocked:
+            QMessageBox.warning(self.w, "Security", "That permissions password is not correct.")
+        return unlocked
+
+    def _notify(self, message: str) -> None:
+        self.last_message = message
+        self.w.statusBar().showMessage(message, 8000)
+
+    def encrypt(
+        self, dialog: SecurityDialog | None = None, owner_password: str | None = None
+    ) -> bool:
+        view = self.w.current_view()
+        if view is None:
+            return False
+        session = view.session
+        if not self._owner_access(session, owner_password):
+            return False
+        if dialog is None:
+            with session.lock:
+                current = session.document.info().permissions
+            dialog = SecurityDialog(current, self.w)
+        if not dialog.result() and not dialog.exec():
+            return False
+        session.execute(SetSecurityCommand(dialog.settings()))
+        self._notify("Password security will be applied when you save the document.")
+        return True
+
+    def remove_security(self, owner_password: str | None = None) -> bool:
+        view = self.w.current_view()
+        if view is None:
+            return False
+        session = view.session
+        with session.lock:
+            doc = session.document
+            encrypted = doc.info().encryption is not EncryptionMethod.NONE
+            pending = doc.pending_security()
+        if not encrypted and (pending is None or pending.method is EncryptionMethod.NONE):
+            QMessageBox.information(self.w, "Remove Security", "This document has no security.")
+            return False
+        if encrypted and not self._owner_access(session, owner_password):
+            return False
+        if not encrypted:  # only a pending change: just drop it
+            session.execute(SetSecurityCommand(SecuritySettings(EncryptionMethod.NONE)))
+            self._notify("The pending password security was removed.")
+            return True
+        session.execute(SetSecurityCommand(SecuritySettings(EncryptionMethod.NONE)))
+        self._notify("Security will be removed when you save the document.")
+        return True
