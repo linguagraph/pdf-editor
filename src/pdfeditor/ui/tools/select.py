@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QCursor, QMouseEvent
 from PySide6.QtWidgets import QApplication, QGraphicsView
 
 from pdfeditor.core.commands import Command, MacroCommand, UpdateAnnotationCommand
@@ -165,6 +165,8 @@ class SelectTool(Tool):
         self._drag_matrix = None
         view.set_annotation_preview({})
         if m is None or (abs(m.e) < 0.5 and abs(m.f) < 0.5 and m.a == 1 and m.d == 1):
+            if handle is None and len(models) == 1 and models[0].type is AnnotationType.TEXT:
+                view.note_clicked.emit(models[0], QCursor.pos())  # a click (no drag) opens it
             return
         label = "Resize Comment" if handle is not None else "Move Comment"
         commands: list[Command] = [

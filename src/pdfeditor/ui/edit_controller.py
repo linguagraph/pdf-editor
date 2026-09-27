@@ -55,7 +55,7 @@ class EditController:
             if key:
                 tool_action.setShortcut(QKeySequence(key))
             tool_action.setProperty("needs_doc", True)
-            tool_action.triggered.connect(lambda _=False, n=name: window.set_tool(n))
+            tool_action.triggered.connect(lambda _=False, n=name: window.tool_clicked(n))
             window.addAction(tool_action)
             tool_group.addAction(tool_action)
             tool_actions[name] = tool_action

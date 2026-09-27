@@ -92,11 +92,13 @@ def commit(view: DocumentView, models: list[AnnotationModel], label: str) -> Non
         if isinstance(c, AddAnnotationCommand)
     ]
     view.set_annotation_selection(names)
+    view.tool_used.emit()
 
 
 class AnnotationTool(Tool):
     kind = AnnotationType.SQUARE
     label = "Comment"
+    respects_existing = True
 
     def activate(self, view: DocumentView) -> None:
         view.setDragMode(QGraphicsView.DragMode.NoDrag)
@@ -306,6 +308,7 @@ class PolyTool(AnnotationTool):
         page, p = hit
         if self._page is None:
             self._page, self._points = page, [p]
+            self.busy = True
         elif page == self._page:
             close = self._points and abs(p.x - self._points[0].x) + abs(p.y - self._points[0].y) < 4
             if close and len(self._points) >= 3:
@@ -327,6 +330,7 @@ class PolyTool(AnnotationTool):
     def finish(self, view: DocumentView) -> bool:
         page, points = self._page, self._points
         self._page, self._points = None, []
+        self.busy = False
         view.set_annotation_preview({})
         # a double-click also delivered a press at the same spot: drop the duplicate
         deduped: list[Point] = []

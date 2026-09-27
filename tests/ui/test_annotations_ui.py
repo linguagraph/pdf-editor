@@ -21,6 +21,7 @@ pytestmark = pytest.mark.gui
 @pytest.fixture
 def window(qtbot):
     w = MainWindow()
+    w.prefs.keep_tools = True  # these tests draw several comments with one tool
     w.resize(1200, 900)
     w.show()
     qtbot.waitExposed(w)
@@ -70,7 +71,7 @@ def test_rectangle_tool_and_undo(qtbot, window: MainWindow, view) -> None:
         Point(250, 400)
     )
     assert view.selected_annotations == [(0, sq.name)]
-    assert window.tool_actions["rectangle"].isChecked()  # tool stays active
+    assert window.tool_actions["rectangle"].isChecked()  # "keep tools selected" is on here
     window.act_undo.trigger()
     assert annots(view) == []
 
@@ -277,7 +278,7 @@ def test_flatten_all_and_save_roundtrip(qtbot, window: MainWindow, view, monkeyp
 def test_context_menu_reorder(qtbot, window: MainWindow, view) -> None:
     window.set_tool("rectangle")
     drag(qtbot, view, 0, (100, 300), (200, 400))
-    drag(qtbot, view, 0, (150, 350), (250, 450))
+    drag(qtbot, view, 0, (250, 450), (150, 350))  # start outside the first box
     first, second = annots(view)
     from pdfeditor.core.commands import ReorderAnnotationCommand
 
@@ -295,7 +296,7 @@ def test_escape_returns_to_select(qtbot, window: MainWindow, view) -> None:
 def test_hit_testing_prefers_topmost(qtbot, window: MainWindow, view) -> None:
     window.set_tool("rectangle")
     drag(qtbot, view, 0, (100, 300), (200, 400))
-    drag(qtbot, view, 0, (150, 350), (250, 450))
+    drag(qtbot, view, 0, (250, 450), (150, 350))  # start outside the first box
     top = annots(view)[-1]
     hit = view.annotation_at(view.page_point_to_scene(0, Point(170, 370)))
     assert hit is not None and hit.name == top.name

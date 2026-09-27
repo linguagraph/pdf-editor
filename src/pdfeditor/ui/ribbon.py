@@ -9,9 +9,11 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QStackedWidget,
     QTabBar,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -51,11 +53,28 @@ class Ribbon(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.bar)
+        self.quick = QToolBar(self)
+        self.quick.setIconSize(QSize(16, 16))
+        self.quick.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.quick.setMovable(False)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(self.quick)
+        top.addWidget(self.bar, 1)
+        layout.addLayout(top)
         layout.addWidget(self.stack)
         layout.addWidget(line)
         self.bar.currentChanged.connect(self.stack.setCurrentIndex)
         self._tabs: dict[str, RibbonTab] = {}
+
+    def set_quick_actions(self, actions: list[QAction]) -> None:
+        """Always-visible actions left of the tabs (Select, Hand, Undo, ...)."""
+        self.quick.clear()
+        for action in actions:
+            self.quick.addAction(action)
+            button = self.quick.widgetForAction(action)
+            if isinstance(button, QToolButton) and action.icon().isNull():
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
 
     def add_tab(self, name: str) -> RibbonTab:
         tab = RibbonTab(name, self)

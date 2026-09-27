@@ -79,6 +79,15 @@ class AppSettings:
         self.qs.setValue("prefs/default_tool", value)
 
     @property
+    def keep_tools(self) -> bool:
+        """Keep creation tools active after use (off: back to Select after one use)."""
+        return self._str("prefs/keep_tools", "false") == "true"
+
+    @keep_tools.setter
+    def keep_tools(self, value: bool) -> None:
+        self.qs.setValue("prefs/keep_tools", "true" if value else "false")
+
+    @property
     def cache_mb(self) -> int:
         """Render cache budget; applies on next start."""
         return min(4096, max(64, self._int("prefs/cache_mb", 384)))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -37,6 +38,10 @@ class PreferencesDialog(QDialog):
         self.tool.addItem("Hand", "hand")
         self.tool.setCurrentIndex(max(0, self.tool.findData(settings.default_tool)))
         form.addRow("Default tool:", self.tool)
+        self.keep_tools = QCheckBox("Keep tools selected after use")
+        self.keep_tools.setToolTip("Off: comment and drawing tools go back to Select after one use")
+        self.keep_tools.setChecked(settings.keep_tools)
+        form.addRow("", self.keep_tools)
 
         documents = QGroupBox("Documents", self)
         form = QFormLayout(documents)
@@ -76,6 +81,7 @@ class PreferencesDialog(QDialog):
         s.author = self.author.text().strip()
         s.default_zoom = str(self.zoom.currentData())
         s.default_tool = str(self.tool.currentData())
+        s.keep_tools = self.keep_tools.isChecked()
         s.autosave_minutes = self.autosave.value()
         s.undo_disk_mb = self.undo_disk.value()
         s.cache_mb = self.cache.value()
