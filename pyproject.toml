@@ -30,6 +30,7 @@ dev = [
     "mypy>=1.8",
     "import-linter>=2.0",
     "pre-commit>=3.6",
+    "pyhanko>=0.25",  # scripts/make_signed_sample.py; signature checks in tests
 ]
 
 [project.scripts]
