@@ -65,6 +65,7 @@ from pdfeditor.model.annotations import (
 )
 from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.outline import Link, LinkKind
+from pdfeditor.ui.compare_controller import CompareController
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.dialogs.print_dialog import PrintDialog
@@ -335,6 +336,7 @@ class MainWindow(QMainWindow):
         self.tools = ToolsController(self)
         self.export = ExportController(self)
         self.optimize = OptimizeController(self)
+        self.compare = CompareController(self)
         self.panels.insert(3, self.protect.panel)
         self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -630,6 +632,8 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
         tools_menu.addAction(self.optimize.act_reduce)
         tools_menu.addAction(self.optimize.act_audit)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.compare.act_compare)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -681,6 +685,7 @@ class MainWindow(QMainWindow):
         self.tools.ribbon()
         self.export.ribbon()
         self.optimize.ribbon()
+        self.compare.ribbon()
 
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:

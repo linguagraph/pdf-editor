@@ -135,6 +135,7 @@ class DocumentView(QGraphicsView):
         self._tip_for: str | None = None
         self.selected_annotations: list[tuple[int, str]] = []  # (page, /NM name)
         self.annotation_preview: dict[int, list[Rect]] = {}  # drag outlines per page
+        self.extra_overlays: dict[int, list[tuple[Rect, QColor]]] = {}  # e.g. compare changes
         self.author = ""
         self.tool: Tool = SelectTool()
         self.tool.activate(self)
@@ -906,7 +907,13 @@ class DocumentView(QGraphicsView):
         if self._current_hit is not None and self._current_hit.page_index == index:
             out.extend((q.rect, CURRENT_HIT_COLOR) for q in self._current_hit.quads)
         out.extend((r, SELECTION_COLOR) for r in self._selection_rects.get(index, ()))
+        out.extend(self.extra_overlays.get(index, ()))
         return out
+
+    def set_extra_overlays(self, overlays: dict[int, list[tuple[Rect, QColor]]]) -> None:
+        self.extra_overlays = overlays
+        for item in self._items:
+            item.update()
 
     # -- rendering ------------------------------------------------------------------------
     def _on_tile_ready(self, key: TileKey) -> None:

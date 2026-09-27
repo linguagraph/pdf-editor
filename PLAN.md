@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 12 (Compare documents).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 13 (Security).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -211,11 +211,11 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Closing the edit box after editing existing text leaves the original place blank and creates a new text box elsewhere with the formatting lost. The edit must be re-typeset in the original block's position with its font, size and color, and closing without changes must leave the page untouched. *(Only the edited column is removed; whitespace is kept; the font is resolved before removal and matched by a loose name, so the document font survives repeated edits; one-line labels widen instead of wrapping; the first baseline is measured and kept, so edits don't drift; duplicate cmap entries are pruned so "(" doesn't copy as U+FD3E; an unchanged close is a no-op)*
 - [x] No way to format edited text: add a style bar to the inline editor (font family, size, bold, italic, color, alignment) that applies to the whole block and is kept when saving the edit. *(The editor previews the embedded font; changing bold/italic of an embedded font falls back to a standard face and says so; Add Text uses the same bar and remembers the last style)*
 
-### Phase 12: Compare documents (M)
-- [ ] Page alignment (text-similarity matching, to handle inserted and deleted pages)
-- [ ] Word-level text diff (difflib) with insert/delete/change highlights
-- [ ] Visual diff: render both pages, compute a numpy pixel difference, and group differing pixels into region boxes
-- [ ] Side-by-side synced view with a change list; export a comparison report PDF
+### Phase 12: Compare documents (M), done
+- [x] Page alignment (text-similarity matching, to handle inserted and deleted pages)
+- [x] Word-level text diff (difflib) with insert/delete/change highlights. *(Words come in visual reading order, so an edited paragraph re-typeset at the end of the content stream still diffs as "changed")*
+- [x] Visual diff: render both pages, compute a numpy pixel difference, and group differing pixels into region boxes. *(Pillow instead of numpy, which the exe excludes; runs on aligned pages whose text is unchanged, e.g. scans or drawings)*
+- [x] Side-by-side synced view with a change list; export a comparison report PDF. *(Tools ▸ Compare Files: two views that follow each other, coloured change boxes, click a change to show it on both sides; the report has a summary page and each changed page of both versions with outlined changes)*
 
 ### Phase 13: Security (S)
 - [ ] Password encryption (AES-256, AES-128), owner and user passwords, permissions (print/copy/modify/annotate)
