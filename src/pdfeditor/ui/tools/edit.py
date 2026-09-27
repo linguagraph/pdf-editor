@@ -52,7 +52,9 @@ def run_edit(view: DocumentView, label: str, operation: Callable[[Document], obj
         return False
     choice = result[0] if result else None
     if isinstance(choice, FontChoice) and choice.substituted:
-        notify(f"The document's font can't show this text; used {choice.name} instead.")
+        notify(
+            f"The document's font can't show this text in this style; used {choice.name} instead."
+        )
     return True
 
 
@@ -246,17 +248,20 @@ class EditObjectsTool(Tool):
         style = obj.style or DEFAULT_TEXT_STYLE
         k = view.transform().m11()
 
-        def commit(text: str) -> None:
+        def commit(text: str, new_style: TextStyle) -> None:
             self.editor = None
-            if text != obj.text:
-                run_edit(
-                    view, "Edit Text", lambda doc: doc.page(page).replace_text(obj.key, text, style)
-                )
+            run_edit(
+                view, "Edit Text", lambda doc: doc.page(page).replace_text(obj.key, text, new_style)
+            )
 
         def cancel() -> None:
             self.editor = None
 
-        self.editor = InlineTextEditor(view.viewport(), obj.text, style, k, commit, cancel)
+        with view.session.lock:
+            font_data = view.session.document.page(page).font_program(style.font)
+        self.editor = InlineTextEditor(
+            view.viewport(), obj.text, style, k, commit, cancel, font_data
+        )
         self.editor.place(viewport_rect(view, page, obj.bbox))
 
     def hover(self, view: DocumentView, event: QMouseEvent) -> None:
@@ -324,6 +329,7 @@ class _RectTool(Tool):
 
 class AddTextTool(_RectTool):
     name = "add_text"
+    last_style = DEFAULT_TEXT_STYLE  # new text boxes start with the style used last
 
     def press(self, view: DocumentView, event: QMouseEvent) -> bool:
         """Clicking existing text edits that paragraph instead of starting a new text box."""
@@ -339,17 +345,16 @@ class AddTextTool(_RectTool):
     def __init__(self) -> None:
         super().__init__()
         self.editor: InlineTextEditor | None = None
-        self.style = DEFAULT_TEXT_STYLE
+        self.style = AddTextTool.last_style
 
     def deactivate(self, view: DocumentView) -> None:
         if self.editor is not None:
             self.editor.commit()
 
     def finish(self, view: DocumentView, page: int, rect: Rect, a: Point, b: Point) -> None:
-        style = self.style
-
-        def commit(text: str) -> None:
+        def commit(text: str, style: TextStyle) -> None:
             self.editor = None
+            self.style = AddTextTool.last_style = style  # the next box starts like this
             if text.strip():
                 _used(
                     view,
@@ -362,7 +367,7 @@ class AddTextTool(_RectTool):
             self.editor = None
 
         self.editor = InlineTextEditor(
-            view.viewport(), "", style, view.transform().m11(), commit, cancel
+            view.viewport(), "", self.style, view.transform().m11(), commit, cancel
         )
         self.editor.place(viewport_rect(view, page, rect))
 

@@ -280,6 +280,9 @@ class MuPage:
     def replace_image(self, key: str, data: bytes) -> None:
         content.replace_image(self, key, data)
 
+    def font_program(self, name: str) -> bytes | None:
+        return content.font_program(self, name)
+
     def ocr_text_layer(
         self, language: str, dpi: int, tessdata: Path, preprocess: bool = False
     ) -> bytes:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import io
 import re
@@ -28,6 +29,7 @@ from pdfeditor.engine.contentstream.objects import (
 )
 from pdfeditor.engine.contentstream.parser import ContentSyntaxError, Operation, parse, write
 from pdfeditor.engine.mupdf import annots
+from pdfeditor.engine.textlayout import editable_blocks
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Rect
 from pdfeditor.model.objects import (
@@ -158,10 +160,10 @@ def _alignment(block: Block) -> Align:
 
 
 def _text_blocks(page: MuPage) -> list[Block]:
-    """Text blocks in reading order (top to bottom, then left to right), so keys don't depend
-    on where an edit put the text in the content stream."""
-    blocks = [b for b in page.text_page(with_chars=False).blocks if not b.is_image and b.lines]
-    return sorted(blocks, key=lambda b: (round(b.bbox.y0, 1), b.bbox.x0))
+    """Editable paragraphs in reading order (top to bottom, then left to right), so keys don't
+    depend on where an edit put the text in the content stream. Multi-column rows are split
+    into their columns (see ``engine.textlayout``)."""
+    return editable_blocks(page.text_page(with_chars=True).blocks)
 
 
 def list_objects(page: MuPage) -> list[PageObject]:
@@ -228,26 +230,74 @@ def _remove_text(page: MuPage, rects: Sequence[Rect]) -> None:
     page._doc.mark_page_changed(page.index)
 
 
-def _font_for(page: MuPage, style: TextStyle, text: str) -> tuple[bytes, FontChoice]:
-    """The font buffer to typeset ``text`` with, preferring the document's own font."""
-    doc = page._doc.fz
-    wanted = {c for c in text if not c.isspace()}
-    original_embedded = False
+def font_key(name: str) -> str:
+    """Compare font names loosely: text extraction reports the font program's own name
+    ("SegoeUI") while the page lists its BaseFont ("ABCDEF+Segoe UI Regular")."""
+    key = re.sub(r"[^a-z0-9]", "", _SUBSET.sub("", name).lower())
+    return key.removesuffix("regular").removesuffix("mt").removesuffix("ps") or key
+
+
+def font_program(page: MuPage, name: str) -> bytes | None:
+    """The embedded font program used on the page under ``name`` (None if not embedded)."""
+    wanted = font_key(name)
     for xref, ext, _ftype, basefont, *_ in page.fz.get_fonts(full=True):
-        if _SUBSET.sub("", basefont) != style.font or ext in ("n/a", ""):
+        if ext in ("n/a", "") or font_key(basefont) != wanted:
             continue
-        original_embedded = True
         try:
-            _name, _ext, _type, buffer = doc.extract_font(xref)
+            buffer = page._doc.fz.extract_font(xref)[3]
         except Exception:
-            break
-        if buffer and _covers(buffer, wanted):
-            return buffer, FontChoice(style.font, embedded_reused=True)
-        break
+            return None
+        return bytes(buffer) if buffer else None
+    return None
+
+
+def _font_for(
+    page: MuPage, style: TextStyle, text: str, reuse_embedded: bool = True
+) -> tuple[bytes, FontChoice]:
+    """The font buffer to typeset ``text`` with, preferring the document's own font."""
+    wanted = {c for c in text if not c.isspace()}
+    buffer = font_program(page, style.font)
+    original_embedded = buffer is not None
+    if reuse_embedded and buffer and _covers(buffer, wanted):
+        return _single_codepoint_cmap(buffer, wanted), FontChoice(style.font, embedded_reused=True)
     code = _STANDARD[family_of(style.font)][(style.bold, style.italic)]
     font = pymupdf.Font(code)
     substituted = original_embedded or not _BASE14.match(style.font)
     return font.buffer, FontChoice(font.name, substituted=substituted)
+
+
+def _single_codepoint_cmap(buffer: bytes, used: set[str]) -> bytes:
+    """Give every glyph a single Unicode value.
+
+    Fonts often map several code points to one glyph ("(" and the ornate U+FD3E, "-" and
+    U+2010). MuPDF writes the ToUnicode map by reverse lookup and may pick the exotic one, so
+    the edited text would copy and search wrong. Keep the code point the text uses, else the
+    lowest one.
+    """
+    try:
+        from fontTools.ttLib import TTFont
+
+        font = TTFont(io.BytesIO(buffer))
+        best = font.getBestCmap() or {}
+    except Exception:
+        return buffer  # not a TrueType/OpenType program: leave it alone
+    by_glyph: dict[str, list[int]] = {}
+    for code, glyph in best.items():
+        by_glyph.setdefault(glyph, []).append(code)
+    wanted = {ord(c) for c in used}
+    drop: set[int] = set()
+    for codes in by_glyph.values():
+        if len(codes) > 1:
+            keep = min((c for c in codes if c in wanted), default=min(codes))
+            drop.update(c for c in codes if c != keep)
+    if not drop:
+        return buffer
+    for table in font["cmap"].tables:
+        if table.isUnicode():
+            table.cmap = {c: g for c, g in table.cmap.items() if c not in drop}
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
 
 
 def _covers(buffer: bytes, chars: set[str]) -> bool:
@@ -256,23 +306,37 @@ def _covers(buffer: bytes, chars: set[str]) -> bool:
 
         cmap = TTFont(io.BytesIO(buffer), lazy=True).getBestCmap() or {}
     except Exception:
-        return False  # CFF/Type1 or damaged: don't risk missing glyphs
+        # bare CFF/Type1 programs: ask MuPDF (a font without a Unicode map reports no glyphs,
+        # so we never risk missing ones)
+        try:
+            font = pymupdf.Font(fontbuffer=buffer)
+            return all(font.has_glyph(ord(c)) for c in chars)
+        except Exception:
+            return False
     return all(ord(c) in cmap for c in chars)
 
 
-def insert_text(page: MuPage, rect: Rect, text: str, style: TextStyle) -> FontChoice:
-    """Typeset ``text`` in ``rect`` (visible space), growing downward if it doesn't fit."""
-    buffer, choice = _font_for(page, style, text)
-    archive = pymupdf.Archive()
-    archive.add(buffer, "edit-font")
+def insert_text(
+    page: MuPage,
+    rect: Rect,
+    text: str,
+    style: TextStyle,
+    reuse_embedded: bool = True,
+    keep_lines: bool = False,
+    font: tuple[bytes, FontChoice] | None = None,
+    baseline: float | None = None,
+) -> FontChoice:
+    """Typeset ``text`` in ``rect`` (visible space), growing downward if it doesn't fit.
+
+    The box widens (up to the page edge) so no word is broken, and with ``keep_lines`` so that
+    no line wraps: a one-line label stays one line after it gets longer.
+    """
+    buffer, choice = font or _font_for(page, style, text, reuse_embedded)
+    rect = _widen(page, rect, text, style, buffer, keep_lines)
+    if baseline is not None:
+        rect = _on_baseline(rect, baseline, style, buffer)
+    archive, css = _html_setup(buffer, style)
     body = "<br>".join(html.escape(line) for line in text.split("\n"))
-    css = (
-        '@font-face {font-family: EditFont; src: url("edit-font");} '
-        "body {font-family: EditFont; margin: 0; "
-        f"font-size: {style.size:.2f}pt; color: {style.color.to_hex()}; "
-        f"text-align: {style.align.value}; line-height: {style.line_height}; "
-        "font-weight: normal; font-style: normal;} p {margin: 0; padding: 0;}"
-    )
     fz = page.fz
     page_bottom = fz.rect.height
     height = max(rect.height, style.size * style.line_height)
@@ -291,6 +355,74 @@ def insert_text(page: MuPage, rect: Rect, text: str, style: TextStyle) -> FontCh
     return choice
 
 
+def _widen(
+    page: MuPage, rect: Rect, text: str, style: TextStyle, buffer: bytes, keep_lines: bool
+) -> Rect:
+    font = pymupdf.Font(fontbuffer=buffer)
+    pieces = text.splitlines() if keep_lines else text.split()
+    need = max((font.text_length(p, fontsize=style.size) for p in pieces), default=0.0)
+    need = need * 1.03 + 2  # rounding in the HTML layout
+    if need <= rect.width:
+        return rect
+    right = max(rect.x1, min(page.fz.rect.width - 2, rect.x0 + need))
+    return Rect(rect.x0, rect.y0, right, rect.y1)
+
+
+def _html_setup(buffer: bytes, style: TextStyle) -> tuple[pymupdf.Archive, str]:
+    archive = pymupdf.Archive()
+    archive.add(buffer, "edit-font")
+    css = (
+        '@font-face {font-family: EditFont; src: url("edit-font");} '
+        "body {font-family: EditFont; margin: 0; "
+        f"font-size: {style.size:.2f}pt; color: {style.color.to_hex()}; "
+        f"text-align: {style.align.value}; line-height: {style.line_height}; "
+        "font-weight: normal; font-style: normal; white-space: pre-wrap;} "
+        "p {margin: 0; padding: 0;}"
+    )
+    return archive, css
+
+
+_BASELINE_CACHE: dict[tuple[str, float, float], float] = {}
+
+
+def _baseline_offset(buffer: bytes, style: TextStyle) -> float:
+    """Distance from the box top to the first baseline in MuPDF's HTML layout, measured by
+    typesetting a sample on a scratch page (cached per font, size and line height)."""
+    key = (hashlib.sha1(buffer).hexdigest(), style.size, style.line_height)
+    if key not in _BASELINE_CACHE:
+        archive, css = _html_setup(buffer, style)
+        scratch = pymupdf.open()
+        try:
+            page = scratch.new_page(width=400, height=200)
+            page.insert_htmlbox(
+                pymupdf.Rect(10, 50, 390, 190), "<p>Hx</p>", css=css, archive=archive
+            )
+            spans = [
+                s
+                for b in page.get_text("dict")["blocks"]
+                for ln in b.get("lines", [])
+                for s in ln["spans"]
+                if s["text"].strip()
+            ]
+            offset = spans[0]["origin"][1] - 50 if spans else style.size * 0.9
+        finally:
+            scratch.close()
+        _BASELINE_CACHE[key] = offset
+    return _BASELINE_CACHE[key]
+
+
+def _on_baseline(rect: Rect, baseline: float, style: TextStyle, buffer: bytes) -> Rect:
+    """Move ``rect`` so the first typeset line sits on ``baseline`` (visible space); otherwise
+    an edited line lands a point or so off and drifts further with every edit."""
+    top = baseline - _baseline_offset(buffer, style)
+    return Rect(rect.x0, top, rect.x1, top + rect.height)
+
+
+def _baseline(block: Block) -> float | None:
+    spans = [s for s in block.lines[0].spans if s.text.strip()] if block.lines else []
+    return spans[0].origin.y if spans else None
+
+
 def replace_text(
     page: MuPage, key: str, text: str, style: TextStyle | None = None
 ) -> FontChoice | None:
@@ -299,11 +431,28 @@ def replace_text(
     obj = next(o for o in list_objects(page) if o.key == key)
     if not obj.editable:
         raise UnsupportedFeature(obj.reason)
-    style = style or obj.style or TextStyle()
+    original = obj.style or TextStyle()
+    style = style or original
+    # the document's font program only has the original weight/slant
+    same_face = font_key(style.font) == font_key(original.font) and (
+        style.bold,
+        style.italic,
+    ) == (original.bold, original.italic)
+    # pick the font first: removing the old text can drop an unused font from the resources
+    font = _font_for(page, style, text, reuse_embedded=same_face)
     _remove_text(page, [block.bbox])
     if not text.strip():
         return None
-    return insert_text(page, block.bbox, text, style)
+    single_line = len(block.lines) == 1
+    return insert_text(
+        page,
+        block.bbox,
+        text,
+        style,
+        keep_lines=single_line,
+        font=font,
+        baseline=_baseline(block),
+    )
 
 
 # -- objects ------------------------------------------------------------------------------------
@@ -340,13 +489,34 @@ def transform_objects(page: MuPage, keys: Sequence[str], visible: Matrix) -> Non
             if x is not None:
                 edits.append((obj.start, obj.end, x))
         _write_ops(page, wrap_ranges(ops, edits))
+    for key, _block in texts:
+        if not text_styles[key].editable:
+            raise UnsupportedFeature(text_styles[key].reason)
+    # resolve fonts before removing anything (removal can drop now-unused fonts)
+    fonts = {
+        key: _font_for(page, text_styles[key].style or TextStyle(), block.text)
+        for key, block in texts
+    }
+    if texts:
+        _remove_text(page, [block.bbox for _key, block in texts])
     for key, block in texts:
-        item = text_styles[key]
-        if not item.editable:
-            raise UnsupportedFeature(item.reason)
-        _remove_text(page, [block.bbox])
-        target = block.bbox.transform(visible)
-        insert_text(page, target, block.text, item.style or TextStyle())
+        insert_text(
+            page,
+            block.bbox.transform(visible),
+            block.text,
+            text_styles[key].style or TextStyle(),
+            keep_lines=len(block.lines) == 1,
+            font=fonts[key],
+            baseline=_moved_baseline(block, visible),
+        )
+
+
+def _moved_baseline(block: Block, visible: Matrix) -> float | None:
+    """The block's baseline after a move; None when resized (the box decides then)."""
+    if abs(visible.a - 1) > 1e-6 or abs(visible.d - 1) > 1e-6:
+        return None
+    base = _baseline(block)
+    return None if base is None else base + visible.f
 
 
 def image_data(page: MuPage, key: str) -> tuple[bytes, str]:

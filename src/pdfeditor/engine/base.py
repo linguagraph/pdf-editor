@@ -250,6 +250,11 @@ class Page(Protocol):
 
     def replace_image(self, key: str, data: bytes) -> None: ...
 
+    def font_program(self, name: str) -> bytes | None:
+        """The embedded font program behind a text style's font name (for an editing preview
+        that looks like the page); None if the font isn't embedded."""
+        ...
+
     # Optional (``capabilities.ocr``). Two steps so recognition can run in a background job.
     def ocr_text_layer(
         self, language: str, dpi: int, tessdata: Path, preprocess: bool = False

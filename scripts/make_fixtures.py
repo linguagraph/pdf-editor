@@ -359,7 +359,34 @@ def heavy() -> None:
     _save(doc, "heavy.pdf")
 
 
+def two_columns() -> None:
+    """A two-column label list like appliance manuals: each row is ONE text line whose gutter
+    is a run of spaces, in an embedded (non-base-14) font; plus a wrapped paragraph."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=420, height=595)
+    page.insert_font(fontname="F1", fontbuffer=pymupdf.Font("helv").buffer)  # embedded
+    rows = [
+        ("Предпране", "Забавено стартиране"),
+        ("Бързо", "Заключване на вратата"),
+        ("Допълнително вода", "Включено/Изключено"),
+        ("Против намачкване", "Старт/Пауза"),
+    ]
+    y = 60.0
+    for left, right in rows:
+        gap = " " * max(4, 60 - 2 * len(left))
+        page.insert_text((40, y), left + gap + right, fontname="F1", fontsize=10,
+                         color=(0.14, 0.12, 0.13))  # fmt: skip
+        y += 17.5
+    paragraph = (
+        "Продължителността на програмата се изписва на екрана на машината докато се "
+        "избира програма и автоматично се регулира по време на пране."
+    )
+    page.insert_textbox(pymupdf.Rect(40, 200, 380, 300), paragraph, fontname="F1", fontsize=10)
+    _save(doc, "two_columns.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "two_columns": two_columns,
     "heavy": heavy,
     "report": report,
     "sensitive": sensitive,
