@@ -133,6 +133,9 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
 - After each phase is merged, build the executable from the updated `main`:
   `uv run python scripts/build_exe.py --test` (writes `dist/pdfeditor.exe`, must end with
   `RESULT: OK`), and report the size and self-test result.
+- If a pre-commit hook modifies files and aborts the commit, `git add` and run the same
+  `git commit` again. Never use `--amend` for this: it amends the previous (possibly merged)
+  commit. Never rewrite or force-push shared history; fix mistakes with new commits.
 - GitHub doesn't let a PR's author approve it. When the reviewer is the same account, post the
   review with `gh pr review --comment` (verdict, findings, follow-ups), fix findings on the
   branch, wait for green CI, then merge.
