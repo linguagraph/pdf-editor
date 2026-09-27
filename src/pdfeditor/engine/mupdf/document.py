@@ -37,6 +37,7 @@ from pdfeditor.model.metadata import (
 )
 from pdfeditor.model.outline import Destination, OutlineItem, flatten
 from pdfeditor.model.pages import PageLabelRule
+from pdfeditor.model.redaction import SanitizeOptions
 
 log = logging.getLogger(__name__)
 
@@ -173,8 +174,10 @@ class MuDocument:
         if self._path is not None and self._path.exists():
             size = self._path.stat().st_size
         names_js = self._catalog_key("Names/JavaScript")[0] != "null"
-        open_action = self._catalog_key("OpenAction")
-        open_js = "/JS" in open_action[1] or "/JavaScript" in open_action[1]
+        kind, open_action = self._catalog_key("OpenAction")
+        if kind == "xref":  # an indirect action object: look inside it
+            open_action = fz.xref_object(int(open_action.split()[0]))
+        open_js = "/JS" in open_action or "/JavaScript" in open_action
         marked = self._catalog_key("MarkInfo/Marked")[1] == "true"
         struct_tree = self._catalog_key("StructTreeRoot")[0] != "null"
         sigflags = fz.get_sigflags()
@@ -452,6 +455,78 @@ class MuDocument:
 
     def set_page_label_rules(self, rules: Sequence[PageLabelRule]) -> None:
         pages.set_label_rules(self, rules)
+
+    def sanitize(self, options: SanitizeOptions) -> list[str]:
+        fz = self._fz
+        report: list[str] = []
+        before_meta = any(
+            (fz.metadata or {}).get(k)
+            for k in ("title", "author", "subject", "keywords", "creator", "producer")
+        )
+        if options.comments:
+            removed = 0
+            for index in range(self.page_count):
+                page = fz.load_page(index)
+                for annot in list(page.annots()):
+                    if annot.type[0] not in (pymupdf.PDF_ANNOT_WIDGET, pymupdf.PDF_ANNOT_LINK):
+                        page.delete_annot(annot)
+                        removed += 1
+            if removed:
+                report.append(f"{removed} comment(s) and markup(s)")
+        attachments = len(fz.embfile_names())
+        links = sum(len(fz.load_page(i).get_links()) for i in range(self.page_count))
+        has_js = self.info().has_javascript
+        has_xmp = bool(fz.get_xml_metadata())
+        hidden = 0
+        if options.hidden_text:
+            for index in range(self.page_count):
+                # render mode 3 = invisible (typical of OCR layers and hidden text tricks)
+                hidden += sum(
+                    1 for span in fz.load_page(index).get_texttrace() if span.get("type") == 3
+                )
+        fz.scrub(
+            attached_files=options.attachments,
+            clean_pages=True,
+            embedded_files=options.attachments,
+            hidden_text=options.hidden_text,
+            javascript=options.javascript,
+            metadata=options.metadata,
+            redactions=False,  # applying marks is the separate, reviewed step
+            remove_links=options.links,
+            reset_fields=options.form_data,
+            reset_responses=options.comments,
+            thumbnails=options.thumbnails,
+            xml_metadata=options.xmp,
+        )
+        catalog = fz.pdf_catalog()
+        if options.javascript:
+            # scrub() blanks script text but leaves the actions; remove the triggers themselves
+            kind, value = fz.xref_get_key(catalog, "OpenAction")
+            action = fz.xref_object(int(value.split()[0])) if kind == "xref" else value
+            if "/JavaScript" in action or "/JS" in action:
+                fz.xref_set_key(catalog, "OpenAction", "null")
+            fz.xref_set_key(catalog, "AA", "null")
+            fz.xref_set_key(catalog, "Names/JavaScript", "null")
+            for index in range(self.page_count):
+                fz.xref_set_key(fz.page_xref(index), "AA", "null")
+        if options.attachments and fz.xref_get_key(catalog, "PageMode")[1] == "/UseAttachments":
+            fz.xref_set_key(catalog, "PageMode", "/UseNone")
+        if options.metadata and before_meta:
+            report.append("document properties (title, author, ...)")
+        if options.xmp and has_xmp:
+            report.append("XMP metadata")
+        if options.javascript and has_js:
+            report.append("JavaScript")
+        if options.attachments and attachments:
+            report.append(f"{attachments} attached file(s)")
+        if options.links and links:
+            report.append(f"{links} link(s)")
+        if options.hidden_text and hidden:
+            report.append(f"{hidden} hidden text run(s)")
+        if options.form_data and fz.is_form_pdf:
+            report.append("form field values")
+        self._reset_pages()
+        return report
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes:
         options = options or SaveOptions()

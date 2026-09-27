@@ -20,6 +20,7 @@ from pdfeditor.model.metadata import DocumentInfo, EmbeddedFile, FontInfo, Layer
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
+from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
 from pdfeditor.model.text import TextPage
 
 
@@ -226,6 +227,12 @@ class Page(Protocol):
 
     def replace_image(self, key: str, data: bytes) -> None: ...
 
+    # Optional (``capabilities.redact``). Marks are REDACT annotations (add_annotation).
+    def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
+        """Permanently remove content under redaction marks (all, or ``ids``). Returns the
+        number of marks applied; the marks themselves are replaced by their fill boxes."""
+        ...
+
 
 @runtime_checkable
 class Document(Protocol):
@@ -299,6 +306,11 @@ class Document(Protocol):
     def page_label_rules(self) -> list[PageLabelRule]: ...
 
     def set_page_label_rules(self, rules: Sequence[PageLabelRule]) -> None: ...
+
+    def sanitize(self, options: SanitizeOptions) -> list[str]:
+        """Remove hidden or sensitive information; returns what was removed, for the report.
+        Save with ``SaveOptions(garbage=4)`` afterwards so nothing stays in unused objects."""
+        ...
 
     def can_save_incrementally(self) -> bool:
         """True if ``save(options=SaveOptions(incremental=True))`` to ``path`` can work."""

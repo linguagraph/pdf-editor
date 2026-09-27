@@ -81,6 +81,7 @@ from pdfeditor.ui.panels.inspector import InspectorPanel
 from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
+from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.theme import Theme, apply_theme
@@ -313,6 +314,9 @@ class MainWindow(QMainWindow):
         self._create_actions()
         self.organize = OrganizeController(self)
         self.edit = EditController(self, self.tool_group, self.tool_actions)
+        self.protect = ProtectController(self, self.tool_group, self.tool_actions)
+        self.panels.insert(3, self.protect.panel)
+        self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
         self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
@@ -610,6 +614,7 @@ class MainWindow(QMainWindow):
         home.add_group(self.act_prev, self.act_next)
         self.edit.ribbon()
         self.organize.ribbon()
+        self.protect.ribbon()
         comment = self.ribbon.add_tab("Comment")
         comment.add_group(
             *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
@@ -1149,6 +1154,8 @@ class MainWindow(QMainWindow):
             tool = annotate.StampTool(self.stamp_name)
         elif (edit_tool := make_edit_tool(name)) is not None:
             tool = edit_tool
+        elif name == "redact":
+            tool = RedactTool(self.protect)
         else:
             tool = annotate.tool_for(name) or SelectTool()
         tool.name = name

@@ -16,6 +16,7 @@ from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Destination, Link, LinkKind
 from pdfeditor.model.pages import ImageStamp, TextStamp
+from pdfeditor.model.redaction import RedactOptions
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TextPage
 
 if TYPE_CHECKING:
@@ -276,6 +277,9 @@ class MuPage:
     def replace_image(self, key: str, data: bytes) -> None:
         content.replace_image(self, key, data)
 
+    def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
+        return annots.apply_redactions(self, ids, options)
+
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]
 
@@ -344,6 +348,9 @@ class MuPage:
             locked=bool(annot.flags & pymupdf.PDF_ANNOT_IS_LOCKED),
             file_name=file_name,
             file_data=file_data,
+            overlay_text=_overlay_text(self._doc.fz, annot.xref)
+            if atype is AnnotationType.REDACT
+            else "",
         )
 
 
@@ -359,6 +366,11 @@ _LINE_END_NAMES = {
     pymupdf.PDF_ANNOT_LE_R_CLOSED_ARROW: "RClosedArrow",
     pymupdf.PDF_ANNOT_LE_SLASH: "Slash",
 }
+
+
+def _overlay_text(doc: pymupdf.Document, xref: int) -> str:
+    kind, value = doc.xref_get_key(xref, "OverlayText")
+    return value if kind == "string" else ""
 
 
 def _border_width(value: float | None) -> float:

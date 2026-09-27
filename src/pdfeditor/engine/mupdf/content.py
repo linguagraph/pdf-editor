@@ -27,6 +27,7 @@ from pdfeditor.engine.contentstream.objects import (
     wrap_ranges,
 )
 from pdfeditor.engine.contentstream.parser import ContentSyntaxError, Operation, parse, write
+from pdfeditor.engine.mupdf import annots
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Rect
 from pdfeditor.model.objects import (
@@ -211,32 +212,19 @@ def _remove_text(page: MuPage, rects: Sequence[Rect]) -> None:
     marks are set aside and restored.
     """
     fz = page.fz
-    doc = page._doc.fz
-    # (rect, info, fill color, /NM) of the user's pending redaction marks
-    saved: list[tuple[pymupdf.Rect, dict[str, str], tuple[float, ...] | None, str]] = []
-    for annot in list(fz.annots(types=[pymupdf.PDF_ANNOT_REDACT])):
-        colors = annot.colors or {}
-        saved.append((annot.rect, dict(annot.info), colors.get("fill"), annot.info.get("id", "")))
-        fz.delete_annot(annot)
+    stashed = annots.stash_redactions(page)
     for r in rects:
         unrot = (pymupdf.Rect(*r.as_tuple()) * fz.derotation_matrix).normalize()
         inner = pymupdf.Rect(unrot.x0 + 0.5, unrot.y0 + 0.5, unrot.x1 - 0.5, unrot.y1 - 0.5)
         fz.add_redact_annot(inner, fill=False)
-    fz.apply_redactions(
-        images=pymupdf.PDF_REDACT_IMAGE_NONE,
-        graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
-        text=pymupdf.PDF_REDACT_TEXT_REMOVE,
-    )
-    for rect, info, fill, name in saved:
-        mark = fz.add_redact_annot(rect, fill=fill if fill else (0, 0, 0))
-        mark.set_info(
-            content=info.get("content", ""),
-            title=info.get("title", ""),
-            subject=info.get("subject", ""),
+    try:
+        fz.apply_redactions(
+            images=pymupdf.PDF_REDACT_IMAGE_NONE,
+            graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+            text=pymupdf.PDF_REDACT_TEXT_REMOVE,
         )
-        if name:
-            doc.xref_set_key(mark.xref, "NM", pymupdf.get_pdf_str(name))
-        mark.update()
+    finally:
+        annots.restore_redactions(page, stashed)
     page._doc.mark_page_changed(page.index)
 
 

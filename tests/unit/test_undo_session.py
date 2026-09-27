@@ -281,3 +281,31 @@ def test_recovery_entries_from_dead_process(tmp_path: Path, fixture_pdf) -> None
     assert entry.uid == "abc" and entry.original_path is None
     assert not (tmp_path / "orphan.json").exists()
     assert _pid_alive(os.getpid()) and not _pid_alive(999999999)
+
+
+def test_required_full_save_overrides_incremental(fixture_pdf, tmp_path: Path) -> None:
+    """After redaction a signed file must be rewritten, not appended to."""
+    import pymupdf
+
+    src = pymupdf.open(fixture_pdf("images"))
+    widget = pymupdf.Widget()
+    widget.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+    widget.field_name = "Sig1"
+    widget.rect = pymupdf.Rect(50, 50, 200, 100)
+    src[0].add_widget(widget)
+    path = tmp_path / "signed.pdf"
+    src.save(path)
+    src.close()
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        pdf.Root.AcroForm.SigFlags = 3
+        pdf.save(path)
+    before = path.read_bytes()
+    session = DocumentSession.open(path)
+    meta = session.document.metadata()
+    meta.subject = "sanitized"
+    session.execute(SetMetadataCommand(meta))
+    session.require_full_save = True
+    session.save()
+    assert not path.read_bytes().startswith(before)  # rewritten, not an appended revision
+    assert session.require_full_save is False
+    session.close()

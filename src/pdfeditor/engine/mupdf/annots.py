@@ -26,6 +26,7 @@ from pdfeditor.model.annotations import (
     ReviewState,
 )
 from pdfeditor.model.geometry import Point, Quad, Rect
+from pdfeditor.model.redaction import GraphicsRedaction, ImageRedaction, RedactOptions
 
 if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.page import MuPage
@@ -71,6 +72,7 @@ WRITABLE_TYPES = frozenset(
         AnnotationType.SQUIGGLY,
         AnnotationType.STRIKEOUT,
         AnnotationType.INK,
+        AnnotationType.REDACT,
     }
 )
 
@@ -174,6 +176,26 @@ def add(page: MuPage, model: AnnotationModel) -> AnnotationModel:
     elif t is AnnotationType.STAMP:
         index = STANDARD_STAMPS.index(model.icon) if model.icon in STANDARD_STAMPS else 0
         annot = fz.add_stamp_annot(geo.rect(model.rect), stamp=index)
+    elif t is AnnotationType.REDACT:
+        quads = [geo.quad(q) for q in model.quads]
+        box = geo.rect(model.rect)
+        if quads:
+            box = quads[0].rect
+            for q in quads[1:]:
+                box |= q.rect
+        annot = fz.add_redact_annot(
+            box,
+            text=model.overlay_text or None,
+            fill=model.fill.rgb() if model.fill else (0, 0, 0),
+            text_color=model.text_color.rgb() if model.text_color else (1, 1, 1),
+            cross_out=True,
+        )
+        if len(quads) > 1:  # exact line areas of a multi-line text mark
+            coords: list[float] = []
+            for q in model.quads:
+                for p in (q.ul, q.ur, q.ll, q.lr):
+                    coords.extend(geo.pdf(p))
+            page._doc.fz.xref_set_key(annot.xref, "QuadPoints", _nums(coords))
     elif t is AnnotationType.FILE_ATTACHMENT:
         if model.file_data is None:
             raise EngineError("file attachment annotation needs file_data")
@@ -245,6 +267,9 @@ def _apply_properties(
         info["creationDate"] = _pdf_date(model.created or datetime.now().astimezone())
     info["modDate"] = _pdf_date(model.modified or datetime.now().astimezone())
     annot.set_info(info)
+    if t is AnnotationType.REDACT:
+        annot.update()
+        return
     if t is not AnnotationType.FREE_TEXT:
         fill = model.fill.rgb() if model.fill is not None and t in _FILL_TYPES else None
         stroke = model.color.rgb() if model.color is not None else None
@@ -419,3 +444,55 @@ def _add_xobject_resource(page: MuPage, name: str, xobject: int) -> None:
             doc.xref_set_key(int(_REF.match(sub).group(1)), name, f"{xobject} 0 R")  # type: ignore[union-attr]
         else:
             doc.xref_set_key(page.fz.xref, f"Resources/XObject/{name}", f"{xobject} 0 R")
+
+
+# -- redaction --------------------------------------------------------------------------------
+_IMAGE_MODES = {
+    ImageRedaction.NONE: pymupdf.PDF_REDACT_IMAGE_NONE,
+    ImageRedaction.PIXELS: pymupdf.PDF_REDACT_IMAGE_PIXELS,
+    ImageRedaction.REMOVE: pymupdf.PDF_REDACT_IMAGE_REMOVE,
+}
+_GRAPHICS_MODES = {
+    GraphicsRedaction.NONE: pymupdf.PDF_REDACT_LINE_ART_NONE,
+    GraphicsRedaction.COVERED: pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+    GraphicsRedaction.TOUCHED: pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+}
+
+
+def stash_redactions(page: MuPage, keep: set[int] | None = None) -> list[AnnotationModel]:
+    """Remove pending redaction marks (all, or all except ``keep``) and return them.
+
+    MuPDF applies *every* redaction mark on a page at once; stashing lets callers apply a
+    subset (or their own temporary marks) and then :func:`restore_redactions`.
+    """
+    stashed: list[AnnotationModel] = []
+    for annot in list(page.fz.annots(types=[pymupdf.PDF_ANNOT_REDACT])):
+        if keep is not None and annot.xref in keep:
+            continue
+        stashed.append(page._annot_model(annot))
+        page.fz.delete_annot(annot)
+    return stashed
+
+
+def restore_redactions(page: MuPage, models: Sequence[AnnotationModel]) -> None:
+    for model in models:
+        add(page, model)
+
+
+def apply_redactions(page: MuPage, ids: Sequence[int] | None, options: RedactOptions) -> int:
+    """Apply redaction marks (all, or ``ids``); returns how many were applied."""
+    stashed = stash_redactions(page, set(ids)) if ids is not None else []
+    count = len(list(page.fz.annots(types=[pymupdf.PDF_ANNOT_REDACT])))
+    try:
+        if count:
+            page.fz.apply_redactions(
+                images=_IMAGE_MODES[options.images],
+                graphics=_GRAPHICS_MODES[options.graphics],
+                text=pymupdf.PDF_REDACT_TEXT_REMOVE
+                if options.text
+                else pymupdf.PDF_REDACT_TEXT_NONE,
+            )
+    finally:
+        restore_redactions(page, stashed)
+        page._doc.mark_page_changed(page.index)
+    return count

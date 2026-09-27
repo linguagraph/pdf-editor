@@ -248,7 +248,46 @@ def mixed_content() -> None:
     _save(doc, "mixed_content.pdf")
 
 
+def sensitive() -> None:
+    """Personal data, an image under text, hidden text and other sanitization targets."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_image(pymupdf.Rect(60, 90, 400, 200), stream=_gradient_png(340, 110))
+    lines = [
+        "Customer: Jane Example",
+        "Email: jane.example@example.com",
+        "Phone: +1 (555) 010-7788",
+        "Card: 4111 1111 1111 1111",
+        "IBAN: DE89 3704 0044 0532 0130 00",
+        "SSN: 123-45-6789",
+    ]
+    for i, text in enumerate(lines):
+        page.insert_text((72, 110 + 18 * i), text, fontsize=12)
+    page.insert_text((72, 300), "Public paragraph that must survive.", fontsize=12)
+    page.insert_text((72, 330), "invisible OCR layer text", fontsize=12, render_mode=3)
+    page.draw_line((72, 360), (400, 360), color=(0, 0, 0), width=1)
+    page.insert_link(
+        {
+            "kind": pymupdf.LINK_URI,
+            "from": pymupdf.Rect(72, 290, 300, 305),
+            "uri": "https://example.org",
+        }
+    )
+    note = page.add_text_annot((450, 110), "Internal reviewer note")
+    note.update()
+    doc.embfile_add("secret", b"secret attachment", filename="secret.txt")
+    doc.set_metadata({"title": "Confidential report", "author": "Jane Example"})
+    doc.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/"></x:xmpmeta>')
+    catalog = doc.pdf_catalog()
+    js = doc.get_new_xref()
+    doc.update_object(js, "<< /S /JavaScript /JS (app.alert('hi');) >>")
+    doc.xref_set_key(catalog, "OpenAction", f"{js} 0 R")
+    doc.save(OUT / "sensitive.pdf", garbage=3, deflate=True)
+    doc.close()
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "sensitive": sensitive,
     "mixed_content": mixed_content,
     "layers": layers,
     "scanned": scanned,

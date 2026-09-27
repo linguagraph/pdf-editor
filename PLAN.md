@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 8 (Redaction and sanitization).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 9 (OCR).**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -169,10 +169,10 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Snapshot-based undo for every content command; render/pixel and text-extraction checks before and after editing (instead of golden images)
 
 ### Phase 8: Redaction and sanitization (M)
-- [ ] Redact tool: mark area / text selection / whole page; search-and-redact with presets (email, phone, IBAN, credit card, national ID patterns, custom regex)
-- [ ] Review mode: list of marks, per-mark accept/reject, overlay text and fill color
-- [ ] Apply: true removal of text, image pixels and vector graphics under each mark (configurable), then a **verification pass** that re-extracts text and checks image pixels in every redacted area and reports any leak
-- [ ] Sanitize document: metadata/XMP, JavaScript, embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection)
+- [x] Redact tool: mark area / text selection / whole page; search-and-redact with presets (email, phone, IBAN, credit card (Luhn-checked), US SSN, dates, custom regex)
+- [x] Review mode: Redactions panel listing marks, jump-to, apply selected / remove / apply all; overlay text and fill color (Redaction Properties, remembered)
+- [x] Apply: true removal of text, image pixels (blank or remove images) and vector graphics (covered or touched) under each mark, then a **verification pass** that re-extracts text and inspects image pixels in every redacted area and reports any leak; the next save is forced to be a full, garbage-collected rewrite (an incremental save would keep the old content)
+- [ ] Sanitize document: metadata/XMP, JavaScript (incl. open actions and triggers), embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection) _(partial: all done except hidden-layer content and off-page text)_
 
 ### Phase 9: OCR (M)
 - [ ] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed
