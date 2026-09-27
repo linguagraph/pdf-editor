@@ -229,7 +229,27 @@ def layers() -> None:
     _save(doc, "layers.pdf")
 
 
+def mixed_content() -> None:
+    """Paragraphs, an image, a vector shape and a form XObject: content-editing tests."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((72, 60), "Mixed content heading", fontsize=18, fontname="hebo")
+    page.insert_textbox(pymupdf.Rect(72, 80, 400, 180), LOREM, fontsize=11, fontname="tiro")
+    page.insert_textbox(
+        pymupdf.Rect(72, 200, 400, 260), "A second paragraph that stays put.", fontsize=11
+    )
+    page.insert_image(pymupdf.Rect(420, 80, 540, 180), stream=_gradient_png(120, 100))
+    page.draw_rect(pymupdf.Rect(72, 300, 272, 380), color=(0, 0, 1), fill=(0.8, 0.9, 1), width=2)
+    logo = pymupdf.open()
+    lp = logo.new_page(width=100, height=60)
+    lp.draw_circle((50, 30), 25, color=(1, 0, 0), fill=(1, 0.8, 0))
+    page.show_pdf_page(pymupdf.Rect(320, 300, 420, 360), logo, 0)  # becomes a form XObject
+    page.add_redact_annot(pymupdf.Rect(72, 420, 200, 440))  # a pending user redaction mark
+    _save(doc, "mixed_content.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "mixed_content": mixed_content,
     "layers": layers,
     "scanned": scanned,
     "broken_xref": broken_xref,

@@ -8,11 +8,12 @@ from typing import TYPE_CHECKING, Any
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
-from pdfeditor.engine.mupdf import annots, pages
+from pdfeditor.engine.mupdf import annots, content, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType, ReviewState
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
+from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Destination, Link, LinkKind
 from pdfeditor.model.pages import ImageStamp, TextStamp
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TextPage
@@ -248,6 +249,32 @@ class MuPage:
 
     def fill_background(self, color: Color, opacity: float = 1.0) -> None:
         pages.fill_background(self, color.rgb(), opacity)
+
+    def content_objects(self) -> list[PageObject]:
+        return content.list_objects(self)
+
+    def delete_objects(self, keys: Sequence[str]) -> None:
+        content.delete_objects(self, keys)
+
+    def transform_objects(self, keys: Sequence[str], matrix: Matrix) -> None:
+        content.transform_objects(self, keys, matrix)
+
+    def replace_text(
+        self, key: str, text: str, style: TextStyle | None = None
+    ) -> FontChoice | None:
+        return content.replace_text(self, key, text, style)
+
+    def add_text(self, rect: Rect, text: str, style: TextStyle) -> FontChoice:
+        return content.insert_text(self, rect, text, style)
+
+    def add_shape(self, spec: ShapeSpec) -> None:
+        content.add_shape(self, spec)
+
+    def image_data(self, key: str) -> tuple[bytes, str]:
+        return content.image_data(self, key)
+
+    def replace_image(self, key: str, data: bytes) -> None:
+        content.replace_image(self, key, data)
 
     def annotations(self) -> list[AnnotationModel]:
         return [self._annot_model(a) for a in self.fz.annots()]
