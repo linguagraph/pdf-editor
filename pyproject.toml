@@ -15,7 +15,6 @@ dependencies = [
     "pikepdf>=8.0",
     "fonttools>=4.47",
     "Pillow>=10.0",
-    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]

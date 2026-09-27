@@ -121,6 +121,8 @@ def test_add_text_remembers_style(qtbot, window, view) -> None:
     editor.setPlainText("Нов текст")
     editor.style_bar.font_combo.setCurrentIndex(editor.style_bar.font_combo.findData("Courier"))
     editor.style_bar.size_box.setValue(16)
+    editor.style_bar.line_spacing.setValue(1.5)
+    assert editor.text_style().line_height == 1.5
     editor.commit()
     obj = texts(view)["Нов текст"]
     assert obj.style.size == pytest.approx(16) and family_of(obj.style.font) == "mono"
