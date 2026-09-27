@@ -249,6 +249,23 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             doc.close()
         return f"Word ({docx.stat().st_size // 1024} KB) and PNG ({len(pngs)} page)"
 
+    def optimize() -> str:
+        from pdfeditor.engine.base import OptimizeOptions
+        from pdfeditor.services.optimize import ReduceOptions, reduce_size
+
+        doc = get_engine().open(data_path("selftest.pdf"))
+        try:
+            result = reduce_size(doc, ReduceOptions(OptimizeOptions(image_dpi=72), linearize=True))
+            usage = doc.space_usage()
+        finally:
+            doc.close()
+        check = get_engine().open(result.data)
+        pages = check.page_count
+        check.close()
+        if pages != 1 or not usage.total:
+            raise AssertionError("optimized copy is broken")
+        return f"{result.before} -> {result.after} bytes, linearized"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -265,6 +282,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("print to PDF", printing),
         ("OCR", ocr),
         ("export", export),
+        ("optimize", optimize),
     ]
 
 
