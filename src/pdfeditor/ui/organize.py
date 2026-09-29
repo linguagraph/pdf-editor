@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QStyle
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from pdfeditor.core.commands import SetPageLabelsCommand
 from pdfeditor.core.jobs import Cancelled
@@ -38,6 +38,7 @@ from pdfeditor.ui.dialogs.pages import (
     checked_pages,
 )
 from pdfeditor.ui.dialogs.password import password_prompt
+from pdfeditor.ui.icons import icon
 
 if TYPE_CHECKING:
     from pdfeditor.ui.document_tab import DocumentTab
@@ -47,18 +48,15 @@ if TYPE_CHECKING:
 class OrganizeController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
-        sp = QStyle.StandardPixmap
 
         def act(
             text: str,
             slot: Callable[[], object],
+            icon_name: str,
             shortcut: str | None = None,
-            icon: QStyle.StandardPixmap | None = None,
             needs_doc: bool = True,
         ) -> QAction:
-            a = QAction(text, window)
-            if icon is not None:
-                a.setIcon(window.style().standardIcon(icon))
+            a = QAction(icon(icon_name), text, window)
             if shortcut:
                 a.setShortcut(QKeySequence(shortcut))
             a.triggered.connect(lambda _=False: self._guard(slot))
@@ -67,34 +65,31 @@ class OrganizeController:
             return a
 
         self.act_organize = act(
-            "&Organize Pages", self.toggle_organizer, "Ctrl+Shift+O", sp.SP_FileDialogListView
+            "&Organize Pages", self.toggle_organizer, "layout-grid", "Ctrl+Shift+O"
         )
         self.act_organize.setCheckable(True)
-        self.act_insert = act(
-            "&Insert Pages…", self.insert_pages, "Ctrl+Shift+I", sp.SP_FileDialogNewFolder
-        )
-        self.act_delete = act("&Delete Pages", self.delete_pages, "Ctrl+Shift+D", sp.SP_TrashIcon)
+        self.act_insert = act("&Insert Pages…", self.insert_pages, "file-plus", "Ctrl+Shift+I")
+        self.act_delete = act("&Delete Pages", self.delete_pages, "file-x", "Ctrl+Shift+D")
         self.act_rotate_left = act(
-            "Rotate Pages &Left", lambda: self.rotate(-90), "Ctrl+Shift+Left"
+            "Rotate Pages &Left", lambda: self.rotate(-90), "rotate-ccw", "Ctrl+Shift+Left"
         )
         self.act_rotate_right = act(
-            "Rotate Pages &Right", lambda: self.rotate(90), "Ctrl+Shift+Right"
+            "Rotate Pages &Right", lambda: self.rotate(90), "rotate-cw", "Ctrl+Shift+Right"
         )
-        self.act_duplicate = act("D&uplicate Pages", self.duplicate)
-        self.act_extract = act("E&xtract Pages…", self.extract_pages)
-        self.act_replace = act("Re&place Pages…", self.replace_pages)
-        self.act_split = act("&Split Document…", self.split_document)
-        self.act_crop = act("&Crop Pages…", self.crop_pages, "Ctrl+Shift+T")
-        self.act_labels = act("Page &Labels…", self.page_labels)
-        self.act_header = act("&Header && Footer…", lambda: self.header_footer(False))
-        self.act_bates = act("&Bates Numbering…", lambda: self.header_footer(True))
-        self.act_watermark = act("&Watermark…", self.watermark)
-        self.act_background = act("Bac&kground…", self.background)
+        self.act_duplicate = act("D&uplicate Pages", self.duplicate, "copy")
+        self.act_extract = act("E&xtract Pages…", self.extract_pages, "file-output")
+        self.act_replace = act("Re&place Pages…", self.replace_pages, "replace")
+        self.act_split = act("&Split Document…", self.split_document, "split")
+        self.act_crop = act("&Crop Pages…", self.crop_pages, "crop", "Ctrl+Shift+T")
+        self.act_labels = act("Page &Labels…", self.page_labels, "tag")
+        self.act_header = act("&Header && Footer…", lambda: self.header_footer(False), "panel-top")
+        self.act_bates = act("&Bates Numbering…", lambda: self.header_footer(True), "hash")
+        self.act_watermark = act("&Watermark…", self.watermark, "droplet")
+        self.act_background = act("Bac&kground…", self.background, "paint-bucket")
         self.act_combine = act(
             "&Combine Files into PDF…",
             self.combine,
-            None,
-            sp.SP_FileDialogDetailedView,
+            "combine",
             needs_doc=False,
         )
 

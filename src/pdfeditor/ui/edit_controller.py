@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from pdfeditor.model.objects import ObjectType, ShapeKind
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.tools import edit
 from pdfeditor.ui.tools.base import Tool
 
@@ -25,6 +26,14 @@ EDIT_TOOLS = (
     ("add_ellipse", "Add &Ellipse", None),
     ("add_line", "Add &Line", None),
 )
+EDIT_TOOL_ICONS = {
+    "edit": "file-pen-line",
+    "add_text": "type",
+    "add_image": "image-plus",
+    "add_rectangle": "square",
+    "add_ellipse": "circle",
+    "add_line": "slash",
+}
 
 
 def make_edit_tool(name: str) -> Tool | None:
@@ -51,7 +60,7 @@ class EditController:
         self.w = window
         self._warned_signed: set[int] = set()
         for name, text, key in EDIT_TOOLS:
-            tool_action = QAction(text, window, checkable=True)
+            tool_action = QAction(icon(EDIT_TOOL_ICONS[name]), text, window, checkable=True)
             if key:
                 tool_action.setShortcut(QKeySequence(key))
             tool_action.setProperty("needs_doc", True)
@@ -61,16 +70,18 @@ class EditController:
             tool_actions[name] = tool_action
         self.tool_actions = tool_actions
 
-        def act(text: str, slot: Callable[[], object], needs_doc: bool = True) -> QAction:
-            a = QAction(text, window)
+        def act(
+            text: str, icon_name: str, slot: Callable[[], object], needs_doc: bool = True
+        ) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())
             a.setProperty("needs_doc", needs_doc)
             window.addAction(a)
             return a
 
-        self.act_replace_image = act("Re&place Image…", self.replace_image)
-        self.act_extract_image = act("E&xport Image…", self.export_image)
-        self.act_delete_objects = act("&Delete Selected Objects", self.delete_objects)
+        self.act_replace_image = act("Re&place Image…", "image-up", self.replace_image)
+        self.act_extract_image = act("E&xport Image…", "image-down", self.export_image)
+        self.act_delete_objects = act("&Delete Selected Objects", "trash-2", self.delete_objects)
         edit.notify = lambda message: window.statusBar().showMessage(message, 6000)
 
         def show_error(message: str) -> None:

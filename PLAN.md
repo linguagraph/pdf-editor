@@ -82,7 +82,7 @@ pdf-editor/
 
 ## Implementation phases (todo list)
 
-Progress is tracked here: see AGENTS.md for the rules. **Current phase: 17 (Packaging).**
+Progress is tracked here: see AGENTS.md for the rules. **Current phase: 17 (Packaging), last items need a certificate, Inno Setup and a VM.**
 
 Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for one developer.
 
@@ -92,7 +92,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] import-linter contracts (engine isolation, layers `ui > services > core > engine > model`)
 - [x] pre-commit hooks, plus a GitHub Actions CI matrix (windows-latest; ubuntu for headless tests with `QT_QPA_PLATFORM=offscreen`)
 - [x] `scripts/make_fixtures.py`: generate test PDFs (multi-page text, images, vector art, annotations, outlines, encrypted, rotated pages, CJK text, subset fonts, scanned, broken xref, large 1000-page doc). RTL fixture deferred until a bundled Arabic/Hebrew font is chosen
-- [ ] Curate a small corpus of real-world PDFs (scanned, broken xref, forms, signed) in `tests/fixtures/real/` with sources noted _(partial: synthetic `scanned` and `broken_xref` fixtures generated, and `tests/fixtures/real/README.md` holds the sourcing table; real forms/signed samples still need to be sourced)_
+- [x] Curate a small corpus of real-world PDFs (scanned, broken xref, forms, signed) in `tests/fixtures/real/` with sources noted _(IRS W-9 (fillable form with XFA, tagged, usage-rights signature) and a 1953 US Navy letter scan, both public domain; a pyHanko-signed sample from `scripts/make_signed_sample.py` with a self-signed test certificate; broken xref stays synthetic. `tests/services/test_real_corpus.py` checks that signatures and form fields survive incremental saves; the real files exposed a bug in reading indirect /Lang, /DisplayDocTitle and /Alt, now fixed)_
 - [x] Logging setup, plus a global exception hook that shows a dialog and writes a crash log
 
 ### Phase 1: Engine abstraction and PyMuPDF backend (M)
@@ -138,7 +138,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 
 ### Phase 5: Annotations and comments (L)
 - [x] Text markup: highlight, underline, strikeout, squiggly (built from text-selection quads)
-- [ ] Sticky note, FreeText (typewriter and callout), Ink (pressure-agnostic smoothing), Line/Arrow, Rectangle, Ellipse, Polygon/Polyline, Stamp (standard plus custom image stamps), File attachment _(partial: all done except FreeText callouts and custom image stamps; ink is smoothed with RDP simplification)_
+- [x] Sticky note, FreeText (typewriter and callout), Ink (pressure-agnostic smoothing), Line/Arrow, Rectangle, Ellipse, Polygon/Polyline, Stamp (standard plus custom image stamps), File attachment _(ink smoothed with RDP simplification. Callout tool: click the point, drag the box; resizing keeps the tip, but the tip can't be dragged on its own. Custom PNG/JPEG stamps are copied into the user data folder and listed in the Stamp menu)_
 - [x] SelectObject tool: select, move, resize handles, multi-select, delete, z-order, copy/paste between pages and docs
 - [x] Properties inspector: color, fill, opacity, border width/style, font for FreeText, author, subject, lock (dash style is kept but not editable yet)
 - [x] Comments panel: list and filter by type/author/page, replies (IRT), review status, jump-to, summary export (PDF/CSV), XFDF import/export
@@ -158,13 +158,13 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 ### Phase 7: Content editing (XL, the hardest part)
 - [x] `engine/contentstream`: lexer and parser for content streams (operators, operands, inline images), tracking graphics and text state, and a serializer. Hypothesis round-trip tests (parse → write → parse is identical)
 - [x] Object model: text blocks (MuPDF blocks in reading order, with the dominant style detected), images, form XObjects and paths (from the content-stream tracker, with operator ranges and page-space boxes)
-- [ ] **Add content:** text box (rich: font, size, color, alignment, line spacing), images (PNG/JPEG, keep aspect), shapes/lines as real page content (not annotations) _(partial: engine takes a full `TextStyle`; the Add Text tool uses a default style until a style bar is added)_
+- [x] **Add content:** text box (rich: font, size, color, alignment, line spacing), images (PNG/JPEG, keep aspect), shapes/lines as real page content (not annotations) _(the inline editor's style bar sets font, size, bold, italic, colour, alignment and line spacing; Add Text remembers the last style)_
 - [x] **Edit existing images:** move/resize (the `cm` is rewritten around `Do`, computed from the CTM), replace, delete, extract/save _(rotation works through the API; there's no rotate handle in the UI yet)_
 - [x] **Edit existing text** (paragraph-level, the way Acrobat does it):
   - [x] Detect paragraph blocks and show an inline editor over them with a matching screen font, size and color
   - [x] Font strategy: extract the embedded font, check glyph coverage with fontTools, reuse it if it covers all glyphs, otherwise fall back to the closest standard family (weight/italic kept) and tell the user it was substituted
   - [x] Apply the edit by removing the original glyphs precisely (a text-only redaction that keeps images, vector art and the user's pending redaction marks), then re-typesetting with `insert_htmlbox` inside the block width (the box grows downward instead of shrinking the font)
-  - [ ] Handle rotated text, character spacing and word spacing; decline CJK vertical and Type3 fonts for now, with a clear message _(partial: rotated/vertical and Type3 text are declined with a clear reason; original character/word spacing isn't reproduced)_
+  - [x] Handle rotated text, character spacing and word spacing; decline CJK vertical and Type3 fonts for now, with a clear message _(rotated/vertical and Type3 text are declined with a reason. Character spacing (Tc) and word spacing (Tw) are detected per block and reproduced on edit, including alignment and justification, by rewriting the typeset operators, because MuPDF's HTML layout ignores CSS spacing. Horizontal scaling (Tz) isn't reproduced)_
 - [x] Delete/move whole objects (text blocks, images, forms, paths); marquee selection; Delete key
 - [x] Snapshot-based undo for every content command; render/pixel and text-extraction checks before and after editing (instead of golden images)
 
@@ -172,7 +172,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Redact tool: mark area / text selection / whole page; search-and-redact with presets (email, phone, IBAN, credit card (Luhn-checked), US SSN, dates, custom regex)
 - [x] Review mode: Redactions panel listing marks, jump-to, apply selected / remove / apply all; overlay text and fill color (Redaction Properties, remembered)
 - [x] Apply: true removal of text, image pixels (blank or remove images) and vector graphics (covered or touched) under each mark, then a **verification pass** that re-extracts text and inspects image pixels in every redacted area and reports any leak; the next save is forced to be a full, garbage-collected rewrite (an incremental save would keep the old content)
-- [ ] Sanitize document: metadata/XMP, JavaScript (incl. open actions and triggers), embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection) _(partial: all done except hidden-layer content and off-page text)_
+- [x] Sanitize document: metadata/XMP, JavaScript (incl. open actions and triggers), embedded files, hidden layers, hidden or off-page text, comments, form data, links, thumbnails, and orphaned objects (full rewrite with garbage collection) _(hidden-layer content (OFF in the default configuration, including membership dictionaries and hidden form XObjects) is stripped and those layers are dropped; glyphs entirely outside the CropBox are removed one by one, so partly visible words survive. Leak-tested with MuPDF (all layers on), pypdfium2 and pikepdf)_
 
 ### Phase T: Tool modes and discoverability (S–M), done next, before Phase 9
 Problem (user feedback): once a tool such as Sticky Note is active there's no visible way to turn it off, and clicking an existing comment creates another one instead of showing it. Escape and the Select tool (V, Home tab) exist but aren't discoverable, and creation tools ignore what's already on the page.
@@ -187,7 +187,7 @@ Problem (user feedback): once a tool such as Sticky Note is active there's no vi
 
 ### Phase 9: OCR (M), done
 - [x] OCR through MuPDF's built-in Tesseract engine with bundled `tessdata` (English plus a few common languages in the exe). More languages can be downloaded into the user data folder from the OCR dialog; no Tesseract install is needed. *(The exe bundles English (`tessdata_fast`, fetched by `scripts/fetch_tessdata.py`); the other common languages are one click away in the dialog.)*
-- [ ] Preprocessing (optional OpenCV): deskew, denoise, and binarize for OCR only (the visible image stays unchanged). *(Grayscale, denoise and binarize with Pillow; deskew is not done yet, and OpenCV was dropped to keep the exe small.)*
+- [x] Preprocessing (optional OpenCV): deskew, denoise, and binarize for OCR only (the visible image stays unchanged). *(Pure Pillow, no OpenCV: grayscale, denoise, binarize, and deskew by projection profile (±10°). The recognized text layer is rotated back with a `cm` so it lines up with the skewed scan; OCR ▸ "Straighten skewed scans")*
 - [x] Make scanned pages searchable by adding an invisible text layer (MuPDF OCR page output overlaid with `show_pdf_page`), with page ranges, skipping pages that already have text, and a `Job` with progress and cancel. Undo through one "Recognize Text" snapshot; rotated pages are handled
 - [x] Batch OCR of many files through the same in-process engine (no `ocrmypdf` dependency)
 - [x] Accuracy check against fixture scans (text similarity threshold), plus an OCR check in the exe `--self-test`
@@ -230,7 +230,7 @@ Reported on a two-column manual (icons plus labels in two columns):
 ### Phase 15: Accessibility (M)
 - [x] Checker: tagged or not, document language, title shown in the window, image alt text, headings structure, reading-order sanity, and contrast of annotations/added text. Results panel with jump-to. *(Tools ▸ Accessibility Check and an Accessibility panel: failed / needs review / passed, double-click goes to the page and the tag; also tab order for pages with annotations. Contrast follows WCAG 2 against an assumed white background, for all text and FreeText comments)*
 - [x] Fix-ups: set language/title/DisplayDocTitle; edit alt text in the struct tree (pikepdf); a Tags tree panel (read, rename, reorder). *(Fix… in the Accessibility panel for language, title, title bar, tab order and alt text; a Tags panel to change tag types and alt text and move tags up/down. All undoable. Done through the engine (MuPDF objects plus our own PDF object parser), not pikepdf, so edits apply to the open document)*
-- [ ] Stretch: basic auto-tagging (paragraphs/headings/figures from block analysis). Marked experimental. _(not started: it needs marked-content rewriting of every page's content stream plus a ParentTree)_
+- [x] Stretch: basic auto-tagging (paragraphs/headings/figures from block analysis). Marked experimental. *(Tools ▸ Auto-Tag Document (experimental): marks each page's content as /P, /H1–/H3 and /Figure (vector art as /Artifact), builds Document → elements in reading order with a ParentTree and /MarkInfo, and refuses documents that are already tagged. Undoable; rendering and text extraction are unchanged. No lists, tables, links or alt text yet)*
 
 ### Phase 16: Polish, robustness, performance (M), done
 - [x] Keyboard shortcuts that match Acrobat conventions, customizable; a command palette (Ctrl+Shift+P). *(Edit ▸ Keyboard Shortcuts: filter, assign, remove, reset, with conflict detection; overrides persist. Acrobat keys added where Qt's defaults differ: Ctrl+W, Ctrl+Q, Ctrl+6. Edit ▸ Command Palette runs any enabled command by name)*
@@ -241,10 +241,10 @@ Reported on a two-column manual (icons plus labels in two columns):
 - [x] Vector printing (native print path instead of 300 dpi raster), and running `select_all` off the GUI thread for very large documents (follow-ups from the Phase 3 review). *(Pages print as vectors through the engine's SVG and QtSvg, with a workaround for QtSvg's handling of MuPDF glyph outlines; output matches the screen within anti-aliasing. Grayscale, printing without comments, pages QtSvg can't draw (masks, blend modes, patterns), and "Print as image" use the 300 dpi raster path. select_all no longer needs a thread: it's now instant)*
 
 ### Phase 17: Packaging and distribution (S–M)
-- [ ] Release build of the self-contained one-file `pdfeditor.exe` (from Phase P), with all optional-feature data bundled (tessdata, ICC, fonts) and final size/startup tuning
-- [ ] Optional thin installer around the same exe (Inno Setup: Start menu, optional `.pdf` association, uninstall). The portable exe stays the primary deliverable
-- [ ] Code signing, version stamping, an "About" dialog with third-party licenses (AGPL notice and source offer)
-- [ ] Smoke test in a clean Windows VM with no Python or other tools installed (every feature, including OCR and PDF/A, works offline from the single exe)
+- [x] Release build of the self-contained one-file `pdfeditor.exe` (from Phase P), with all optional-feature data bundled (tessdata, ICC, fonts) and final size/startup tuning. *(66 MB, down from 82.6: Qt pieces nothing loads are left out (software OpenGL, virtual keyboard with QML/Quick, the PDF image plugin with Qt6Pdf, unused platform/TLS plugins, Qt Help translations). English tessdata, the sRGB profile, MuPDF's fonts, the AGPL text and third-party notices are bundled. About 1.5 s from launch to window; the self-test runs in about 2.4 s including unpacking)*
+- [ ] Optional thin installer around the same exe (Inno Setup: Start menu, optional `.pdf` association, uninstall). The portable exe stays the primary deliverable _(partial: `packaging/installer.iss` (per-user install, Start menu, optional desktop icon, optional .pdf default, "Open with" entry, clean uninstall) and `build_exe.py --installer` are ready and unit-tested; not compiled yet because Inno Setup isn't installed on the build machine)_
+- [ ] Code signing, version stamping, an "About" dialog with third-party licenses (AGPL notice and source offer) _(partial: version resource stamped in the exe; Help ▸ About shows the AGPL notice with a source offer (`SOURCE_URL`), the full license and generated third-party notices; `build_exe.py --sign` signs with signtool from a .pfx or a certificate thumbprint, but no code-signing certificate is available yet)_
+- [ ] Smoke test in a clean Windows VM with no Python or other tools installed (every feature, including OCR and PDF/A, works offline from the single exe) _(partial: no VM or Windows Sandbox on this machine. `build_exe.py --clean-env` runs the exe copied to a temporary folder with no Python, a system-only PATH and an empty profile: all self-test checks (OCR, PDF/A, export, security, printing, ...) pass and the window opens a document in about 2 s. CI runs the clean-environment self-test on every PR)_
 
 ### Later / not in current scope
 - AcroForm creation and editing, digital signatures (PAdES) and certificate validation. Rendering and keeping existing forms and signatures intact is covered above.

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.objects import Align, TextStyle, family_of
+from pdfeditor.ui.icons import icon
 
 if TYPE_CHECKING:
     from pdfeditor.ui.view.document_view import DocumentView
@@ -85,14 +86,8 @@ class TextStyleBar(QFrame):
         self.size_box.setDecimals(1)
         self.size_box.setSingleStep(0.5)
         self.size_box.setValue(style.size)
-        self.bold = self._toggle("B", "Bold", style.bold)
-        self.italic = self._toggle("I", "Italic", style.italic)
-        f = self.bold.font()
-        f.setBold(True)
-        self.bold.setFont(f)
-        f = self.italic.font()
-        f.setItalic(True)
-        self.italic.setFont(f)
+        self.bold = self._toggle("bold", "Bold", style.bold)
+        self.italic = self._toggle("italic", "Italic", style.italic)
         self.color_button = QToolButton(self)
         self.color_button.setToolTip("Text colour")
         self.color_button.clicked.connect(self._pick_color)
@@ -102,22 +97,31 @@ class TextStyleBar(QFrame):
         for a in Align:
             self.align_combo.addItem(a.value.capitalize(), a)
         self.align_combo.setCurrentIndex(list(Align).index(style.align))
+        self.line_spacing = QDoubleSpinBox(self)
+        self.line_spacing.setToolTip("Line spacing (multiple of the font size)")
+        self.line_spacing.setAccessibleName("Line spacing")
+        self.line_spacing.setRange(0.8, 3.0)
+        self.line_spacing.setDecimals(2)
+        self.line_spacing.setSingleStep(0.1)
+        self.line_spacing.setValue(style.line_height)
+        self.line_spacing.setPrefix("↕ ")
         self._base = style
         row = QHBoxLayout(self)
         row.setContentsMargins(3, 3, 3, 3)
         row.setSpacing(3)
         for w in (self.font_combo, self.size_box, self.bold, self.italic, self.color_button,
-                  self.align_combo):  # fmt: skip
+                  self.align_combo, self.line_spacing):  # fmt: skip
             row.addWidget(w)
         self.font_combo.currentIndexChanged.connect(lambda _i: on_change())
         self.size_box.valueChanged.connect(lambda _v: on_change())
         self.align_combo.currentIndexChanged.connect(lambda _i: on_change())
+        self.line_spacing.valueChanged.connect(lambda _v: on_change())
         self.picking = False
         self.adjustSize()
 
-    def _toggle(self, text: str, tip: str, checked: bool) -> QToolButton:
+    def _toggle(self, icon_name: str, tip: str, checked: bool) -> QToolButton:
         b = QToolButton(self)
-        b.setText(text)
+        b.setIcon(icon(icon_name))
         b.setToolTip(tip)
         b.setCheckable(True)
         b.setChecked(checked)
@@ -157,6 +161,7 @@ class TextStyleBar(QFrame):
             italic=self.italic.isChecked(),
             color=self._color,
             align=align if isinstance(align, Align) else self._base.align,
+            line_height=round(self.line_spacing.value(), 2),
         )
 
 

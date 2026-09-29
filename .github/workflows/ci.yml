@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv venv && uv pip install -e ".[build]"
-      - run: uv run python scripts/build_exe.py --test
+      - run: uv run python scripts/build_exe.py --test --clean-env --no-window-check
       - uses: actions/upload-artifact@v4
         with:
           name: pdfeditor-exe-${{ github.sha }}

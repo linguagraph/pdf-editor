@@ -22,6 +22,7 @@ from pdfeditor.services.pdfa import (
     validate_with_verapdf,
 )
 from pdfeditor.ui.dialogs.pdfa import PdfaReportDialog
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
 
 if TYPE_CHECKING:
@@ -33,17 +34,19 @@ class PdfaController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
 
-        def act(text: str, slot: object) -> QAction:
-            a = QAction(text, window)
+        def act(text: str, icon_name: str, slot: object) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())  # type: ignore[operator]
             a.setProperty("needs_doc", True)
             window.addAction(a)
             return a
 
-        self.act_preflight = act("PDF/A &Preflight…", self.preflight)
-        self.act_save_pdfa = act("Save as PDF/&A…", self.save_as_pdfa)
-        self.act_accessibility = act("Accessibility &Check", window.accessibility_check)
-        self.act_auto_tag = act("Auto-&Tag Document (experimental)", self.auto_tag)
+        self.act_preflight = act("PDF/A &Preflight…", "list-checks", self.preflight)
+        self.act_save_pdfa = act("Save as PDF/&A…", "archive", self.save_as_pdfa)
+        self.act_accessibility = act(
+            "Accessibility &Check", "accessibility", window.accessibility_check
+        )
+        self.act_auto_tag = act("Auto-&Tag Document (experimental)", "tags", self.auto_tag)
         self.act_auto_tag.setIconText("Auto-Tag")
         self.act_auto_tag.setToolTip(
             "Add tags (headings, paragraphs, figures) to an untagged document from its layout"

@@ -191,9 +191,17 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("main window could not open the sample")
         app.processEvents()
         window.renderer.wait_idle(5000)
+        # toolbar icons are bundled SVGs: this needs QtSvg and data/icons in the executable
+        actions = window.ribbon.button_actions()
+        missing = [a.text() for a in actions if a.icon().isNull()]
+        if missing:
+            raise AssertionError(f"toolbar buttons without icons: {missing}")
+        image = actions[0].icon().pixmap(24, 24).toImage()
+        if not any(image.pixelColor(x, y).alpha() for x in range(24) for y in range(24)):
+            raise AssertionError("toolbar icon rendered blank")
         window.close()
         QSettings().clear()
-        return f"Qt {qVersion()}, main window OK"
+        return f"Qt {qVersion()}, main window OK, {len(actions)} toolbar icons"
 
     def printing() -> str:
         from pdfeditor.core.session import DocumentSession as Session
@@ -306,6 +314,18 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("; ".join(str(i) for i in result.remaining))
         return f"PDF/A-2b copy: {len(result.fixed)} fix(es), built-in checks clean"
 
+    def licenses() -> str:
+        from pdfeditor.licenses import LICENSE_FILE, NOTICES_FILE, notices
+
+        if getattr(sys, "frozen", False):
+            for name in (NOTICES_FILE, LICENSE_FILE):
+                data_path(name)  # raises if the build forgot to bundle it
+        text = notices()
+        missing = [n for n in ("pymupdf", "PySide6", "pikepdf") if n.lower() not in text.lower()]
+        if missing:
+            raise AssertionError(f"notices don't mention {missing}")
+        return f"third-party notices ({len(text) // 1024} KB) and AGPL text bundled"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -325,6 +345,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("optimize", optimize),
         ("security", security),
         ("PDF/A", pdfa),
+        ("licenses", licenses),
     ]
 
 
