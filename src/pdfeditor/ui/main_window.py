@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pdfeditor import __version__
 from pdfeditor.core import engine_lock
 from pdfeditor.core.autosave import Autosaver, RecoveryStore
 from pdfeditor.core.commands import (
@@ -64,6 +63,7 @@ from pdfeditor.model.annotations import (
 from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.ui.compare_controller import CompareController
+from pdfeditor.ui.dialogs.about import AboutDialog
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.dialogs.print_dialog import PrintDialog
@@ -1340,12 +1340,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         if view is not None:
             engine_version = getattr(view.session.engine, "version", "")
-        QMessageBox.about(
-            self,
-            "About pdfeditor",
-            f"<b>pdfeditor {__version__}</b><p>An open-source PDF editor.</p>"
-            f"<p>{engine_version}</p><p>Licensed under the GNU AGPL v3 or later.</p>",
-        )
+        AboutDialog(engine_version or getattr(self.engine(), "version", ""), self).exec()
 
     # -- theme ----------------------------------------------------------------------------
     def set_theme(self, theme: Theme) -> None:

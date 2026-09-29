@@ -60,8 +60,8 @@ QT_EXCLUDES = [
         "QtWebEngineQuick QtWebEngineWidgets QtWebSockets QtWebView QtXml"
     ).split()
 ]
-# Dev/test-only packages that must never end up in the product. numpy is not used at runtime
-# yet; drop it from this list when a feature needs it (e.g. Phase 12 compare).
+# Dev/test-only packages that must never end up in the product. numpy is not a runtime
+# dependency (the compare and OCR code use Pillow); keep it out if a tool pulls it in.
 DEV_EXCLUDES = [
     "pytest", "_pytest", "hypothesis", "pytestqt", "pytest_benchmark", "mypy", "ruff",
     "importlinter", "grimp", "pre_commit", "tkinter", "unittest", "pydoc_data", "numpy",
@@ -71,12 +71,44 @@ DEV_EXCLUDES = [
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    datas=collect_data_files("pdfeditor", includes=["data/*", "data/icons/*", "data/tessdata/*"]),
+    datas=collect_data_files("pdfeditor", includes=["data/*", "data/icons/*", "data/tessdata/*"])
+    # license texts written by scripts/build_exe.py (AGPL notice + third-party notices)
+    + [(str(GENERATED / "THIRD_PARTY_NOTICES.txt"), "pdfeditor/data"),
+       (str(ROOT / "LICENSE"), "pdfeditor/data")],
     # Loaded lazily through the engine registry, so static analysis can't see it.
     hiddenimports=["pdfeditor.engine.mupdf"],
     excludes=QT_EXCLUDES + DEV_EXCLUDES,
     noarchive=False,
 )
+# Qt pieces nothing in the app loads, pulled in by plugins or copied wholesale: the software
+# OpenGL fallback (20 MB), the virtual keyboard (which drags in QML/Quick/OpenGL), the PDF
+# image plugin (drags in Qt6Pdf), touch/TLS/network-info plugins, the Direct2D platform.
+# `--self-test` and the windowed launch check in scripts/build_exe.py prove what remains.
+DROP_FILES = {
+    "opengl32sw.dll",
+    "qt6virtualkeyboard.dll", "qtvirtualkeyboardplugin.dll",
+    "qt6qml.dll", "qt6qmlmodels.dll", "qt6qmlmeta.dll", "qt6qmlworkerscript.dll",
+    "qt6quick.dll", "qt6opengl.dll",
+    "qt6pdf.dll", "qpdf.dll",
+    "qtuiotouchplugin.dll", "qdirect2d.dll", "qminimal.dll",
+    "qnetworklistmanager.dll", "qopensslbackend.dll", "qschannelbackend.dll",
+    "qcertonlybackend.dll",
+}
+
+
+def _keep(entry):
+    name = entry[0].replace("\\", "/").lower()
+    base = name.rsplit("/", 1)[-1]
+    if base in DROP_FILES:
+        return False
+    # Qt's own UI strings: keep qtbase/qt catalogues, drop Qt Help/Designer/etc.
+    if "/translations/" in name and not base.startswith(("qtbase_", "qt_")) or "qt_help_" in base:
+        return False
+    return True
+
+
+a.binaries = [e for e in a.binaries if _keep(e)]
+a.datas = [e for e in a.datas if _keep(e)]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
