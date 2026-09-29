@@ -15,7 +15,6 @@ dependencies = [
     "pikepdf>=8.0",
     "fonttools>=4.47",
     "Pillow>=10.0",
-    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +30,7 @@ dev = [
     "import-linter>=2.0",
     "pre-commit>=3.6",
     "pyhanko>=0.25",  # scripts/make_signed_sample.py; signature checks in tests
+    "numpy>=1.26",  # pixel comparisons in tests only (the app itself uses Pillow)
 ]
 
 [project.scripts]

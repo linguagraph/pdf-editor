@@ -102,16 +102,25 @@ class TextStyleBar(QFrame):
         for a in Align:
             self.align_combo.addItem(a.value.capitalize(), a)
         self.align_combo.setCurrentIndex(list(Align).index(style.align))
+        self.line_spacing = QDoubleSpinBox(self)
+        self.line_spacing.setToolTip("Line spacing (multiple of the font size)")
+        self.line_spacing.setAccessibleName("Line spacing")
+        self.line_spacing.setRange(0.8, 3.0)
+        self.line_spacing.setDecimals(2)
+        self.line_spacing.setSingleStep(0.1)
+        self.line_spacing.setValue(style.line_height)
+        self.line_spacing.setPrefix("↕ ")
         self._base = style
         row = QHBoxLayout(self)
         row.setContentsMargins(3, 3, 3, 3)
         row.setSpacing(3)
         for w in (self.font_combo, self.size_box, self.bold, self.italic, self.color_button,
-                  self.align_combo):  # fmt: skip
+                  self.align_combo, self.line_spacing):  # fmt: skip
             row.addWidget(w)
         self.font_combo.currentIndexChanged.connect(lambda _i: on_change())
         self.size_box.valueChanged.connect(lambda _v: on_change())
         self.align_combo.currentIndexChanged.connect(lambda _i: on_change())
+        self.line_spacing.valueChanged.connect(lambda _v: on_change())
         self.picking = False
         self.adjustSize()
 
@@ -157,6 +166,7 @@ class TextStyleBar(QFrame):
             italic=self.italic.isChecked(),
             color=self._color,
             align=align if isinstance(align, Align) else self._base.align,
+            line_height=round(self.line_spacing.value(), 2),
         )
 
 
