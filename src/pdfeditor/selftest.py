@@ -154,7 +154,13 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         cmap = font.getBestCmap() or {}
         if ord("A") not in cmap:
             raise AssertionError("fontTools couldn't read a font")
-        return f"fontTools read {len(cmap)} glyph mappings"
+        family = font["name"].getDebugName(1)  # Word export names fonts by their name table
+        if not family:
+            raise AssertionError("fontTools couldn't read a font's name table")
+        # ... and measures lines with their advance widths
+        if font["hmtx"][cmap[ord("A")]][0] <= 0 or not font["head"].unitsPerEm:
+            raise AssertionError("fontTools couldn't read a font's metrics")
+        return f"fontTools read {len(cmap)} glyph mappings of {family}"
 
     def save_copy() -> str:
         session = state["session"]

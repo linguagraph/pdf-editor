@@ -315,7 +315,15 @@ class MuPage:
             found = self.fz.find_tables()
         # find_tables already reports visible (rotated) coordinates
         return [
-            TableData(self.index, cv.rect(t.bbox), tuple(tuple(row) for row in t.extract()))
+            TableData(
+                self.index,
+                cv.rect(t.bbox),
+                tuple(tuple(row) for row in t.extract()),
+                tuple(
+                    tuple(cv.rect(c) if c is not None else None for c in row.cells)
+                    for row in t.rows
+                ),
+            )
             for t in found.tables
         ]
 

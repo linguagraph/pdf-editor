@@ -193,3 +193,8 @@ def test_label_rules_roundtrip(ops: Engine, fixture_pdf, tmp_path: Path) -> None
 def test_text_width(ops: Engine) -> None:
     assert ops.text_width("", "helv", 10) == 0
     assert ops.text_width("MMMM", "helv", 20) > ops.text_width("iiii", "helv", 20) > 0
+    # characters outside WinAnsi are measured too (a bullet used to shorten the line)
+    assert ops.text_width("• Material", "Helvetica", 11.5) > ops.text_width(
+        "Material", "helv", 11.5
+    )
+    assert ops.text_width("• Material", "Helvetica", 11.5) == pytest.approx(48.1, abs=0.1)

@@ -91,6 +91,9 @@ class ExportDialog(QDialog):
         browse = QPushButton("Browse…", self)
         browse.clicked.connect(self._browse)
         # text formats
+        self.layout_mode = QComboBox(self)
+        self.layout_mode.addItem("Keep page layout", True)
+        self.layout_mode.addItem("Flowing text", False)
         self.pictures = QCheckBox("Include pictures", self)
         self.pictures.setChecked(True)
         self.tables = QCheckBox("Detect tables", self)
@@ -120,6 +123,7 @@ class ExportDialog(QDialog):
         self.form = QFormLayout()
         self.form.addRow("Format:", self.format_combo)
         self.form.addRow("Save as:", target_row)
+        self.form.addRow("Layout:", self.layout_mode)
         self.form.addRow("", self.pictures)
         self.form.addRow("", self.tables)
         self.form.addRow("", self.page_breaks)
@@ -140,6 +144,7 @@ class ExportDialog(QDialog):
         layout.addWidget(self.range)
         layout.addWidget(buttons)
         self.format_combo.currentIndexChanged.connect(lambda _i: self._format_changed())
+        self.layout_mode.currentIndexChanged.connect(lambda _i: self._format_changed())
         self.set_format(fmt)
 
     def format(self) -> ExportFormat:
@@ -153,9 +158,12 @@ class ExportDialog(QDialog):
 
     def _format_changed(self) -> None:
         fmt = self.format()
-        reflow = fmt.text_format not in (None, TextFormat.TEXT)
-        for widget in (self.pictures, self.tables, self.page_breaks):
-            self.form.setRowVisible(widget, reflow)
+        structured = fmt.text_format not in (None, TextFormat.TEXT)
+        keep_layout = self.keeps_layout()
+        self.form.setRowVisible(self.layout_mode, fmt is ExportFormat.WORD)
+        self.form.setRowVisible(self.pictures, structured)
+        self.form.setRowVisible(self.tables, structured)
+        self.form.setRowVisible(self.page_breaks, structured and not keep_layout)
         image_rows: tuple[QWidget, ...] = (self.dpi, self.grayscale, self.annotations)
         for row in image_rows:
             self.form.setRowVisible(row, fmt.is_image)
@@ -163,8 +171,11 @@ class ExportDialog(QDialog):
         self.form.setRowVisible(self.multipage, fmt is ExportFormat.TIFF)
         self.hint.setText(
             {
-                ExportFormat.WORD: "Text is reflowed into editable paragraphs; headings, tables "
-                "and pictures are kept. Complex layouts may need touching up.",
+                ExportFormat.WORD: "Every page looks like the PDF: text stays editable at its "
+                "place, drawings and pictures are kept behind it."
+                if keep_layout
+                else "Text is reflowed into editable paragraphs; headings, tables and pictures "
+                "are kept. Complex layouts may need touching up.",
                 ExportFormat.EXCEL: "Tables are detected on the chosen pages; you pick which "
                 "ones to export, one sheet each.",
                 ExportFormat.MARKDOWN: "Pictures are saved in a folder next to the file.",
@@ -179,6 +190,9 @@ class ExportDialog(QDialog):
         base = Path(current) if current else self._default_target()
         self.target.setText(str(base.with_suffix(fmt.suffix)))
         self.adjustSize()
+
+    def keeps_layout(self) -> bool:
+        return self.format() is ExportFormat.WORD and bool(self.layout_mode.currentData())
 
     def _default_target(self) -> Path:
         if self.source is not None:
@@ -201,6 +215,7 @@ class ExportDialog(QDialog):
             tables=self.tables.isChecked(),
             pictures=self.pictures.isChecked(),
             page_breaks=self.page_breaks.isChecked(),
+            keep_layout=self.keeps_layout(),
         )
 
     def image_options(self) -> PageImageOptions:

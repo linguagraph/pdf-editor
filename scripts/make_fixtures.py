@@ -559,7 +559,38 @@ def letter_spacing() -> None:
     _save(doc, "letter_spacing.pdf")
 
 
+def print_to_pdf() -> None:
+    """Like Microsoft's "Print to PDF": the embedded font is called ``CIDFont+F1`` instead of
+    its real name, the page number comes first in content order, columns are lined up with
+    runs of spaces and a bullet is set larger than its text. Bulgarian text, a picture between
+    two paragraphs."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_font(fontname="F1", fontbuffer=pymupdf.Font("cjk").buffer)
+    page.insert_text((A4.width / 2, A4.height - 30), "1", fontsize=9, fontname="F1")
+    page.insert_text((72, 80), "Символи за управление", fontsize=16, fontname="F1")
+    page.insert_text((72, 120), "Предпране" + " " * 12 + "Забавено стартиране", fontname="F1")
+    page.insert_text((72, 150), "Бутон за температурата на пералнята.", fontsize=10, fontname="F1")
+    page.insert_image(pymupdf.Rect(72, 180, 232, 280), stream=_gradient_png())
+    page.insert_text((72, 310), "•", fontsize=14, fontname="F1")
+    page.insert_text(
+        (84, 310), "Натиснете бутона, за да изберете цикъл на пране.", fontsize=10, fontname="F1"
+    )
+    for xref, *_ in page.get_fonts(full=True):
+        doc.xref_set_key(xref, "BaseFont", "/CIDFont+F1")
+        for key in ("DescendantFonts", "FontDescriptor"):
+            kind, value = doc.xref_get_key(xref, key)
+            if kind == "array":  # [n 0 R]
+                sub = int(value.strip("[]").split()[0])
+                doc.xref_set_key(sub, "BaseFont", "/CIDFont+F1")
+                kind, value = doc.xref_get_key(sub, "FontDescriptor")
+            if kind == "xref":
+                doc.xref_set_key(int(value.split()[0]), "FontName", "/CIDFont+F1")
+    _save(doc, "print_to_pdf.pdf")
+
+
 GENERATORS: dict[str, Callable[[], None]] = {
+    "print_to_pdf": print_to_pdf,
     "letter_spacing": letter_spacing,
     "tagged": tagged,
     "two_columns": two_columns,

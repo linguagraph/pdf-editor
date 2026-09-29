@@ -208,5 +208,15 @@ def fill_background(page: MuPage, color: tuple[float, float, float], opacity: fl
     page._doc.mark_page_changed(page.index)
 
 
+_BASE14: dict[str, pymupdf.Font] = {}  # kept for the process: base-14 programs are built in
+
+
 def text_width(text: str, font: str, size: float) -> float:
-    return float(pymupdf.get_text_length(text, fontname=font, fontsize=size))
+    # measure with the font program's Unicode map: ``get_text_length`` encodes the text as
+    # WinAnsi first and gets characters outside it wrong ("•" even shortens a line)
+    try:
+        if font not in _BASE14:
+            _BASE14[font] = pymupdf.Font(font)
+        return float(_BASE14[font].text_length(text, fontsize=size))
+    except Exception:
+        return float(pymupdf.get_text_length(text, fontname=font, fontsize=size))

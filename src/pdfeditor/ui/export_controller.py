@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -133,13 +134,24 @@ class ExportController:
             else:
                 text_format = chosen.text_format
                 assert text_format is not None
-                structure = dialog.structure_options()
+                # the vector-art background comes from a copy with the text deleted
+                structure = replace(
+                    dialog.structure_options(),
+                    vector_background=session.engine.capabilities.content_edit,
+                )
                 result = self._run(
                     f"Exporting to {chosen.label}…",
                     lambda job: _locked(
                         lock,
                         lambda: export_document(
-                            doc, pages, target, text_format, structure, job.token, job.progress
+                            doc,
+                            pages,
+                            target,
+                            text_format,
+                            structure,
+                            job.token,
+                            job.progress,
+                            session.engine.text_width,
                         ),
                     ),
                     len(pages),

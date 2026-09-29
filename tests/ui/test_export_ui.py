@@ -41,6 +41,15 @@ def test_dialog_adapts_to_format(window: MainWindow, view) -> None:
     d = ExportDialog(view.page_count, 0, [], view.session.path, ExportFormat.WORD, window)
     assert d.target.text().endswith("report.docx")
     assert d.form.isRowVisible(d.pictures) and not d.form.isRowVisible(d.dpi)
+    # Word keeps the page layout by default; reflow options only apply to flowing text
+    assert d.keeps_layout() and d.structure_options().keep_layout
+    assert d.form.isRowVisible(d.layout_mode) and not d.form.isRowVisible(d.page_breaks)
+    assert d.form.isRowVisible(d.tables)
+    d.layout_mode.setCurrentIndex(1)
+    assert not d.keeps_layout() and d.form.isRowVisible(d.page_breaks)
+    d.set_format(ExportFormat.HTML)
+    assert not d.form.isRowVisible(d.layout_mode) and not d.structure_options().keep_layout
+    d.set_format(ExportFormat.WORD)
     d.set_format(ExportFormat.JPEG)
     assert d.target.text().endswith("report.jpg")
     assert d.form.isRowVisible(d.quality) and not d.form.isRowVisible(d.pictures)
@@ -55,7 +64,9 @@ def test_export_word_and_images(window: MainWindow, view, tmp_path: Path) -> Non
     written = window.export.export(dialog_for(window, view, ExportFormat.WORD, tmp_path / "out"))
     assert written == [tmp_path / "out.docx"]
     with zipfile.ZipFile(written[0]) as z:
-        assert b"Quarterly Report" in z.read("word/document.xml")
+        body = z.read("word/document.xml")
+        assert b"Quarterly Report" in body and b"<w:framePr" in body  # page layout kept
+        assert b"<w:tbl>" in body and b"<w:tblpPr" in body  # a real table at its place
     assert "Exported 2 page(s)" in window.export.last_message
     d = dialog_for(window, view, ExportFormat.PNG, tmp_path / "pg")
     d.dpi.setValue(40)
