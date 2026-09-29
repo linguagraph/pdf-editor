@@ -320,6 +320,19 @@ def test_layout_background_keeps_vector_art(fixture_pdf) -> None:
         assert bg.getextrema()[3][0] == 0
 
 
+def test_text_word_cant_write_stays_in_the_picture(fixture_pdf) -> None:
+    doc = ENGINE.open(fixture_pdf("rotated_pages"))
+    quarter, upside_down = analyze_layout(doc, [1, 2])
+    doc.close()
+    # a quarter turn: vertical text in a borderless cell, gone from the picture
+    [box] = quarter.tables
+    assert not box.ruled and box.cells[0].direction and "Rotation" in _text(box.cells[0].content)
+    assert quarter.background is None and not quarter.frames
+    # upside down: Word can't write it, so the picture keeps it and nothing is doubled
+    assert not upside_down.frames and not upside_down.tables
+    assert upside_down.background is not None
+
+
 def test_inline_boxes_are_not_tables() -> None:
     def piece(text: str, x0: float, x1: float, y0: float) -> Line:
         box = Rect(x0, y0, x1, y0 + 10)

@@ -538,7 +538,9 @@ def _dress(table: LayoutTable, art: Image.Image, scale: float) -> None:
 
 def _page_text(
     page: Page, found: Sequence[TableData], measure: Measure | None
-) -> tuple[list[Frame], list[LayoutTable]]:
+) -> tuple[list[Frame], list[LayoutTable], list[Rect]]:
+    """Frames and tables for the page's text, and where text stays that Word can't write
+    (upside down, slanted): that text is left in the background picture."""
     blocks = page.text_page(with_chars=True).blocks
     fonts = real_font_names(page, blocks)
     widths = _Widths(page, measure)
@@ -561,7 +563,18 @@ def _page_text(
         ]
         if lines:
             frames.append(_frame([[ln] for ln in lines], fonts, widths))
-    return frames, tables
+    written = [c.rect for t in tables for c in t.cells if c.direction]
+    unplaced = [
+        p.bbox
+        for p in pieces
+        if not _is_horizontal(p) and not any(_center_in(p, r) for r in written)
+    ]
+    return frames, tables, unplaced
+
+
+def _holds(box: Rect, piece: Rect) -> bool:
+    cx, cy = (piece.x0 + piece.x1) / 2, (piece.y0 + piece.y1) / 2
+    return box.x0 <= cx <= box.x1 and box.y0 <= cy <= box.y1
 
 
 def _is_blank(img: Image.Image) -> bool:
@@ -607,7 +620,9 @@ def analyze_layout(
                 token.check()
             page = doc.page(index)
             rect = page.rect
-            frames, placed = _page_text(page, page.find_tables() if tables else [], measure)
+            frames, placed, unplaced = _page_text(
+                page, page.find_tables() if tables else [], measure
+            )
             result = LayoutPage(rect.width, rect.height, frames, placed)
             areas = [a for a in page.image_areas() if a.width >= 1 and a.height >= 1]
             source = page
@@ -617,8 +632,10 @@ def analyze_layout(
                     [
                         o.key
                         for o in source.content_objects()
+                        # all text now in frames and cells, whatever the engine can edit;
+                        # only text Word can't write stays in the picture
                         if o.type is ObjectType.TEXT
-                        and (o.editable or any(_inside(o.bbox, t.rect) for t in placed))
+                        and not any(_holds(o.bbox, r) for r in unplaced)
                     ]
                 )
             if pictures:
