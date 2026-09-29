@@ -20,6 +20,7 @@ from pdfeditor.services.ocr import (
 )
 from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog, OcrOptionsBox
 from pdfeditor.ui.dialogs.pages import checked_pages
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
 
 if TYPE_CHECKING:
@@ -30,15 +31,17 @@ class ToolsController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
 
-        def act(text: str, slot: Callable[[], object], needs_doc: bool = True) -> QAction:
-            a = QAction(text, window)
+        def act(
+            text: str, icon_name: str, slot: Callable[[], object], needs_doc: bool = True
+        ) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())
             a.setProperty("needs_doc", needs_doc)
             window.addAction(a)
             return a
 
-        self.act_ocr = act("&Recognize Text (OCR)…", self.recognize)
-        self.act_batch_ocr = act("&Batch OCR…", self.batch_ocr, needs_doc=False)
+        self.act_ocr = act("&Recognize Text (OCR)…", "scan-text", self.recognize)
+        self.act_batch_ocr = act("&Batch OCR…", "scan-line", self.batch_ocr, needs_doc=False)
         self.last_message = ""
 
     def ribbon(self) -> None:

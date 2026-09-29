@@ -31,6 +31,7 @@ def test_notices_and_agpl() -> None:
         assert license_.lower() in line.lower(), line
     assert "numpy" not in notices.split("License texts")[0].lower()  # not bundled
     assert "Tesseract" in notices and "MuPDF" in notices
+    assert "Lucide icons" in notices and "Copyright (c) 2013-present Cole Bemis" in notices
     about = about_text()
     assert SOURCE_URL in about and "Affero" in about and __version__ in about
     assert "GNU AFFERO GENERAL PUBLIC LICENSE" in license_text()

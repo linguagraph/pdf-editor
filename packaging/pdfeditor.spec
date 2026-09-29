@@ -71,7 +71,7 @@ DEV_EXCLUDES = [
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    datas=collect_data_files("pdfeditor", includes=["data/*", "data/tessdata/*"])
+    datas=collect_data_files("pdfeditor", includes=["data/*", "data/icons/*", "data/tessdata/*"])
     # license texts written by scripts/build_exe.py (AGPL notice + third-party notices)
     + [(str(GENERATED / "THIRD_PARTY_NOTICES.txt"), "pdfeditor/data"),
        (str(ROOT / "LICENSE"), "pdfeditor/data")],

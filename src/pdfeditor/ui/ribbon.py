@@ -89,3 +89,13 @@ class Ribbon(QWidget):
 
     def tab_names(self) -> list[str]:
         return list(self._tabs)
+
+    def button_actions(self) -> list[QAction]:
+        """Every action shown as a button: the quick bar and all tabs (no separators/widgets)."""
+        bars: list[QToolBar] = [self.quick, *self._tabs.values()]
+        return [
+            a
+            for bar in bars
+            for a in bar.actions()
+            if not a.isSeparator() and isinstance(bar.widgetForAction(a), QToolButton)
+        ]

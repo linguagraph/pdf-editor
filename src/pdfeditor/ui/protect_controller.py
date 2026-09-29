@@ -38,6 +38,7 @@ from pdfeditor.ui.dialogs.redaction import (
     SanitizeDialog,
 )
 from pdfeditor.ui.dialogs.security import SecurityDialog
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.redactions import RedactionsPanel
 from pdfeditor.ui.tools.base import Tool
 
@@ -102,7 +103,7 @@ class ProtectController:
     ) -> None:
         self.w = window
         self.style = self._load_style()
-        tool = QAction("&Redact", window, checkable=True)
+        tool = QAction(icon("eraser"), "&Redact", window, checkable=True)
         tool.setProperty("needs_doc", True)
         tool.setToolTip("Drag over content to mark it for redaction (or mark the selected text)")
         tool.triggered.connect(lambda _=False: self.start_redact_tool())
@@ -110,20 +111,24 @@ class ProtectController:
         tool_actions["redact"] = tool
         self.act_redact = tool
 
-        def act(text: str, slot: Callable[[], object], needs_doc: bool = True) -> QAction:
-            a = QAction(text, window)
+        def act(
+            text: str, icon_name: str, slot: Callable[[], object], needs_doc: bool = True
+        ) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())
             a.setProperty("needs_doc", needs_doc)
             window.addAction(a)
             return a
 
-        self.act_mark_text = act("&Find Text to Redact…", self.find_and_mark)
-        self.act_mark_pages = act("Mark Whole &Pages", self.mark_pages)
-        self.act_properties = act("Redaction &Properties…", self.edit_properties, needs_doc=False)
-        self.act_apply = act("&Apply Redactions…", lambda: self.apply(None))
-        self.act_sanitize = act("&Sanitize Document…", self.sanitize)
-        self.act_encrypt = act("&Encrypt with Password…", self.encrypt)
-        self.act_remove_security = act("Remove &Security", self.remove_security)
+        self.act_mark_text = act("&Find Text to Redact…", "text-search", self.find_and_mark)
+        self.act_mark_pages = act("Mark Whole &Pages", "file-lock", self.mark_pages)
+        self.act_properties = act(
+            "Redaction &Properties…", "settings-2", self.edit_properties, needs_doc=False
+        )
+        self.act_apply = act("&Apply Redactions…", "check-check", lambda: self.apply(None))
+        self.act_sanitize = act("&Sanitize Document…", "brush-cleaning", self.sanitize)
+        self.act_encrypt = act("&Encrypt with Password…", "lock", self.encrypt)
+        self.act_remove_security = act("Remove &Security", "lock-open", self.remove_security)
         self.last_message = ""
         self.panel = RedactionsPanel()
         self.panel.on_apply = self.apply
