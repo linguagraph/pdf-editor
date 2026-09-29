@@ -48,6 +48,14 @@ def test_split_line_at_gutter_keeps_word_spaces() -> None:
     assert split_line(_line("ab   ", 0))[0].text == "ab"  # trailing blanks trimmed
 
 
+def test_split_line_keeps_spaces_where_the_style_changes() -> None:
+    bold, regular = _line("A. ", 0).spans[0], _line("Button" + " " * 12 + "x", 15).spans[0]
+    line = Line((bold, regular), Rect(0, 10, regular.bbox.x1, 20))
+    parts = split_line(line)
+    assert [p.text for p in parts] == ["A. Button", "x"]
+    assert [s.text for s in parts[0].spans] == ["A. ", "Button"]
+
+
 def test_tabular_detection() -> None:
     assert is_tabular([_line("left", 0), _line("right", 100)])
     assert not is_tabular([_line("one", 0, 10), _line("two", 0, 22)])

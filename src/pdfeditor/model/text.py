@@ -114,6 +114,9 @@ class TableData:
     page_index: int
     bbox: Rect
     rows: tuple[tuple[str | None, ...], ...]
+    # each cell's box, laid out like ``rows`` (None where a merged cell covers the position);
+    # empty when the engine can't tell
+    cells: tuple[tuple[Rect | None, ...], ...] = ()
 
     @property
     def size(self) -> tuple[int, int]:

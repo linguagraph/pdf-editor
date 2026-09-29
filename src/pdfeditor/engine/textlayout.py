@@ -51,34 +51,40 @@ def split_line(line: Line) -> list[Line]:
     if abs(line.direction[0] - 1) > 1e-3 or not all(s.chars for s in line.spans if s.text):
         return [line]
     pieces: list[list[tuple[Span, list[Char]]]] = [[]]
+    blanks: list[tuple[Span, Char]] = []  # since the last visible character
     last_x1: float | None = None
+
+    def add(span: Span, ch: Char) -> None:
+        piece = pieces[-1]
+        if piece and piece[-1][0] is span:
+            piece[-1][1].append(ch)
+        else:
+            piece.append((span, [ch]))
+
     for span in line.spans:
         for ch in span.chars:
             if ch.c.isspace():
+                blanks.append((span, ch))
                 continue
             if last_x1 is not None and ch.bbox.x0 - last_x1 > COLUMN_GAP_EM * span.size:
                 pieces.append([])
+            elif pieces[-1]:
+                # blanks *between* visible characters are word spaces, even where the style
+                # changes ("A. " bold, then "Button" regular)
+                for owner, blank in blanks:
+                    add(owner, blank)
+            blanks = []
             last_x1 = ch.bbox.x1
-            piece = pieces[-1]
-            if piece and piece[-1][0] is span:
-                piece[-1][1].append(ch)
-            else:
-                piece.append((span, [ch]))
+            add(span, ch)
     if len(pieces) == 1 and line.text == line.text.strip():
         return [line]
     out: list[Line] = []
     for piece in pieces:
         if not piece:
             continue
-        # keep the blanks *between* visible characters of the piece (word spaces)
-        spans = [_with_inner_blanks(span, chars) for span, chars in piece]
+        spans = [_span_of(span, chars) for span, chars in piece]
         out.append(Line(tuple(spans), _union([s.bbox for s in spans]), line.direction))
     return out
-
-
-def _with_inner_blanks(span: Span, visible: list[Char]) -> Span:
-    first, last = span.chars.index(visible[0]), span.chars.index(visible[-1])
-    return _span_of(span, span.chars[first : last + 1])
 
 
 def _rows_overlap(a: Rect, b: Rect) -> bool:
