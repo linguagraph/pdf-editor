@@ -21,6 +21,7 @@ from pdfeditor.services.export.office import (
 )
 from pdfeditor.ui.dialogs.export import ExportDialog, ExportFormat, TablePickerDialog
 from pdfeditor.ui.dialogs.pages import checked_pages
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
 
 if TYPE_CHECKING:
@@ -36,24 +37,28 @@ class ExportController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
 
-        def act(text: str, slot: Callable[[], object], needs_doc: bool = True) -> QAction:
-            a = QAction(text, window)
+        def act(
+            text: str, icon_name: str, slot: Callable[[], object], needs_doc: bool = True
+        ) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())
             a.setProperty("needs_doc", needs_doc)
             window.addAction(a)
             return a
 
-        self.act_export = act("&Export PDF…", self.export)
+        self.act_export = act("&Export PDF…", "file-output", self.export)
         self.format_actions: dict[ExportFormat, QAction] = {}
         for fmt in ExportFormat:
 
             def export_as(f: ExportFormat = fmt) -> list[Path]:
                 return self.export(fmt=f)
 
-            self.format_actions[fmt] = act(f"{fmt.label}…", export_as)
-        self.act_extract_images = act("Extract &Images…", self.extract_images)
-        self.act_extract_fonts = act("Extract &Fonts…", self.extract_fonts)
-        self.act_from_office = act("Create PDF from &Office File…", self.from_office, False)
+            self.format_actions[fmt] = act(f"{fmt.label}…", "file-output", export_as)
+        self.act_extract_images = act("Extract &Images…", "images", self.extract_images)
+        self.act_extract_fonts = act("Extract &Fonts…", "a-large-small", self.extract_fonts)
+        self.act_from_office = act(
+            "Create PDF from &Office File…", "file-input", self.from_office, False
+        )
         self.act_from_office.setToolTip(
             "Word, Excel, PowerPoint and OpenDocument files; needs LibreOffice installed"
         )

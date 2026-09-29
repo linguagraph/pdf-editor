@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMessageBox
 from pdfeditor.model.metadata import SpaceUsage
 from pdfeditor.services.optimize import ReduceOptions, ReduceResult, audit, reduce_size
 from pdfeditor.ui.dialogs.optimize import ReduceSizeDialog, SpaceAuditDialog, human_size
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
 
 if TYPE_CHECKING:
@@ -23,15 +24,15 @@ class OptimizeController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
 
-        def act(text: str, slot: Callable[[], object]) -> QAction:
-            a = QAction(text, window)
+        def act(text: str, icon_name: str, slot: Callable[[], object]) -> QAction:
+            a = QAction(icon(icon_name), text, window)
             a.triggered.connect(lambda _=False: slot())
             a.setProperty("needs_doc", True)
             window.addAction(a)
             return a
 
-        self.act_reduce = act("Reduce File &Size…", self.reduce)
-        self.act_audit = act("Space &Usage…", self.audit)
+        self.act_reduce = act("Reduce File &Size…", "shrink", self.reduce)
+        self.act_audit = act("Space &Usage…", "chart-pie", self.audit)
         self.last_message = ""
         enabled = window.engine().capabilities.optimize
         for a in (self.act_reduce, self.act_audit):

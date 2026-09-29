@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.objects import Align, TextStyle, family_of
+from pdfeditor.ui.icons import icon
 
 if TYPE_CHECKING:
     from pdfeditor.ui.view.document_view import DocumentView
@@ -85,14 +86,8 @@ class TextStyleBar(QFrame):
         self.size_box.setDecimals(1)
         self.size_box.setSingleStep(0.5)
         self.size_box.setValue(style.size)
-        self.bold = self._toggle("B", "Bold", style.bold)
-        self.italic = self._toggle("I", "Italic", style.italic)
-        f = self.bold.font()
-        f.setBold(True)
-        self.bold.setFont(f)
-        f = self.italic.font()
-        f.setItalic(True)
-        self.italic.setFont(f)
+        self.bold = self._toggle("bold", "Bold", style.bold)
+        self.italic = self._toggle("italic", "Italic", style.italic)
         self.color_button = QToolButton(self)
         self.color_button.setToolTip("Text colour")
         self.color_button.clicked.connect(self._pick_color)
@@ -115,9 +110,9 @@ class TextStyleBar(QFrame):
         self.picking = False
         self.adjustSize()
 
-    def _toggle(self, text: str, tip: str, checked: bool) -> QToolButton:
+    def _toggle(self, icon_name: str, tip: str, checked: bool) -> QToolButton:
         b = QToolButton(self)
-        b.setText(text)
+        b.setIcon(icon(icon_name))
         b.setToolTip(tip)
         b.setCheckable(True)
         b.setChecked(checked)

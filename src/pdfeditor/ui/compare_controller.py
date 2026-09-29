@@ -13,6 +13,7 @@ from pdfeditor.engine.base import OpenError, PasswordRequired
 from pdfeditor.services.compare import CompareResult, compare, write_report
 from pdfeditor.ui.dialogs.compare import CompareFilesDialog, CompareWindow
 from pdfeditor.ui.dialogs.password import password_prompt
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
 from pdfeditor.ui.view.document_view import DocumentView
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 class CompareController:
     def __init__(self, window: MainWindow) -> None:
         self.w = window
-        self.act_compare = QAction("&Compare Files…", window)
+        self.act_compare = QAction(icon("git-compare"), "&Compare Files…", window)
         self.act_compare.triggered.connect(lambda _=False: self.compare())
         self.act_compare.setProperty("needs_doc", False)
         window.addAction(self.act_compare)

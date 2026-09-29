@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
-    QStyle,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.core.commands import ChangeKind, SetOutlineCommand
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.outline import Destination, Link, LinkKind, OutlineItem
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.base import ViewPanel
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
@@ -60,15 +60,13 @@ class BookmarksPanel(ViewPanel):
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setWordWrap(True)
         self.add_button = self._tool(
-            QStyle.StandardPixmap.SP_FileDialogNewFolder,
-            "Add a bookmark for the current view",
-            self.add_bookmark,
+            "bookmark-plus", "Add a bookmark for the current view", self.add_bookmark
         )
         self.delete_button = self._tool(
-            QStyle.StandardPixmap.SP_TrashIcon, "Delete the selected bookmark", self.delete_bookmark
+            "trash-2", "Delete the selected bookmark", self.delete_bookmark
         )
         self.dest_button = self._tool(
-            QStyle.StandardPixmap.SP_DialogApplyButton,
+            "map-pin",
             "Point the selected bookmark at the current view",
             self.set_destination,
         )
@@ -84,9 +82,9 @@ class BookmarksPanel(ViewPanel):
         layout.addWidget(self.empty)
         self._building = False
 
-    def _tool(self, icon: QStyle.StandardPixmap, tip: str, slot: Callable[[], None]) -> QToolButton:
+    def _tool(self, icon_name: str, tip: str, slot: Callable[[], None]) -> QToolButton:
         b = QToolButton(self)
-        b.setIcon(self.style().standardIcon(icon))
+        b.setIcon(icon(icon_name))
         b.setToolTip(tip)
         b.setAutoRaise(True)
         b.clicked.connect(lambda _=False: slot())

@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QStyle,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -73,6 +72,7 @@ from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.document_tab import DocumentTab
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.export_controller import ExportController
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.optimize_controller import OptimizeController
 from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.accessibility import AccessibilityPanel, TagsPanel
@@ -102,24 +102,24 @@ from pdfeditor.ui.view.renderer import TileRenderer
 
 log = logging.getLogger(__name__)
 
-# (action name, label, standard icon name or None)
+# (action name, label, icon)
 COMMENT_TOOLS = (
-    ("highlight", "&Highlight", None),
-    ("underline", "&Underline", None),
-    ("strikeout", "S&trikethrough", None),
-    ("squiggly", "S&quiggly", None),
-    ("note", "Sticky &Note", "SP_MessageBoxInformation"),
-    ("textbox", "Te&xt Box", None),
-    ("callout", "&Callout", None),
-    ("stamp", "Sta&mp", None),
-    ("attach", "Attach &File", "SP_FileLinkIcon"),
-    ("rectangle", "&Rectangle", None),
-    ("oval", "&Oval", None),
-    ("line", "&Line", None),
-    ("arrow", "&Arrow", None),
-    ("polygon", "Pol&ygon", None),
-    ("polyline", "Poly&line", None),
-    ("pen", "&Pen", None),
+    ("highlight", "&Highlight", "highlighter"),
+    ("underline", "&Underline", "underline"),
+    ("strikeout", "S&trikethrough", "strikethrough"),
+    ("squiggly", "S&quiggly", "spell-check"),
+    ("note", "Sticky &Note", "sticky-note"),
+    ("textbox", "Te&xt Box", "text-cursor-input"),
+    ("callout", "&Callout", "message-square-text"),
+    ("stamp", "Sta&mp", "stamp"),
+    ("attach", "Attach &File", "paperclip"),
+    ("rectangle", "&Rectangle", "square"),
+    ("oval", "&Oval", "circle"),
+    ("line", "&Line", "slash"),
+    ("arrow", "&Arrow", "move-up-right"),
+    ("polygon", "Pol&ygon", "pentagon"),
+    ("polyline", "Poly&line", "activity"),
+    ("pen", "&Pen", "pencil"),
 )
 EDIT_TOOL_NAMES = {name for name, _t, _k in EDIT_TOOLS}
 # Tools that aren't "make one thing" tools: they don't switch back after use.
@@ -152,28 +152,25 @@ class PageNavigator(QWidget):
     def __init__(self, window: MainWindow) -> None:
         super().__init__(window)
         self._window = window
-        style = self.style()
 
-        def button(icon: QStyle.StandardPixmap, tip: str, slot: Callable[[], None]) -> QToolButton:
+        def button(name: str, tip: str, slot: Callable[[], None]) -> QToolButton:
             b = QToolButton(self)
-            b.setIcon(style.standardIcon(icon))
+            b.setIcon(icon(name))
             b.setToolTip(tip)
             b.setAutoRaise(True)
             b.clicked.connect(slot)
             return b
 
-        self.first = button(
-            QStyle.StandardPixmap.SP_MediaSkipBackward, "First page", window.first_page
-        )
-        self.prev = button(QStyle.StandardPixmap.SP_ArrowUp, "Previous page", window.previous_page)
+        self.first = button("chevrons-up", "First page", window.first_page)
+        self.prev = button("chevron-up", "Previous page", window.previous_page)
         self.edit = QLineEdit(self)
         self.edit.setAccessibleName("Page number")
         self.edit.setFixedWidth(56)
         self.edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.edit.returnPressed.connect(self._jump)
         self.total = QLabel(self)
-        self.next = button(QStyle.StandardPixmap.SP_ArrowDown, "Next page", window.next_page)
-        self.last = button(QStyle.StandardPixmap.SP_MediaSkipForward, "Last page", window.last_page)
+        self.next = button("chevron-down", "Next page", window.next_page)
+        self.last = button("chevrons-down", "Last page", window.last_page)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         for w in (self.first, self.prev, self.edit, self.total, self.next, self.last):
@@ -331,7 +328,7 @@ class MainWindow(QMainWindow):
         self.zoom_box = ZoomBox(self)
         self.tool_label = QLabel(self)
         self.tool_exit = QToolButton(self)
-        self.tool_exit.setText("✕")
+        self.tool_exit.setIcon(icon("x"))
         self.tool_exit.setToolTip("Stop using this tool (Esc)")
         self.tool_exit.setAutoRaise(True)
         self.tool_exit.clicked.connect(lambda: self.set_tool("select"))
@@ -368,15 +365,15 @@ class MainWindow(QMainWindow):
         text: str,
         slot: Callable[..., object],
         shortcut: QKeySequence | QKeySequence.StandardKey | str | None = None,
-        icon: QStyle.StandardPixmap | None = None,
+        icon_name: str | None = None,
         needs_doc: bool = True,
         checkable: bool = False,
         scope: QWidget | None = None,
     ) -> QAction:
         """Create an action. ``scope`` limits its shortcut to that widget and its children."""
         action = QAction(text, self)
-        if icon is not None:
-            action.setIcon(self.style().standardIcon(icon))
+        if icon_name is not None:
+            action.setIcon(icon(icon_name))
         if shortcut is not None:
             action.setShortcut(QKeySequence(shortcut))
         action.setCheckable(checkable)
@@ -393,21 +390,16 @@ class MainWindow(QMainWindow):
         return action
 
     def _create_actions(self) -> None:
-        sp = QStyle.StandardPixmap
         a = self._action
         self.act_open = a(
-            "&Open…", self.open_dialog, QKeySequence.StandardKey.Open, sp.SP_DialogOpenButton, False
+            "&Open…", self.open_dialog, QKeySequence.StandardKey.Open, "folder-open", False
         )
-        self.act_close = a(
-            "&Close", self.close_current, QKeySequence.StandardKey.Close, sp.SP_DialogCloseButton
-        )
-        self.act_properties = a(
-            "Document &Properties…", self.show_properties, "Ctrl+D", sp.SP_FileDialogInfoView
-        )
-        self.act_save = a("&Save", self.save, QKeySequence.StandardKey.Save, sp.SP_DialogSaveButton)
+        self.act_close = a("&Close", self.close_current, QKeySequence.StandardKey.Close, "x")
+        self.act_properties = a("Document &Properties…", self.show_properties, "Ctrl+D", "info")
+        self.act_save = a("&Save", self.save, QKeySequence.StandardKey.Save, "save")
         self.act_save_as = a("Save &As…", self.save_as, QKeySequence.StandardKey.SaveAs)
-        self.act_undo = a("&Undo", self.undo, QKeySequence.StandardKey.Undo, sp.SP_ArrowBack)
-        self.act_redo = a("&Redo", self.redo, QKeySequence.StandardKey.Redo, sp.SP_ArrowForward)
+        self.act_undo = a("&Undo", self.undo, QKeySequence.StandardKey.Undo, "undo-2")
+        self.act_redo = a("&Redo", self.redo, QKeySequence.StandardKey.Redo, "redo-2")
         self.act_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.act_prefs = a("Pre&ferences…", self.show_preferences, "Ctrl+K", None, False)
         self.act_palette = a("Command &Palette…", self.show_command_palette, None, None, False)
@@ -415,7 +407,7 @@ class MainWindow(QMainWindow):
         self.act_shortcuts = a("&Keyboard Shortcuts…", self.show_shortcuts, None, None, False)
         self.act_shortcuts.setObjectName("keyboard-shortcuts")
         self.act_print = a(
-            "&Print…", self.print_document, QKeySequence.StandardKey.Print, sp.SP_FileIcon
+            "&Print…", self.print_document, QKeySequence.StandardKey.Print, "printer"
         )
         # Copy/Select All only apply while the page view has focus (line edits keep theirs).
         self.act_copy = a(
@@ -436,7 +428,7 @@ class MainWindow(QMainWindow):
             False,
             self.tabs,
         )
-        self.act_find = a("&Find…", self.show_find, QKeySequence.StandardKey.Find)
+        self.act_find = a("&Find…", self.show_find, QKeySequence.StandardKey.Find, "search")
         self.act_find_next = a(
             "Find &Next", self.search_panel.next_hit, QKeySequence.StandardKey.FindNext
         )
@@ -445,8 +437,11 @@ class MainWindow(QMainWindow):
         )
         self.tool_group = QActionGroup(self)
         self.tool_actions: dict[str, QAction] = {}
-        for name, text, key in (("select", "&Select Tool", "V"), ("hand", "&Hand Tool", "H")):
-            act = QAction(text, self, checkable=True)
+        for name, text, key, icon_name in (
+            ("select", "&Select Tool", "V", "mouse-pointer-2"),
+            ("hand", "&Hand Tool", "H", "hand"),
+        ):
+            act = QAction(icon(icon_name), text, self, checkable=True)
             act.setShortcut(QKeySequence(key))
             act.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             act.setProperty("needs_doc", True)
@@ -454,11 +449,8 @@ class MainWindow(QMainWindow):
             self.tabs.addAction(act)
             self.tool_group.addAction(act)
             self.tool_actions[name] = act
-        sp_note = QStyle.StandardPixmap
-        for name, text, icon in COMMENT_TOOLS:
-            act = QAction(text, self, checkable=True)
-            if icon is not None:
-                act.setIcon(self.style().standardIcon(getattr(sp_note, icon)))
+        for name, text, icon_name in COMMENT_TOOLS:
+            act = QAction(icon(icon_name), text, self, checkable=True)
             act.setProperty("needs_doc", True)
             act.triggered.connect(lambda _=False, n=name: self.tool_clicked(n))
             self.tool_group.addAction(act)
@@ -477,57 +469,65 @@ class MainWindow(QMainWindow):
             False,
             self.tabs,
         )
-        self.act_delete_annots = a(
-            "&Delete Comment", self.delete_annotations, None, sp_note.SP_TrashIcon
+        self.act_delete_annots = a("&Delete Comment", self.delete_annotations, None, "trash-2")
+        self.act_flatten = a("&Flatten All Comments…", self.flatten_all, None, "layers")
+        self.act_show_comments = a(
+            "Comments &List", self.show_comments, "Ctrl+Shift+C", "messages-square"
         )
-        self.act_flatten = a("&Flatten All Comments…", self.flatten_all)
-        self.act_show_comments = a("Comments &List", self.show_comments, "Ctrl+Shift+C")
         self.act_quit = a("E&xit", self.close, QKeySequence.StandardKey.Quit, None, False)
         self.act_zoom_in = a(
             "Zoom &In",
             lambda: self._with_view(DocumentView.zoom_in),
             QKeySequence.StandardKey.ZoomIn,
+            "zoom-in",
         )
         self.act_zoom_out = a(
             "Zoom &Out",
             lambda: self._with_view(DocumentView.zoom_out),
             QKeySequence.StandardKey.ZoomOut,
+            "zoom-out",
         )
         self.act_actual = a(
-            "&Actual Size", lambda: self._with_view(lambda v: v.set_zoom(1.0)), "Ctrl+1"
+            "&Actual Size", lambda: self._with_view(lambda v: v.set_zoom(1.0)), "Ctrl+1", "scan"
         )
-        self.act_fit_page = a("Fit &Page", lambda: self._with_view(DocumentView.fit_page), "Ctrl+0")
+        self.act_fit_page = a(
+            "Fit &Page", lambda: self._with_view(DocumentView.fit_page), "Ctrl+0", "expand"
+        )
         self.act_fit_width = a(
-            "Fit &Width", lambda: self._with_view(DocumentView.fit_width), "Ctrl+2"
+            "Fit &Width",
+            lambda: self._with_view(DocumentView.fit_width),
+            "Ctrl+2",
+            "move-horizontal",
         )
         self.act_rotate_cw = a(
             "Rotate View &Clockwise",
             lambda: self._with_view(lambda v: v.rotate_view(90)),
             "Ctrl+Shift+=",
-            sp.SP_BrowserReload,
+            "rotate-cw",
         )
         self.act_rotate_ccw = a(
             "Rotate View Counterc&lockwise",
             lambda: self._with_view(lambda v: v.rotate_view(-90)),
             "Ctrl+Shift+-",
+            "rotate-ccw",
         )
-        self.act_night = a("&Night Reading", self._toggle_night, "Ctrl+Alt+N", None, True, True)
+        self.act_night = a("&Night Reading", self._toggle_night, "Ctrl+Alt+N", "moon", True, True)
         self.act_nav_pane = self.nav_dock.toggleViewAction()
         self.act_nav_pane.setText("&Navigation Pane")
         self.act_nav_pane.setShortcut(QKeySequence("F4"))
         self.act_first = a("&First Page", self.first_page, "Home")
-        self.act_prev = a("&Previous Page", self.previous_page, None, sp.SP_ArrowUp)
-        self.act_next = a("&Next Page", self.next_page, None, sp.SP_ArrowDown)
+        self.act_prev = a("&Previous Page", self.previous_page, None, "chevron-up")
+        self.act_next = a("&Next Page", self.next_page, None, "chevron-down")
         self.act_last = a("&Last Page", self.last_page, "End")
         self.act_goto = a("&Go to Page…", self.go_to_page_dialog, "Ctrl+Shift+N")
         self.act_back = a(
-            "&Back", lambda: self._with_view(DocumentView.go_back), "Alt+Left", sp.SP_ArrowBack
+            "&Back", lambda: self._with_view(DocumentView.go_back), "Alt+Left", "arrow-left"
         )
         self.act_forward = a(
             "F&orward",
             lambda: self._with_view(DocumentView.go_forward),
             "Alt+Right",
-            sp.SP_ArrowForward,
+            "arrow-right",
         )
         self.act_next_tab = a("Next Document", lambda: self._cycle_tab(1), "Ctrl+Tab")
         self.act_prev_tab = a("Previous Document", lambda: self._cycle_tab(-1), "Ctrl+Shift+Tab")
@@ -538,13 +538,13 @@ class MainWindow(QMainWindow):
 
         self.layout_group = QActionGroup(self)
         self.layout_actions: dict[LayoutMode, QAction] = {}
-        for mode, text in (
-            (LayoutMode.SINGLE, "&Single Page"),
-            (LayoutMode.CONTINUOUS, "Single Page &Continuous"),
-            (LayoutMode.TWO_UP, "&Two-Up Continuous"),
-            (LayoutMode.TWO_UP_COVER, "Two-Up with &Cover Page"),
+        for mode, text, icon_name in (
+            (LayoutMode.SINGLE, "&Single Page", "file"),
+            (LayoutMode.CONTINUOUS, "Single Page &Continuous", "gallery-vertical"),
+            (LayoutMode.TWO_UP, "&Two-Up Continuous", "columns-2"),
+            (LayoutMode.TWO_UP_COVER, "Two-Up with &Cover Page", "book-open"),
         ):
-            act = QAction(text, self, checkable=True)
+            act = QAction(icon(icon_name), text, self, checkable=True)
             act.setData(mode)
             act.setProperty("needs_doc", True)
             act.triggered.connect(

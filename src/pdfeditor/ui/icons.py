@@ -1,0 +1,83 @@
+"""Toolbar/menu icons: bundled Lucide SVGs tinted with the current palette.
+
+The SVGs (``data/icons``, ISC licensed, see the LICENSE there) are stroked with
+``currentColor``. They are rendered on demand in the palette's text colour instead of being
+turned into fixed pixmaps once, so they follow light/dark theme switches and get a proper
+disabled look without shipping two sets.
+"""
+
+from __future__ import annotations
+
+import functools
+
+from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QIconEngine, QPainter, QPalette, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
+from pdfeditor.bundle import data_path
+
+
+@functools.cache
+def _svg(name: str) -> bytes:
+    return data_path("icons", f"{name}.svg").read_bytes()
+
+
+def _color(mode: QIcon.Mode) -> QColor:
+    palette = QGuiApplication.palette()
+    if mode is QIcon.Mode.Disabled:
+        return palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText)
+    if mode is QIcon.Mode.Selected:
+        return palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText)
+    return palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
+
+
+class _TintedSvgEngine(QIconEngine):
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self._name = name
+        self._pixmaps: dict[tuple[int, int, str], QPixmap] = {}
+
+    def _render(self, painter: QPainter, rect: QRect, mode: QIcon.Mode) -> None:
+        svg = _svg(self._name).replace(b"currentColor", _color(mode).name().encode())
+        QSvgRenderer(QByteArray(svg)).render(painter, rect)
+
+    def paint(self, painter: QPainter, rect: QRect, mode: QIcon.Mode, state: QIcon.State) -> None:
+        self._render(painter, rect, mode)
+
+    def pixmap(self, size: QSize, mode: QIcon.Mode, state: QIcon.State) -> QPixmap:
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def scaledPixmap(
+        self, size: QSize, mode: QIcon.Mode, state: QIcon.State, scale: float
+    ) -> QPixmap:
+        w, h = round(size.width() * scale), round(size.height() * scale)
+        key = (w, h, _color(mode).name())
+        pix = self._pixmaps.get(key)
+        if pix is None:
+            pix = QPixmap(w, h)
+            pix.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pix)
+            self._render(painter, QRect(QPoint(0, 0), QSize(w, h)), mode)
+            painter.end()
+            self._pixmaps[key] = pix
+        result = QPixmap(pix)
+        result.setDevicePixelRatio(scale)
+        return result
+
+    def actualSize(self, size: QSize, mode: QIcon.Mode, state: QIcon.State) -> QSize:
+        return size
+
+    def clone(self) -> QIconEngine:
+        return _TintedSvgEngine(self._name)
+
+    def key(self) -> str:
+        return "pdfeditor-tinted-svg"
+
+    def iconName(self) -> str:
+        return self._name
+
+
+def icon(name: str) -> QIcon:
+    """Bundled icon ``data/icons/<name>.svg``; raises if the file is missing."""
+    _svg(name)  # fail early, not at first paint
+    return QIcon(_TintedSvgEngine(name))
