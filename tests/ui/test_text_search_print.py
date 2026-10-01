@@ -143,13 +143,16 @@ def test_find_prefills_from_selection(qtbot, window: MainWindow, fixture_pdf) ->
     assert window.search_panel.query_edit.text() == "heading"
 
 
-def test_tool_actions_switch_all_views(window: MainWindow, fixture_pdf) -> None:
+def test_tool_actions_switch_the_current_view_only(window: MainWindow, fixture_pdf) -> None:
+    # Tools are per document (issue #44); tests/ui/test_edit_mode_issues.py has the details.
     v1 = window.open_path(fixture_pdf("text_multipage"))
     v2 = window.open_path(fixture_pdf("images"))
     window.tool_actions["hand"].trigger()
-    assert v1.tool.name == "hand" and v2.tool.name == "hand"
+    assert v1.tool.name == "select" and v2.tool.name == "hand"
     v3 = window.open_path(fixture_pdf("outline"))
-    assert v3.tool.name == "hand"
+    assert v3.tool.name == window.prefs.default_tool == "select"
+    window.tabs.setCurrentIndex(1)
+    assert window.tool_actions["hand"].isChecked()
     window.tool_actions["select"].trigger()
     assert all(v.tool.name == "select" for v in (v1, v2, v3))
 

@@ -22,6 +22,12 @@ def _svg(name: str) -> bytes:
     return data_path("icons", f"{name}.svg").read_bytes()
 
 
+def svg_data(name: str) -> bytes:
+    """The raw SVG of bundled icon ``name`` (stroked with ``currentColor``), for widgets that
+    tint it themselves, e.g. icons drawn on an accent fill."""
+    return _svg(name)
+
+
 def _color(mode: QIcon.Mode) -> QColor:
     palette = QGuiApplication.palette()
     if mode is QIcon.Mode.Disabled:

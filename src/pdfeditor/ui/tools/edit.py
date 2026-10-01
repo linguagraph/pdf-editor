@@ -25,7 +25,7 @@ from pdfeditor.model.objects import (
 )
 from pdfeditor.model.pages import ImageStamp
 from pdfeditor.ui.tools.base import Tool
-from pdfeditor.ui.view.text_editor import InlineTextEditor, viewport_rect
+from pdfeditor.ui.view.text_editor import InlineTextEditor
 
 if TYPE_CHECKING:
     from pdfeditor.ui.view.document_view import DocumentView
@@ -262,7 +262,7 @@ class EditObjectsTool(Tool):
         self.editor = InlineTextEditor(
             view.viewport(), obj.text, style, k, commit, cancel, font_data
         )
-        self.editor.place(viewport_rect(view, page, obj.bbox))
+        self.editor.follow(view, page, obj.bbox)
 
     def hover(self, view: DocumentView, event: QMouseEvent) -> None:
         scene = view.mapToScene(event.position().toPoint())
@@ -369,7 +369,7 @@ class AddTextTool(_RectTool):
         self.editor = InlineTextEditor(
             view.viewport(), "", self.style, view.transform().m11(), commit, cancel
         )
-        self.editor.place(viewport_rect(view, page, rect))
+        self.editor.follow(view, page, rect)
 
 
 def ask_image(view: DocumentView) -> Path | None:

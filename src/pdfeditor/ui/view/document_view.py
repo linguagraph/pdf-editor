@@ -555,6 +555,16 @@ class DocumentView(QGraphicsView):
             self._apply_fit()
         self.geometry_changed.emit()
 
+    def set_top_margin(self, px: int) -> None:
+        """Room above the pages for a row of controls (the mode banner), outside the page
+        area so it never covers a page."""
+        if self.viewportMargins().top() == px:
+            return
+        self.setViewportMargins(0, px, 0, 0)
+        if self._fit is not FitMode.NONE:
+            self._apply_fit()
+        self.geometry_changed.emit()
+
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.geometry_changed.emit()
@@ -581,6 +591,7 @@ class DocumentView(QGraphicsView):
     def viewportEvent(self, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Resize:  # also when a scroll bar comes or goes
             self._update_scene_rect()
+            self.geometry_changed.emit()  # overlays in the viewport re-place
         if event.type() in (QEvent.Type.MouseMove, QEvent.Type.Wheel, QEvent.Type.NativeGesture):
             self.user_activity.emit()
         if (
