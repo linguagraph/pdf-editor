@@ -37,13 +37,14 @@ def _color(mode: QIcon.Mode) -> QColor:
 
 
 class _TintedSvgEngine(QIconEngine):
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, color: str | None = None) -> None:
         super().__init__()
         self._name = name
+        self._fixed = color  # e.g. text on an accent-filled button; None follows the palette
         self._pixmaps: dict[tuple[int, int, str], QPixmap] = {}
 
     def _render(self, painter: QPainter, rect: QRect, mode: QIcon.Mode) -> None:
-        svg = _svg(self._name).replace(b"currentColor", _color(mode).name().encode())
+        svg = _svg(self._name).replace(b"currentColor", self._color(mode).name().encode())
         QSvgRenderer(QByteArray(svg)).render(painter, rect)
 
     def paint(self, painter: QPainter, rect: QRect, mode: QIcon.Mode, state: QIcon.State) -> None:
@@ -56,7 +57,7 @@ class _TintedSvgEngine(QIconEngine):
         self, size: QSize, mode: QIcon.Mode, state: QIcon.State, scale: float
     ) -> QPixmap:
         w, h = round(size.width() * scale), round(size.height() * scale)
-        key = (w, h, _color(mode).name())
+        key = (w, h, self._color(mode).name())
         pix = self._pixmaps.get(key)
         if pix is None:
             pix = QPixmap(w, h)
@@ -69,11 +70,16 @@ class _TintedSvgEngine(QIconEngine):
         result.setDevicePixelRatio(scale)
         return result
 
+    def _color(self, mode: QIcon.Mode) -> QColor:
+        if self._fixed is not None and mode is not QIcon.Mode.Disabled:
+            return QColor(self._fixed)
+        return _color(mode)
+
     def actualSize(self, size: QSize, mode: QIcon.Mode, state: QIcon.State) -> QSize:
         return size
 
     def clone(self) -> QIconEngine:
-        return _TintedSvgEngine(self._name)
+        return _TintedSvgEngine(self._name, self._fixed)
 
     def key(self) -> str:
         return "pdfeditor-tinted-svg"
@@ -82,10 +88,14 @@ class _TintedSvgEngine(QIconEngine):
         return self._name
 
 
-def icon(name: str) -> QIcon:
-    """Bundled icon ``data/icons/<name>.svg``; raises if the file is missing."""
+def icon(name: str, color: str | None = None) -> QIcon:
+    """Bundled icon ``data/icons/<name>.svg``; raises if the file is missing.
+
+    It is drawn in the palette's text color unless ``color`` fixes one (for icons on a colored
+    fill, such as an accent button; set it again when the theme changes).
+    """
     _svg(name)  # fail early, not at first paint
-    return QIcon(_TintedSvgEngine(name))
+    return QIcon(_TintedSvgEngine(name, color))
 
 
 def page_icon(pixmap: QPixmap) -> QIcon:

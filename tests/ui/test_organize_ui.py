@@ -200,7 +200,8 @@ def test_split_and_combine(window: MainWindow, copy_pdf, tmp_path: Path) -> None
     assert session is not None and session.page_count == 1 + 2 + 1
     titles = [i.title for i in session.document.outline()]
     assert titles == ["cover", "book_Chapter 1", "book_Chapter 3"]
-    assert window.tabs.tabText(window.tabs.currentIndex()) == "Combined.pdf*"
+    index = window.tabs.currentIndex()
+    assert window.tabs.tabText(index) == "Combined.pdf" and window.tabs.is_dirty(index)
 
 
 def test_crop_and_trim(window: MainWindow, copy_pdf) -> None:

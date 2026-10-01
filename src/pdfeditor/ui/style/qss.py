@@ -201,6 +201,49 @@ ModeBanner QToolButton {{
 ModeBanner QToolButton:hover {{ background: {_alpha(c.on_accent, 0.18)}; }}
 ModeBanner QToolButton:pressed {{ background: {_alpha(c.on_accent, 0.30)}; }}
 ModeBanner QToolButton:focus {{ border-width: 2px; padding: 0px {m.space(3) - 1}px; }}
+
+/* document tabs (U5): rounded, the active one joins the page area below */
+DocumentTabWidget > QTabBar, QWidget#DocumentTabsCorner {{ background: {c.window}; }}
+DocumentTabBar::tab {{
+    background: transparent; color: {c.text_muted};
+    border: 1px solid transparent; border-bottom: none;
+    border-top-left-radius: {m.radius_large}px; border-top-right-radius: {m.radius_large}px;
+    padding: {m.space(1) + 2}px {m.space(1)}px {m.space(1) + 2}px {m.space(3)}px;
+    margin: {m.space(1)}px 2px 0 0; min-width: 72px; max-width: 240px;
+}}
+DocumentTabBar::tab:hover {{ background: {c.hover}; color: {c.text};
+    border-top-left-radius: {m.radius_large}px; border-top-right-radius: {m.radius_large}px; }}
+DocumentTabBar::tab:selected {{
+    background: {c.surface}; color: {c.text}; border-color: {c.border};
+}}
+DocumentTabBar QToolButton {{ padding: 2px; border-radius: {m.radius_small}px; }}
+QToolButton#DocumentTabsMenu::menu-indicator {{ image: none; width: 0; }}
+
+/* start page (U6) */
+StartPage {{ background: {c.window}; }}
+QLabel#StartTitle {{ font-size: 20pt; font-weight: 600; color: {c.text}; }}
+QLabel#StartSection {{ font-size: 11pt; font-weight: 600; color: {c.text}; }}
+QPushButton#StartOpenButton {{
+    background: {c.accent}; color: {c.on_accent}; border: 1px solid {c.accent};
+    border-radius: {m.radius_large}px; font-size: 12pt; font-weight: 600;
+    padding: {m.space(3)}px {m.space(6)}px;
+}}
+QPushButton#StartOpenButton:hover {{ border: 2px solid {c.accent_text}; }}
+QPushButton#StartOpenButton:focus {{ border: 2px solid {c.on_accent}; }}
+QFrame#DropZone {{
+    background: {c.surface}; border: 2px dashed {c.border_strong};
+    border-radius: {m.radius_large}px;
+}}
+QFrame#DropZone:hover {{ border-color: {c.text_muted}; }}
+QFrame#DropZone[dragging="true"] {{ background: {c.accent_subtle}; border-color: {c.accent_text}; }}
+QFrame#DropZone QLabel {{ background: transparent; }}
+QToolButton#QuickAction {{
+    background: {c.surface}; border: 1px solid {c.border};
+    border-radius: {m.radius_large}px; padding: {m.space(2)}px {m.space(3)}px;
+}}
+QToolButton#QuickAction:hover {{ background: {c.hover}; border-color: {c.border_strong}; }}
+QToolButton#QuickAction:focus {{ border: 2px solid {c.accent_text}; }}
+QListWidget#RecentFiles {{ background: transparent; border: none; }}
 """
 
 

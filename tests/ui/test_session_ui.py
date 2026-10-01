@@ -60,13 +60,13 @@ def test_edit_properties_marks_dirty_and_undoes(window: MainWindow, pdf_copy) ->
     _edit_title(window, "New Title")
     window._update_ui()
     assert view.session.is_dirty
-    assert window.tabs.tabText(0) == "images.pdf*"
+    assert window.tabs.tabText(0) == "images.pdf" and window.tabs.is_dirty(0)
     assert window.windowTitle().startswith("images.pdf*")
     assert window.act_undo.isEnabled()
     assert window.act_undo.text() == "&Undo Change Document Properties"
     window.act_undo.trigger()
     assert view.session.document.metadata().title == "images"
-    assert not view.session.is_dirty and window.tabs.tabText(0) == "images.pdf"
+    assert not view.session.is_dirty and not window.tabs.is_dirty(0)
     window.act_redo.trigger()
     assert view.session.document.metadata().title == "New Title"
     # an unchanged dialog doesn't add an undo step
@@ -80,7 +80,7 @@ def test_save_and_save_as(window: MainWindow, pdf_copy, tmp_path: Path, monkeypa
     view = window.open_path(path)
     _edit_title(window, "Saved Title")
     window.act_save.trigger()
-    assert not view.session.is_dirty and window.tabs.tabText(0) == "images.pdf"
+    assert not view.session.is_dirty and not window.tabs.is_dirty(0)
     with pikepdf.open(path) as pdf:
         assert str(pdf.docinfo["/Title"]) == "Saved Title"
     other = tmp_path / "renamed"
@@ -182,7 +182,7 @@ def test_autosave_and_recovery(qtbot, window: MainWindow, pdf_copy) -> None:
     assert view.session.is_dirty and view.session.path is None
     assert view.session.document.metadata().title == "Recover me"
     assert view.session.save_target() == path.resolve()
-    assert fresh.tabs.tabText(0) == "images.pdf*"
+    assert fresh.tabs.tabText(0) == "images.pdf" and fresh.tabs.is_dirty(0)
     assert not (recovery_dir() / f"{uid}.pdf").exists()
     assert fresh.save()
     with pikepdf.open(path) as pdf:
