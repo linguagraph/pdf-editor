@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QVBoxLayout, QWidget
 
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 
 
 class LayersPanel(ViewPanel):
@@ -15,9 +15,13 @@ class LayersPanel(ViewPanel):
         super().__init__(parent)
         self.list = QListWidget(self)
         self.list.itemChanged.connect(self._on_changed)
-        self.empty = QLabel("This document has no layers.", self)
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setWordWrap(True)
+        self.empty = EmptyState(
+            "layers",
+            "No layers",
+            "Some documents, such as maps and technical drawings, have layers. "
+            "You can show or hide each one here.",
+            self,
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.list)

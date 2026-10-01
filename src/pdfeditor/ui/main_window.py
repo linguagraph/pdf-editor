@@ -25,7 +25,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
@@ -93,6 +92,7 @@ from pdfeditor.ui.protect_controller import ProtectController, RedactTool
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
+from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
 from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.theme import Theme, apply_theme
 from pdfeditor.ui.tools import annotate
@@ -142,12 +142,25 @@ def annotate_transform(model: AnnotationModel, m: Matrix) -> AnnotationModel:
     return transformed(model, m)
 
 
+# Left rail: settings key and icon of each navigation panel.
+PANEL_ICONS: dict[type[ViewPanel], tuple[str, str]] = {
+    ThumbnailsPanel: ("pages", "files"),
+    BookmarksPanel: ("bookmarks", "bookmark"),
+    CommentsPanel: ("comments", "messages-square"),
+    SearchPanel: ("search", "search"),
+    AttachmentsPanel: ("attachments", "paperclip"),
+    LayersPanel: ("layers", "layers"),
+    AccessibilityPanel: ("accessibility", "accessibility"),
+    TagsPanel: ("tags", "tags"),
+}
+
 MAX_RECENT = 10
 SETTINGS_RECENT = "recent_files"
 SETTINGS_GEOMETRY = "window/geometry"
 SETTINGS_STATE = "window/state"
-# Bump when the frame changes so old dock layouts aren't restored into it (U2: ribbon moved).
-STATE_VERSION = 2
+# Bump when the frame changes so old dock layouts aren't restored into it (U2: ribbon moved,
+# U3: icon-rail docks).
+STATE_VERSION = 3
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
 
 
@@ -315,29 +328,26 @@ class MainWindow(QMainWindow):
         self.tags_panel = TagsPanel()
         self.panels += [self.accessibility_panel, self.tags_panel]
         self.accessibility_panel.tag_requested.connect(self._show_tag)
-        self.nav_tabs = QTabWidget()
-        self.nav_tabs.setAccessibleName("Navigation panels")
-        self.nav_tabs.tabBar().setAccessibleName("Panel tabs")
-        self.nav_tabs.setDocumentMode(True)
+        # Icon rails: navigation panels on the left, Properties on the right.
+        self.nav_panels = SidePanels("left", self.prefs, "pages", 220)
         for panel in self.panels:
-            self.nav_tabs.addTab(panel, panel.title)
-        self.nav_dock = QDockWidget("Navigation", self)
-        self.nav_dock.setObjectName("navigation")
-        self.nav_dock.setWidget(self.nav_tabs)
-        self.nav_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetMovable
-        )
+            key, icon_name = PANEL_ICONS[type(panel)]
+            self.nav_panels.add_panel(panel, key, icon_name)
+        self.nav_dock = PanelDock("Navigation", "navigation", self.nav_panels, self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.nav_dock)
-        self.inspector_dock = QDockWidget("Properties", self)
-        self.inspector_dock.setObjectName("inspector")
-        self.inspector_dock.setWidget(self.inspector)
+        # Properties starts collapsed to its rail: the page needs the width.
+        self.inspector_panels = SidePanels("right", self.prefs, "", 260)
+        self.inspector_panels.add_panel(self.inspector, "properties", "sliders-horizontal")
+        self.inspector_panels.no_document.set_text(
+            "No document open", "Open a PDF, then select a comment to change its properties."
+        )
+        self.inspector_dock = PanelDock("Properties", "inspector", self.inspector_panels, self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.inspector_dock)
-        self.inspector_dock.hide()  # opened on demand: the page needs the width
         self.panels.append(self.inspector)
         self._annotation_clipboard: list[AnnotationModel] = []
         self._note_popup: NotePopup | None = None
         self._state_restored = False
+        self._docks_sized = False
 
         self.navigator = PageNavigator(self)
         self.zoom_box = ZoomBox(self)
@@ -364,15 +374,19 @@ class MainWindow(QMainWindow):
         self.compare = CompareController(self)
         self.pdfa = PdfaController(self)
         self.panels.insert(3, self.protect.panel)
-        self.nav_tabs.insertTab(3, self.protect.panel, self.protect.panel.title)
+        self.nav_panels.add_panel(self.protect.panel, "redactions", "eraser", 3)
         self.search_panel.hits_changed.connect(self._update_ui)
         self._create_menus()
         self._create_ribbon()
+        self._connect_panel_actions()
         # after every controller has made its actions: defaults + the user's own shortcuts
         self.shortcuts = ShortcutManager(self)
         apply_short_labels(self.ribbon.button_actions())
         self._refresh_tooltips()
         self.shortcuts.changed.append(self._refresh_tooltips)
+        # Panels first: the saved window state must meet the docks' open/collapsed limits.
+        self.nav_panels.restore()
+        self.inspector_panels.restore()
         self._restore_settings()
         self._apply_prefs()
         self._update_ui()
@@ -541,6 +555,10 @@ class MainWindow(QMainWindow):
         self.act_nav_pane = self.nav_dock.toggleViewAction()
         self.act_nav_pane.setText("&Navigation Pane")
         self.act_nav_pane.setShortcut(QKeySequence("F4"))
+        self.addAction(self.act_nav_pane)  # works with the menu bar hidden too
+        self.act_inspector = a(
+            "&Properties Panel", self._set_inspector_open, "Ctrl+E", None, False, True
+        )
         self.act_first = a("&First Page", self.first_page, "Home")
         self.act_prev = a("&Previous Page", self.previous_page, None, "chevron-up")
         self.act_next = a("&Next Page", self.next_page, None, "chevron-down")
@@ -653,9 +671,6 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_compact_ribbon)
         view_menu.addAction(self.act_collapse_ribbon)
         view_menu.addAction(self.act_nav_pane)
-        self.act_inspector = self.inspector_dock.toggleViewAction()
-        self.act_inspector.setText("&Properties Panel")
-        self.act_inspector.setShortcut(QKeySequence("Ctrl+E"))
         view_menu.addAction(self.act_inspector)
 
         pages_menu = mb.addMenu("&Pages")
@@ -779,14 +794,21 @@ class MainWindow(QMainWindow):
         w = self.tabs.currentWidget()
         return w if isinstance(w, DocumentTab) else None
 
+    def show_panel(self, panel: ViewPanel) -> None:
+        """Open ``panel`` in its side rail, showing that side if it was hidden (F4)."""
+        if panel is self.inspector:
+            self.inspector_dock.show()
+            self.inspector_panels.open(panel)
+        else:
+            self.nav_dock.show()
+            self.nav_panels.open(panel)
+
     def _show_tag(self, ref: int) -> None:
-        self.nav_dock.show()
-        self.nav_tabs.setCurrentWidget(self.tags_panel)
+        self.show_panel(self.tags_panel)
         self.tags_panel.show_tag(ref)
 
     def accessibility_check(self) -> None:
-        self.nav_dock.show()
-        self.nav_tabs.setCurrentWidget(self.accessibility_panel)
+        self.show_panel(self.accessibility_panel)
         self.accessibility_panel.run()
 
     def current_view(self) -> DocumentView | None:
@@ -1064,6 +1086,8 @@ class MainWindow(QMainWindow):
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
         self.navigator.update_state(view)
+        self.nav_panels.set_has_document(has_doc)
+        self.inspector_panels.set_has_document(has_doc)
         self.organize.update_state()
         self.edit.update_state(view)
         if view is not None:
@@ -1188,14 +1212,34 @@ class MainWindow(QMainWindow):
             view.delete_selected_annotations()
 
     def show_inspector(self) -> None:
-        was_hidden = not self.inspector_dock.isVisible()
-        self.inspector_dock.show()
-        if was_hidden:
-            self.resizeDocks([self.inspector_dock], [250], Qt.Orientation.Horizontal)
+        self.show_panel(self.inspector)
+
+    def _set_inspector_open(self, shown: bool) -> None:
+        if shown:
+            self.show_inspector()
+        else:
+            self.inspector_panels.collapse()
+
+    def _connect_panel_actions(self) -> None:
+        """Main actions offered by empty panels, and keeping Ctrl+E in step with the rail."""
+        self.inspector_panels.current_changed.connect(
+            lambda panel: self._set_checked(self.act_inspector, panel is not None)
+        )
+        self._set_checked(self.act_inspector, self.inspector_panels.is_open())
+        for side in (self.nav_panels, self.inspector_panels):
+            side.no_document.set_action("Open", self.act_open)
+        self.comments_panel.empty.set_action("Add sticky note", self.tool_actions["note"])
+        self.protect.panel.empty.set_action("Mark for redaction", self.protect.act_redact)
+        self.tags_panel.empty.set_action("Auto-tag", self.pdfa.act_auto_tag)
+
+    @staticmethod
+    def _set_checked(action: QAction, checked: bool) -> None:
+        action.blockSignals(True)
+        action.setChecked(checked)
+        action.blockSignals(False)
 
     def show_comments(self) -> None:
-        self.nav_dock.show()
-        self.nav_tabs.setCurrentWidget(self.comments_panel)
+        self.show_panel(self.comments_panel)
 
     def choose_stamp(self, stamp: str) -> None:
         self.stamp_name = stamp
@@ -1305,8 +1349,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         if view is None:
             return
-        self.nav_dock.show()
-        self.nav_tabs.setCurrentWidget(self.search_panel)
+        self.show_panel(self.search_panel)
         self.search_panel.focus_query(view.selected_text())
 
     def _make_tool(self, name: str) -> Tool:
@@ -1523,10 +1566,11 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        if not self._state_restored:
-            # Dock sizes only apply once the window has a size; do it on first show.
-            self._state_restored = True
-            self.resizeDocks([self.nav_dock], [210], Qt.Orientation.Horizontal)
+        if not self._docks_sized:
+            # Dock sizes only apply once the window has a size; do it on first show. The side
+            # panels keep their own width (the saved window state may hold a collapsed one).
+            self._docks_sized = True
+            fit_docks(self, [self.nav_dock, self.inspector_dock], force=True)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if any(
@@ -1554,6 +1598,9 @@ class MainWindow(QMainWindow):
             if not self._confirm_discard(view):
                 event.ignore()
                 return
+        for side in (self.nav_panels, self.inspector_panels):
+            side.remember_width()
+            side.save()
         self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
         self.settings.setValue(SETTINGS_STATE, self.saveState(STATE_VERSION))
         self.autosave_timer.stop()

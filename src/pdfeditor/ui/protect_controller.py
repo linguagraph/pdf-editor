@@ -248,8 +248,7 @@ class ProtectController:
         )
 
     def show_panel(self) -> None:
-        self.w.nav_dock.show()
-        self.w.nav_tabs.setCurrentWidget(self.panel)
+        self.w.show_panel(self.panel)
 
     # -- applying -------------------------------------------------------------------------
     def apply(

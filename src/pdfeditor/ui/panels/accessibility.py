@@ -26,7 +26,7 @@ from pdfeditor.core.commands import (
 )
 from pdfeditor.model.structure import STANDARD_TYPES, StructNode, walk_all
 from pdfeditor.services.accessibility import Finding, Status, check
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 
 COMMON_LANGUAGES = ("en-US", "en-GB", "bg-BG", "de-DE", "fr-FR", "es-ES", "it-IT", "ru-RU")
 _STATUS_LABEL = {Status.FAILED: "✗", Status.WARNING: "!", Status.PASSED: "✓"}
@@ -50,14 +50,32 @@ class AccessibilityPanel(ViewPanel):
         self.tree.setHeaderHidden(True)
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(lambda item, _c: self._jump(item))
+        self.empty = EmptyState(
+            "accessibility",
+            "Check accessibility",
+            "Find what makes this document hard to use with a screen reader or keyboard, "
+            "and fix it.",
+            self,
+        )
+        self.empty.set_action("Run check", slot=lambda: self.run())
+        self.results = QWidget(self)
         buttons = QHBoxLayout()
         buttons.addWidget(self.run_button)
         buttons.addWidget(self.fix_button)
+        results = QVBoxLayout(self.results)
+        results.setContentsMargins(0, 0, 0, 0)
+        results.addWidget(self.summary)
+        results.addLayout(buttons)
+        results.addWidget(self.tree, 1)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.summary)
-        layout.addLayout(buttons)
-        layout.addWidget(self.tree, 1)
+        layout.addWidget(self.results, 1)
+        layout.addWidget(self.empty, 1)
         self._selection_changed()
+        self._show_results(False)
+
+    def _show_results(self, shown: bool) -> None:
+        self.results.setVisible(shown)
+        self.empty.setVisible(not shown)
 
     def rebuild(self) -> None:
         self.findings = []
@@ -66,7 +84,13 @@ class AccessibilityPanel(ViewPanel):
             "Run the check to find accessibility problems." if self.view else "No document."
         )
         self.run_button.setEnabled(self.view is not None)
+        self.empty.button.setEnabled(self.view is not None)
+        self._show_results(False)
         self._selection_changed()
+
+    def badge_count(self) -> int:
+        """Problems found by the last check (failed or needing review)."""
+        return sum(1 for f in self.findings if f.status is not Status.PASSED)
 
     def run(self) -> list[Finding]:
         if self.view is None:
@@ -106,7 +130,9 @@ class AccessibilityPanel(ViewPanel):
             else f"{failed} failed, {review} to review. Double-click to go there; "
             "select a fixable item and press Fix."
         )
+        self._show_results(True)
         self._selection_changed()
+        self.badge_changed.emit()
 
     def selected(self) -> Finding | None:
         items = self.tree.selectedItems()
@@ -187,7 +213,13 @@ class TagsPanel(ViewPanel):
         self.tree.setHeaderLabels(["Tag", "Alternate text"])
         self.tree.itemSelectionChanged.connect(self._update_buttons)
         self.tree.itemDoubleClicked.connect(lambda item, _c: self._jump(item))
-        self.empty = QLabel("This document has no tags.", self)
+        self.empty = EmptyState(
+            "tags",
+            "No tags",
+            "Tags tell screen readers the reading order and structure of the document: "
+            "headings, paragraphs, lists and figures.",
+            self,
+        )
         self.rename_button = QPushButton("Change Tag…", self)
         self.rename_button.clicked.connect(lambda: self.change_type())
         self.alt_button = QPushButton("Alternate Text…", self)
@@ -196,16 +228,20 @@ class TagsPanel(ViewPanel):
         self.up_button.clicked.connect(lambda: self.move_tag(-1))
         self.down_button = QPushButton("Move Down", self)
         self.down_button.clicked.connect(lambda: self.move_tag(1))
+        self.buttons = QWidget(self)
+        rows = QVBoxLayout(self.buttons)
+        rows.setContentsMargins(0, 0, 0, 0)
         row1, row2 = QHBoxLayout(), QHBoxLayout()
         row1.addWidget(self.rename_button)
         row1.addWidget(self.alt_button)
         row2.addWidget(self.up_button)
         row2.addWidget(self.down_button)
+        rows.addLayout(row1)
+        rows.addLayout(row2)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.empty)
+        layout.addWidget(self.empty, 1)
         layout.addWidget(self.tree, 1)
-        layout.addLayout(row1)
-        layout.addLayout(row2)
+        layout.addWidget(self.buttons)
         self.nodes: dict[int, StructNode] = {}
         self.parents: dict[int, int | None] = {}
 
@@ -236,6 +272,8 @@ class TagsPanel(ViewPanel):
             add(root, None, None)
         self.tree.expandToDepth(1)
         self.empty.setVisible(not roots)
+        self.tree.setVisible(bool(roots))
+        self.buttons.setVisible(bool(roots))
         if selected is not None:
             self.show_tag(selected)
         self._update_buttons()

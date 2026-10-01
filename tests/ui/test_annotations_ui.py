@@ -199,7 +199,7 @@ def test_copy_paste_between_documents(qtbot, window: MainWindow, view, fixture_p
 def test_inspector_edits_merge(qtbot, window: MainWindow, view) -> None:
     window.set_tool("rectangle")
     drag(qtbot, view, 0, (100, 300), (200, 400))
-    assert not window.inspector_dock.isVisible()  # hidden until asked for
+    assert not window.inspector.isVisible()  # collapsed to its rail until asked for
     window.show_inspector()
     inspector = window.inspector
     assert inspector.model is not None and inspector.editor.isVisible()
