@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import io
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
-from pdfeditor.engine.mupdf import annots, content, ocr, pages
+from pdfeditor.engine.mupdf import annots, content, marks, ocr, pages
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import (
     STANDARD_STAMPS,
@@ -23,7 +23,7 @@ from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Matrix, Point, Quad, Rect
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Destination, Link, LinkKind
-from pdfeditor.model.pages import ImageStamp, TextStamp
+from pdfeditor.model.pages import ImageStamp, MarkKind, PageMark, TextStamp
 from pdfeditor.model.redaction import RedactOptions
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TableData, TextPage
 
@@ -261,8 +261,19 @@ class MuPage:
     def stamp_image(self, stamp: ImageStamp) -> None:
         pages.stamp_image(self, stamp)
 
-    def fill_background(self, color: Color, opacity: float = 1.0) -> None:
-        pages.fill_background(self, color.rgb(), opacity)
+    def fill_background(
+        self, color: Color, opacity: float = 1.0, mark: MarkKind | None = None
+    ) -> None:
+        pages.fill_background(self, color.rgb(), opacity, mark)
+
+    def page_marks(self) -> list[PageMark]:
+        return marks.page_marks(self)
+
+    def remove_marks(self, kinds: Collection[MarkKind]) -> int:
+        return marks.remove_marks(self, kinds)
+
+    def set_mark_settings(self, kind: MarkKind, settings: str) -> None:
+        marks.set_settings(self, kind, settings)
 
     def content_objects(self) -> list[PageObject]:
         return content.list_objects(self)

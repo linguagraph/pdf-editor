@@ -7,7 +7,7 @@ before using the matching optional method.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -28,7 +28,7 @@ from pdfeditor.model.metadata import (
 )
 from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
-from pdfeditor.model.pages import ImageStamp, PageLabelRule, TextStamp
+from pdfeditor.model.pages import ImageStamp, MarkKind, PageLabelRule, PageMark, TextStamp
 from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
 from pdfeditor.model.structure import AccessibilitySettings, StructNode
 from pdfeditor.model.text import TableData, TextPage
@@ -68,6 +68,7 @@ class Capabilities:
     xmp: bool = False
     layers: bool = False
     page_ops: bool = False  # insert/delete/reorder/rotate/crop/labels/stamps
+    page_marks: bool = False  # find, update and remove headers/watermarks/... added as marks
     content_edit: bool = False
     redact: bool = False
     ocr: bool = False
@@ -230,7 +231,25 @@ class Page(Protocol):
 
     def stamp_image(self, stamp: ImageStamp) -> None: ...
 
-    def fill_background(self, color: Color, opacity: float = 1.0) -> None: ...
+    def fill_background(
+        self, color: Color, opacity: float = 1.0, mark: MarkKind | None = None
+    ) -> None: ...
+
+    # Optional (``capabilities.page_marks``). Stamps with a ``mark`` are tagged as that kind of
+    # page artifact (backends without the capability draw them untagged).
+    def page_marks(self) -> list[PageMark]:
+        """The kinds of marks on this page: the app's own, with the settings stored by
+        :meth:`set_mark_settings`, and other tools' (Acrobat's) as ``foreign``."""
+        ...
+
+    def remove_marks(self, kinds: Collection[MarkKind]) -> int:
+        """Delete every mark of ``kinds`` (and its stored settings), leaving the rest of the
+        content alone. Returns the number of marked sections removed."""
+        ...
+
+    def set_mark_settings(self, kind: MarkKind, settings: str) -> None:
+        """Store ``settings`` (opaque text; "" clears it) with the page's ``kind`` marks."""
+        ...
 
     # Optional (``capabilities.content_edit``). Object keys are valid for one page revision.
     def content_objects(self) -> list[PageObject]:

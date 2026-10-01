@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QToolButton
 
 from pdfeditor.core.commands import SetPageLabelsCommand
 from pdfeditor.core.jobs import Cancelled
 from pdfeditor.core.session import DocumentSession
 from pdfeditor.engine.base import Document, EngineError, OpenError, PasswordRequired
+from pdfeditor.model.pages import MarkKind
+from pdfeditor.services import stamping
 from pdfeditor.services.assembly import (
     IMAGE_SUFFIXES,
     SplitMode,
@@ -22,8 +25,17 @@ from pdfeditor.services.assembly import (
     subset_size,
     write_split,
 )
-from pdfeditor.services.pages import parse_page_ranges
-from pdfeditor.services.stamping import apply_background, apply_header_footer, apply_watermark
+from pdfeditor.services.pages import format_page_ranges, parse_page_ranges
+from pdfeditor.services.stamping import (
+    MARK_NAMES,
+    MarkInfo,
+    apply_background,
+    apply_header_footer,
+    apply_watermark,
+    background_from_settings,
+    header_footer_from_settings,
+    watermark_from_settings,
+)
 from pdfeditor.ui import page_ops
 from pdfeditor.ui.dialogs.pages import (
     BackgroundDialog,
@@ -86,6 +98,44 @@ class OrganizeController:
         self.act_bates = act("&Bates Numbering…", lambda: self.header_footer(True), "hash")
         self.act_watermark = act("&Watermark…", self.watermark, "droplet")
         self.act_background = act("Bac&kground…", self.background, "paint-bucket")
+        # Each mark button opens its dialog (asking first whether to replace what's there); its
+        # menu has Add / Update / Remove, also shown as a submenu of the Pages menu.
+        marks: list[tuple[MarkKind, QAction, str, Callable[[bool], object]]] = [
+            (
+                MarkKind.HEADER_FOOTER,
+                self.act_header,
+                "panel-top",
+                lambda update: self.header_footer(False, update=update),
+            ),
+            (
+                MarkKind.BATES,
+                self.act_bates,
+                "hash",
+                lambda update: self.header_footer(True, update=update),
+            ),
+            (
+                MarkKind.WATERMARK,
+                self.act_watermark,
+                "droplet",
+                lambda update: self.watermark(update=update),
+            ),
+            (
+                MarkKind.BACKGROUND,
+                self.act_background,
+                "paint-bucket",
+                lambda update: self.background(update=update),
+            ),
+        ]
+        self.mark_actions: dict[MarkKind, tuple[QAction, QAction, QAction]] = {}
+        for kind, main, icon_name, open_dialog in marks:
+            label = MARK_NAMES[kind].replace("&", "&&")
+            add = act(f"&Add {label}…", partial(open_dialog, False), icon_name)
+            update = act(f"&Update {label}…", partial(open_dialog, True), "pencil")
+            remove = act(f"&Remove {label}", partial(self.remove_marks, kind), "eraser")
+            menu = QMenu(main.text(), window)
+            menu.addActions([add, update, remove])
+            main.setMenu(menu)
+            self.mark_actions[kind] = (add, update, remove)
         self.act_combine = act(
             "&Combine Files into PDF…",
             self.combine,
@@ -128,9 +178,13 @@ class OrganizeController:
             self.act_extract, self.act_replace, self.act_split, self.act_combine, title="Assemble"
         )
         r.add_group(self.act_crop, self.act_labels, title="Page Setup")
-        r.add_group(
+        marks = r.add_group(
             self.act_header, self.act_bates, self.act_watermark, self.act_background, title="Marks"
         )
+        for action in (self.act_header, self.act_bates, self.act_watermark, self.act_background):
+            button = marks.bar.widgetForAction(action)
+            if isinstance(button, QToolButton):  # click: the dialog; arrow: Add/Update/Remove
+                button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
 
     def menu_actions(self) -> list[QAction | None]:
         return [
@@ -379,61 +433,219 @@ class OrganizeController:
         if new != rules:
             session.execute(SetPageLabelsCommand(new))
 
-    def header_footer(self, bates: bool, dialog: HeaderFooterDialog | None = None) -> None:
+    # -- marks: header & footer, Bates numbers, watermark, background ---------------------
+    def find_marks(self, kind: MarkKind) -> MarkInfo | None:
+        tab = self.tab()
+        if tab is None:
+            return None
+        session = tab.view.session
+        with session.lock:
+            return stamping.find_marks(session.engine, session.document, [kind]).get(kind)
+
+    def ask_replace(self, kind: MarkKind, info: MarkInfo) -> bool | None:
+        """Ask what to do with the marks already there: True replaces them, False adds another
+        set as well, None cancels."""
+        box = QMessageBox(
+            QMessageBox.Icon.Question,
+            MARK_NAMES[kind],
+            f"This document already has {_PHRASES[kind]} (pages "
+            f"{format_page_ranges(info.pages)}).\n\n"
+            "Replace it with the new one, or add the new one as well?",
+            parent=self.w,
+        )
+        replace = box.addButton("&Replace Existing", QMessageBox.ButtonRole.AcceptRole)
+        add = box.addButton("&Add New", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(replace)
+        box.exec()
+        clicked = box.clickedButton()
+        return True if clicked is replace else False if clicked is add else None
+
+    def _target(self, kind: MarkKind, update: bool) -> tuple[bool, MarkInfo | None]:
+        """Whether to go on, and the existing marks to replace (None: add new ones)."""
+        info = self.find_marks(kind)
+        if info is None:
+            if update:
+                QMessageBox.information(
+                    self.w,
+                    f"Update {MARK_NAMES[kind]}",
+                    f"This document has no {_bare(kind)} added by this app or Acrobat to update.",
+                )
+            return not update, None
+        if update:
+            return True, info
+        choice = self.ask_replace(kind, info)
+        return choice is not None, info if choice else None
+
+    def _as_update(
+        self,
+        dialog: HeaderFooterDialog | WatermarkDialog | BackgroundDialog,
+        kind: MarkKind,
+        info: MarkInfo,
+    ) -> None:
+        title = f"Update {MARK_NAMES[kind]}"
+        dialog.setWindowTitle(title)
+        dialog.header_title.setText(title)
+        if info.foreign:
+            dialog.header_subtitle.setText(
+                "Replaces the one another application added (its settings can't be read)."
+            )
+            dialog.header_subtitle.setVisible(True)
+        dialog.range.select_pages(info.pages)
+
+    def _run_marks(
+        self, kind: MarkKind, existing: MarkInfo | None, draw: Callable[[Document], object]
+    ) -> None:
         tab = self.tab()
         if tab is None:
             return
+        session = tab.view.session
+        engine = session.engine
+
+        def op(doc: Document) -> None:
+            if existing is not None:
+                stamping.remove_marks(engine, doc, [kind])
+            draw(doc)
+
+        verb = "Update" if existing is not None else "Add"
+        page_ops.run(session, f"{verb} {MARK_NAMES[kind]}", op)
+
+    def header_footer_dialog(self, bates: bool, existing: MarkInfo | None) -> HeaderFooterDialog:
+        tab = self.tab()
+        assert tab is not None
         view = tab.view
-        dialog = dialog or HeaderFooterDialog(
+        dialog = HeaderFooterDialog(
             view.page_count, view.current_page, tab.target_pages(), bates, self.w
         )
+        if existing is not None:
+            self._as_update(dialog, MarkKind.BATES if bates else MarkKind.HEADER_FOOTER, existing)
+            spec = header_footer_from_settings(existing.settings)
+            if spec is not None:
+                dialog.load(spec)
+        return dialog
+
+    def header_footer(
+        self, bates: bool, dialog: HeaderFooterDialog | None = None, update: bool = False
+    ) -> None:
+        tab = self.tab()
+        if tab is None:
+            return
+        kind = MarkKind.BATES if bates else MarkKind.HEADER_FOOTER
+        go, existing = self._target(kind, update)
+        if not go:
+            return
+        dialog = dialog or self.header_footer_dialog(bates, existing)
         if not dialog.result() and not dialog.exec():
             return
         pages = checked_pages(self.w, dialog.range)
         spec = dialog.spec()
         if not pages or not spec.texts:
             return
-        name = view.session.display_name
-        engine = view.session.engine
+        name = tab.view.session.display_name
+        engine = tab.view.session.engine
+        self._run_marks(
+            kind, existing, lambda doc: apply_header_footer(engine, doc, spec, pages, name, kind)
+        )
 
-        def op(doc: Document) -> None:
-            apply_header_footer(engine, doc, spec, pages, name)
+    def watermark_dialog(self, existing: MarkInfo | None) -> WatermarkDialog:
+        tab = self.tab()
+        assert tab is not None
+        view = tab.view
+        dialog = WatermarkDialog(view.page_count, view.current_page, tab.target_pages(), self.w)
+        if existing is not None:
+            self._as_update(dialog, MarkKind.WATERMARK, existing)
+            spec = watermark_from_settings(existing.settings)
+            if spec is not None:
+                dialog.load(spec)
+        return dialog
 
-        page_ops.run(view.session, "Add Bates Numbers" if bates else "Add Header & Footer", op)
-
-    def watermark(self, dialog: WatermarkDialog | None = None) -> None:
+    def watermark(self, dialog: WatermarkDialog | None = None, update: bool = False) -> None:
         tab = self.tab()
         if tab is None:
             return
-        view = tab.view
-        dialog = dialog or WatermarkDialog(
-            view.page_count, view.current_page, tab.target_pages(), self.w
-        )
+        go, existing = self._target(MarkKind.WATERMARK, update)
+        if not go:
+            return
+        dialog = dialog or self.watermark_dialog(existing)
         if not dialog.result() and not dialog.exec():
             return
         pages = checked_pages(self.w, dialog.range)
         if not pages:
             return
         spec = dialog.spec()
-        engine = view.session.engine
-        page_ops.run(
-            view.session, "Add Watermark", lambda doc: apply_watermark(engine, doc, spec, pages)
+        engine = tab.view.session.engine
+        self._run_marks(
+            MarkKind.WATERMARK, existing, lambda doc: apply_watermark(engine, doc, spec, pages)
         )
 
-    def background(self, dialog: BackgroundDialog | None = None) -> None:
+    def background_dialog(self, existing: MarkInfo | None) -> BackgroundDialog:
+        tab = self.tab()
+        assert tab is not None
+        view = tab.view
+        dialog = BackgroundDialog(view.page_count, view.current_page, tab.target_pages(), self.w)
+        if existing is not None:
+            self._as_update(dialog, MarkKind.BACKGROUND, existing)
+            stored = background_from_settings(existing.settings)
+            if stored is not None:
+                dialog.load(*stored)
+        return dialog
+
+    def background(self, dialog: BackgroundDialog | None = None, update: bool = False) -> None:
         tab = self.tab()
         if tab is None:
             return
-        view = tab.view
-        dialog = dialog or BackgroundDialog(
-            view.page_count, view.current_page, tab.target_pages(), self.w
-        )
+        go, existing = self._target(MarkKind.BACKGROUND, update)
+        if not go:
+            return
+        dialog = dialog or self.background_dialog(existing)
         if not dialog.result() and not dialog.exec():
             return
         pages = checked_pages(self.w, dialog.range)
         if not pages:
             return
         color, opacity = dialog.color_button.color, dialog.opacity.value() / 100
-        page_ops.run(
-            view.session, "Add Background", lambda doc: apply_background(doc, color, pages, opacity)
+        engine = tab.view.session.engine
+        self._run_marks(
+            MarkKind.BACKGROUND,
+            existing,
+            lambda doc: apply_background(doc, color, pages, opacity, engine),
         )
+
+    def remove_marks(self, kind: MarkKind) -> int:
+        """Remove every mark of ``kind`` (one undoable step); returns how many were removed."""
+        tab = self.tab()
+        if tab is None:
+            return 0
+        info = self.find_marks(kind)
+        if info is None:
+            QMessageBox.information(
+                self.w,
+                f"Remove {MARK_NAMES[kind]}",
+                f"This document has no {_bare(kind)} added by this app or Acrobat to remove.",
+            )
+            return 0
+        session = tab.view.session
+        engine = session.engine
+        removed: list[int] = []
+        page_ops.run(
+            session,
+            f"Remove {MARK_NAMES[kind]}",
+            lambda doc: removed.append(stamping.remove_marks(engine, doc, [kind])),
+        )
+        self.w.statusBar().showMessage(
+            f"Removed {_bare(kind)} from {len(info.pages)} page(s).", 4000
+        )
+        return sum(removed)
+
+
+_PHRASES = {
+    MarkKind.HEADER_FOOTER: "a header or footer",
+    MarkKind.BATES: "Bates numbers",
+    MarkKind.WATERMARK: "a watermark",
+    MarkKind.BACKGROUND: "a background",
+}
+
+
+def _bare(kind: MarkKind) -> str:
+    """The phrase without its article: "watermark", "Bates numbers"."""
+    return _PHRASES[kind].removeprefix("a ")

@@ -27,6 +27,7 @@ class MuPDFEngine:
         annotations_write=True,
         annotations_flatten=True,
         page_ops=True,
+        page_marks=True,
         content_edit=True,
         redact=True,
         ocr=True,

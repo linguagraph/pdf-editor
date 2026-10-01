@@ -82,6 +82,17 @@ class PageRangeBox(QGroupBox):
             return parse_page_ranges(self.edit.text(), self.page_count)
         return list(range(self.page_count))
 
+    def select_pages(self, pages: list[int]) -> None:
+        """Pre-select ``pages`` (0-based), e.g. the pages an existing mark is on."""
+        chosen = sorted(set(pages))
+        if chosen == list(range(self.page_count)):
+            self.all.setChecked(True)
+        elif chosen == [self.current_index]:
+            self.current.setChecked(True)
+        elif chosen:
+            self.edit.setText(format_page_ranges(chosen))
+            self.custom.setChecked(True)
+
 
 def checked_pages(dialog: QWidget, box: PageRangeBox) -> list[int] | None:
     try:
@@ -523,6 +534,20 @@ class HeaderFooterDialog(FormDialog):
             bates_suffix=self.bates_suffix.text(),
         )
 
+    def load(self, spec: HeaderFooter) -> None:
+        """Fill the fields from existing settings (Update Header & Footer)."""
+        for slot, edit in self.slots.items():
+            edit.setText(spec.texts.get(slot, ""))
+        self.font_box.setCurrentText(spec.font)
+        self.size_box.setValue(spec.font_size)
+        self.color_button.set(spec.color)
+        self.margin_x.setValue(spec.margin_x)
+        self.margin_y.setValue(spec.margin_top)
+        self.bates_prefix.setText(spec.bates_prefix)
+        self.bates_start.setValue(spec.bates_start)
+        self.bates_digits.setValue(spec.bates_digits)
+        self.bates_suffix.setText(spec.bates_suffix)
+
 
 # -- watermark / background ---------------------------------------------------------------------
 class WatermarkDialog(FormDialog):
@@ -592,6 +617,7 @@ class WatermarkDialog(FormDialog):
         return Watermark(
             text=self.text.text(),
             image=image,
+            image_path=self.image_path.text() if image is not None else "",
             font=self.font_box.currentText(),
             font_size=self.size_box.value(),
             color=self.color_button.color,
@@ -600,6 +626,19 @@ class WatermarkDialog(FormDialog):
             scale=self.scale_box.value() / 100,
             on_top=not self.behind.isChecked(),
         )
+
+    def load(self, spec: Watermark) -> None:
+        """Fill the fields from existing settings (Update Watermark)."""
+        self.text.setText(spec.text)
+        self.image_path.setText(spec.image_path)
+        (self.use_image if spec.image_path else self.use_text).setChecked(True)
+        self.font_box.setCurrentText(spec.font)
+        self.size_box.setValue(spec.font_size)
+        self.color_button.set(spec.color)
+        self.opacity.setValue(round(spec.opacity * 100))
+        self.angle.setValue(spec.angle)
+        self.scale_box.setValue(round(spec.scale * 100))
+        self.behind.setChecked(not spec.on_top)
 
 
 class BackgroundDialog(FormDialog):
@@ -617,3 +656,8 @@ class BackgroundDialog(FormDialog):
         add_row(form, "Color:", self.color_button)
         add_row(form, "Opacity:", self.opacity)
         self.add_widget(self.range)
+
+    def load(self, color: Color, opacity: float) -> None:
+        """Fill the fields from existing settings (Update Background)."""
+        self.color_button.set(color)
+        self.opacity.setValue(round(opacity * 100))
