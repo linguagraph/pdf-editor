@@ -140,7 +140,6 @@ def annotate_transform(model: AnnotationModel, m: Matrix) -> AnnotationModel:
 
 MAX_RECENT = 10
 SETTINGS_RECENT = "recent_files"
-SETTINGS_THEME = "theme"
 SETTINGS_GEOMETRY = "window/geometry"
 SETTINGS_STATE = "window/state"
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
@@ -961,6 +960,7 @@ class MainWindow(QMainWindow):
     def show_preferences(self) -> None:
         if PreferencesDialog(self.prefs, self).exec():
             self._apply_prefs()
+            self.set_theme(Theme(self.prefs.theme))
 
     def offer_recovery(self, dialog: RecoveryDialog | None = None) -> int:
         """After a crash, offer the recovery copies left behind. Returns documents reopened."""
@@ -1346,9 +1346,9 @@ class MainWindow(QMainWindow):
     def set_theme(self, theme: Theme) -> None:
         app = QApplication.instance()
         if isinstance(app, QApplication):
-            apply_theme(app, theme)
+            apply_theme(app, theme, self.prefs.accent)
         self.theme_actions[theme].setChecked(True)
-        self.settings.setValue(SETTINGS_THEME, theme.value)
+        self.prefs.theme = theme.value
 
     # -- recent files ---------------------------------------------------------------------
     def _recent_files(self) -> list[str]:
@@ -1392,11 +1392,7 @@ class MainWindow(QMainWindow):
         state = self.settings.value(SETTINGS_STATE)
         if state is not None:
             self._state_restored = bool(self.restoreState(state))
-        try:
-            theme = Theme(str(self.settings.value(SETTINGS_THEME, Theme.SYSTEM.value)))
-        except ValueError:
-            theme = Theme.SYSTEM
-        self.set_theme(theme)
+        self.set_theme(Theme(self.prefs.theme))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

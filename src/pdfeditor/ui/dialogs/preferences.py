@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -17,6 +19,16 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.ui.i18n import available_languages
 from pdfeditor.ui.settings import AppSettings
+from pdfeditor.ui.style.tokens import ACCENT_PRESETS
+from pdfeditor.ui.theme import theme_manager
+
+CUSTOM = "custom"
+
+
+def _swatch(color: str) -> QIcon:
+    pix = QPixmap(14, 14)
+    pix.fill(QColor(color))
+    return QIcon(pix)
 
 
 class PreferencesDialog(QDialog):
@@ -50,6 +62,23 @@ class PreferencesDialog(QDialog):
         self.language.setCurrentIndex(max(0, self.language.findData(settings.language)))
         form.addRow("Language (after restart):", self.language)
 
+        appearance = QGroupBox("Appearance", self)
+        form = QFormLayout(appearance)
+        self.theme = QComboBox()
+        for key, text in (("system", "Same as Windows"), ("light", "Light"), ("dark", "Dark")):
+            self.theme.addItem(text, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))
+        form.addRow("Theme:", self.theme)
+        self.accent = QComboBox()
+        self.accent.addItem(_swatch(theme_manager().system_accent), "Windows accent color", "")
+        for name, color in ACCENT_PRESETS:
+            self.accent.addItem(_swatch(color), name, color)
+        self.accent.addItem("Custom…", CUSTOM)
+        self._select_accent(settings.accent)
+        self._previous_accent = self.accent.currentIndex()
+        self.accent.activated.connect(self._accent_activated)
+        form.addRow("Accent color:", self.accent)
+
         documents = QGroupBox("Documents", self)
         form = QFormLayout(documents)
         self.autosave = QSpinBox()
@@ -80,8 +109,25 @@ class PreferencesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        for w in (general, documents, performance, buttons):
+        for w in (general, appearance, documents, performance, buttons):
             layout.addWidget(w)
+
+    def _select_accent(self, color: str) -> None:
+        index = self.accent.findData(color)
+        if index < 0:  # a custom color: show it just above "Custom…"
+            index = self.accent.count() - 1
+            self.accent.insertItem(index, _swatch(color), color, color)
+        self.accent.setCurrentIndex(index)
+
+    def _accent_activated(self, index: int) -> None:
+        if self.accent.itemData(index) == CUSTOM:
+            start = QColor(theme_manager().colors.accent)
+            color = QColorDialog.getColor(start, self, "Accent Color")
+            if not color.isValid():
+                self.accent.setCurrentIndex(self._previous_accent)
+                return
+            self._select_accent(color.name())
+        self._previous_accent = self.accent.currentIndex()
 
     def accept(self) -> None:
         s = self.settings
@@ -90,6 +136,9 @@ class PreferencesDialog(QDialog):
         s.default_tool = str(self.tool.currentData())
         s.keep_tools = self.keep_tools.isChecked()
         s.language = str(self.language.currentData())
+        s.theme = str(self.theme.currentData())
+        accent = self.accent.currentData()
+        s.accent = accent if isinstance(accent, str) and accent != CUSTOM else ""
         s.autosave_minutes = self.autosave.value()
         s.undo_disk_mb = self.undo_disk.value()
         s.cache_mb = self.cache.value()

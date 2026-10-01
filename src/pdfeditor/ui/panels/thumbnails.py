@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QAbstractItemView, QListView, QVBoxLayout, QWidget
 
 from pdfeditor.core.layout import rotated_size
 from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
+from pdfeditor.ui.icons import page_icon
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.view import tiles
 from pdfeditor.ui.view.document_view import DocumentView
@@ -42,7 +43,7 @@ class ThumbnailModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return self.view.page_label(row)
         if role == Qt.ItemDataRole.DecorationRole:
-            return self._pixmap(row)
+            return page_icon(self._pixmap(row))
         if role == Qt.ItemDataRole.ToolTipRole:
             return f"Page {row + 1} of {self.view.page_count}"
         return None
