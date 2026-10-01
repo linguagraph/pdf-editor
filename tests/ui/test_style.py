@@ -234,3 +234,18 @@ def test_main_window_applies_saved_theme(app: QApplication, qtbot) -> None:
     assert settings.theme == "light"
     assert theme_manager().colors == build_colors("light", "#c42b1c")
     window.close()
+
+
+@pytest.mark.gui
+def test_dock_separator_is_easy_to_grab(app: QApplication, qtbot) -> None:
+    from PySide6.QtWidgets import QStyle
+
+    from pdfeditor.ui.main_window import MainWindow
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    extent = window.style().pixelMetric(
+        QStyle.PixelMetric.PM_DockWidgetSeparatorExtent, None, window
+    )
+    assert extent >= 4
+    window.close()

@@ -116,8 +116,15 @@ QDockWidget {{ color: {c.text}; }}
 QDockWidget::title {{
     background: {c.window}; padding: {m.space(1) + 2}px {m.space(2)}px; text-align: left;
 }}
-QMainWindow::separator {{ background: {c.border}; width: 1px; height: 1px; }}
-QMainWindow::separator:hover {{ background: {c.accent_text}; width: 3px; height: 3px; }}
+/* 4 px so the dock edge is easy to grab; a 1 px border line drawn by a gradient */
+QMainWindow::separator {{ width: 4px; height: 4px; background: {c.window}; }}
+QMainWindow::separator:vertical {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+    stop:0 {c.window}, stop:0.49 {c.window}, stop:0.5 {c.border}, stop:0.75 {c.border},
+    stop:0.76 {c.window}, stop:1 {c.window}); }}
+QMainWindow::separator:horizontal {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    stop:0 {c.window}, stop:0.49 {c.window}, stop:0.5 {c.border}, stop:0.75 {c.border},
+    stop:0.76 {c.window}, stop:1 {c.window}); }}
+QMainWindow::separator:hover {{ background: {c.accent_text}; }}
 QSplitter::handle {{ background: {c.border}; }}
 QSplitter::handle:hover {{ background: {c.accent_text}; }}
 QStatusBar {{ background: {c.window}; border-top: 1px solid {c.border}; }}
