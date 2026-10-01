@@ -161,6 +161,19 @@ def test_alt_tap_opens_first_menu_but_alt_shortcuts_do_not(qtbot, window: MainWi
     qtbot.waitUntil(lambda: not window.menu_bar.isVisible())
 
 
+def test_alt_watch_ends_when_the_app_loses_focus(qtbot, window: MainWindow) -> None:
+    from PySide6.QtCore import QEvent
+
+    _, file_menu = _top_menu(window, "File")
+    qtbot.keyPress(window, Qt.Key.Key_Alt)
+    app = QApplication.instance()
+    assert app is not None
+    app.sendEvent(app, QEvent(QEvent.Type.ApplicationDeactivate))  # Alt+Tab away
+    assert not window._alt_tap
+    qtbot.keyRelease(window, Qt.Key.Key_Alt)
+    assert not file_menu.isVisible()
+
+
 def test_shown_menu_bar_disables_extra_alt_shortcuts(qtbot) -> None:
     AppSettings().show_menu_bar = True
     w = MainWindow()

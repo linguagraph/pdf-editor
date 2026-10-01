@@ -1461,8 +1461,12 @@ class MainWindow(QMainWindow):
             key = event.key() if isinstance(event, QKeyEvent) else None
             if key != Qt.Key.Key_Alt:
                 self._alt_tap = False
-        elif event.type() == QEvent.Type.ApplicationDeactivate:
-            self._alt_tap = False  # Alt+Tab: the release goes to another window
+        if event.type() == QEvent.Type.ApplicationDeactivate:
+            # Alt+Tab: the release goes to another window, so stop watching now.
+            self._alt_tap = False
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
         return False
 
     # -- theme ----------------------------------------------------------------------------
