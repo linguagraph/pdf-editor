@@ -174,6 +174,13 @@ QListWidget[role="sidebar"]::item {{
 QListWidget[role="sidebar"]::item:selected {{ background: {c.accent_subtle}; color: {c.text}; }}
 QListWidget[role="sidebar"]:focus {{ border: 1px solid {c.accent_text}; }}
 
+/* side panels (ui/side_panels.py) */
+QWidget#PanelRail {{ background: {c.window}; }}
+QWidget#PanelRail[side="left"] {{ border-right: 1px solid {c.border}; }}
+QWidget#PanelRail[side="right"] {{ border-left: 1px solid {c.border}; }}
+QLabel[role="panel-title"] {{ font-weight: 600; padding: {m.space(1)}px 0; }}
+QLabel[role="empty-title"] {{ font-weight: 600; font-size: 11pt; }}
+
 QLabel[role="error"] {{ color: {c.danger}; }}
 QLabel[role="success"] {{ color: {c.success}; }}
 QLabel[role="warning"] {{ color: {c.warning}; }}

@@ -11,7 +11,6 @@ from PySide6.QtGui import QBrush, QColor, QDropEvent, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
-    QLabel,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -23,7 +22,7 @@ from pdfeditor.core.commands import ChangeKind, SetOutlineCommand
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.outline import Destination, Link, LinkKind, OutlineItem
 from pdfeditor.ui.icons import icon
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
 
@@ -56,9 +55,13 @@ class BookmarksPanel(ViewPanel):
         self.tree.itemActivated.connect(self._activate)
         self.tree.itemClicked.connect(self._activate)
         self.tree.itemChanged.connect(self._on_renamed)
-        self.empty = QLabel("This document has no bookmarks.", self)
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty.setWordWrap(True)
+        self.empty = EmptyState(
+            "bookmark",
+            "No bookmarks yet",
+            "Bookmarks work like a table of contents: click one to jump to that place.",
+            self,
+        )
+        self.empty.set_action("Add bookmark", slot=lambda: self.add_bookmark())
         self.add_button = self._tool(
             "bookmark-plus", "Add a bookmark for the current view", self.add_bookmark
         )
@@ -70,14 +73,15 @@ class BookmarksPanel(ViewPanel):
             "Point the selected bookmark at the current view",
             self.set_destination,
         )
-        bar = QHBoxLayout()
+        self.toolbar = QWidget(self)
+        bar = QHBoxLayout(self.toolbar)
         bar.setContentsMargins(2, 2, 2, 2)
         for b in (self.add_button, self.delete_button, self.dest_button):
             bar.addWidget(b)
         bar.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(bar)
+        layout.addWidget(self.toolbar)
         layout.addWidget(self.tree)
         layout.addWidget(self.empty)
         self._building = False
@@ -103,8 +107,9 @@ class BookmarksPanel(ViewPanel):
                 self.tree.addTopLevelItem(self._make(item))
             self.tree.setVisible(bool(items))
             self.empty.setVisible(not items)
+            self.toolbar.setVisible(bool(items))  # the empty state offers "Add" itself
             editable = self.view is not None and self.view.session.engine.capabilities.outline_write
-            for b in (self.add_button, self.delete_button, self.dest_button):
+            for b in (self.add_button, self.delete_button, self.dest_button, self.empty.button):
                 b.setEnabled(editable)
         finally:
             self._building = False

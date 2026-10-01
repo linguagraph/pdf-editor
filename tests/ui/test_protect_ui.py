@@ -84,7 +84,7 @@ def test_find_mark_apply_verify_and_undo(qtbot, window: MainWindow, view) -> Non
     assert len(dialog.hits) == 2
     assert window.protect.find_and_mark(accepted(dialog)) == 2
     panel = window.protect.panel
-    assert window.nav_tabs.currentWidget() is panel and panel.list.count() == 2
+    assert window.nav_panels.current() is panel and panel.list.count() == 2
     report = window.protect.apply(None, accepted(ApplyRedactionsDialog(2, 0, window)))
     assert report is not None and report.ok and report.images_checked == 1
     text = page_text(view)

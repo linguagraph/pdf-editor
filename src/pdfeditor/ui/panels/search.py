@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.model.text import SearchHit, SearchOptions
 from pdfeditor.services.search import SearchQuery, compile_query, search_document
 from pdfeditor.ui.jobs import Job
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.view.document_view import DocumentView
 
 
@@ -53,6 +53,8 @@ class SearchPanel(ViewPanel):
         self.results.setWordWrap(True)
         self.results.setUniformItemSizes(False)
         self.results.currentRowChanged.connect(self._on_row_changed)
+        self.empty = EmptyState("search", "", "", self)
+        self.hits_changed.connect(self.badge_changed)
 
         row = QHBoxLayout()
         row.addWidget(self.query_edit, 1)
@@ -70,10 +72,11 @@ class SearchPanel(ViewPanel):
         layout.addWidget(self.progress)
         layout.addWidget(self.status)
         layout.addWidget(self.results, 1)
+        layout.addWidget(self.empty, 1)
 
         self.hits: list[SearchHit] = []
         self.job: Job | None = None
-        self._update_buttons()
+        self.rebuild()
 
     # -- binding --------------------------------------------------------------------------
     def unbind(self, view: DocumentView) -> None:
@@ -84,8 +87,22 @@ class SearchPanel(ViewPanel):
         self.hits = []
         self.results.clear()
         self.status.clear()
+        self._show_empty(
+            "Search this document",
+            "Type a word or phrase above and press Enter. Matches on every page are listed here.",
+        )
         self._update_buttons()
         self.hits_changed.emit()
+
+    def _show_empty(self, title: str | None, text: str = "") -> None:
+        """Show the explanation instead of the result list (``None``: show the results)."""
+        if title is not None:
+            self.empty.set_text(title, text)
+        self.empty.setVisible(title is not None)
+        self.results.setVisible(title is None)
+
+    def badge_count(self) -> int:
+        return len(self.hits)
 
     # -- searching ------------------------------------------------------------------------
     def query(self) -> SearchQuery:
@@ -114,6 +131,7 @@ class SearchPanel(ViewPanel):
         cache = view.text_cache
         start = view.current_page
         self.status.setText("Searching…")
+        self._show_empty(None)
         self.progress.setRange(0, view.page_count)
         self.progress.setValue(0)
         self.progress.show()
@@ -154,6 +172,7 @@ class SearchPanel(ViewPanel):
             item.setToolTip(hit.context)
             self.results.addItem(item)
         self.view.add_search_hits(hits)
+        self._show_empty(None)
         self.status.setText(f"{len(self.hits)} results so far…")
         if first and self.hits:
             self.results.setCurrentRow(0)
@@ -167,6 +186,10 @@ class SearchPanel(ViewPanel):
         self.status.setText(
             "No matches." if count == 0 else f"{count} result{'s' if count != 1 else ''}."
         )
+        if count == 0:
+            self._show_empty(
+                "No matches", "Try other words, or turn off Match case and Whole words."
+            )
         self._update_buttons()
         self.search_finished.emit(count)
 

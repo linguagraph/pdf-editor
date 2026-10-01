@@ -101,7 +101,7 @@ def test_search_panel_streams_and_navigates(qtbot, window: MainWindow, fixture_p
     view = window.open_path(fixture_pdf("text_multipage"))
     panel = window.search_panel
     window.show_find()
-    assert window.nav_tabs.currentWidget() is panel
+    assert window.nav_panels.current() is panel
     panel.query_edit.setText("needle")
     with qtbot.waitSignal(panel.search_finished, timeout=10000) as blocker:
         panel.start_search()

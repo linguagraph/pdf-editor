@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 
 
 def human_size(n: int) -> str:
@@ -39,12 +39,20 @@ class AttachmentsPanel(ViewPanel):
         self.tree.itemDoubleClicked.connect(lambda *_: self.save_selected())
         self.save_button = QPushButton("Save…", self)
         self.save_button.clicked.connect(self.save_selected)
+        self.empty = EmptyState(
+            "paperclip",
+            "No attachments",
+            "Files embedded in this PDF, such as spreadsheets or source documents, are listed "
+            "here so you can save them.",
+            self,
+        )
         buttons = QHBoxLayout()
         buttons.addStretch()
         buttons.addWidget(self.save_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.tree)
+        layout.addWidget(self.empty)
         layout.addLayout(buttons)
 
     def rebuild(self) -> None:
@@ -56,7 +64,11 @@ class AttachmentsPanel(ViewPanel):
                 node = QTreeWidgetItem([f.filename, human_size(f.size), f.description])
                 node.setData(0, Qt.ItemDataRole.UserRole, f.name)
                 self.tree.addTopLevelItem(node)
-        self.save_button.setEnabled(self.tree.topLevelItemCount() > 0)
+        has_files = self.tree.topLevelItemCount() > 0
+        self.save_button.setEnabled(has_files)
+        self.save_button.setVisible(has_files)
+        self.tree.setVisible(has_files)
+        self.empty.setVisible(not has_files)
 
     def save_selected(self, target: Path | None = None) -> Path | None:
         node = self.tree.currentItem() or self.tree.topLevelItem(0)

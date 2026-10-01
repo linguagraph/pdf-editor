@@ -32,7 +32,7 @@ from pdfeditor.services.comments import (
     type_label,
 )
 from pdfeditor.services.xfdf import export_xfdf, import_command
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.printing import pdf_printer
 from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.view.document_view import DocumentView
@@ -96,7 +96,18 @@ class CommentsPanel(ViewPanel):
         import_button = QPushButton("Import…", self)
         import_button.clicked.connect(self.import_xfdf)
 
-        filters = QGridLayout()  # two rows keep the navigation pane narrow
+        self.empty = EmptyState(
+            "messages-square",
+            "No comments yet",
+            "Notes, highlights and other comments in this document are listed here, "
+            "with their replies and review status.",
+            self,
+        )
+        self.export_button = export
+
+        self.filters = QWidget(self)
+        filters = QGridLayout(self.filters)  # two rows keep the navigation pane narrow
+        filters.setContentsMargins(0, 0, 0, 0)
         filters.addWidget(self.type_filter, 0, 0)
         filters.addWidget(self.author_filter, 0, 1)
         filters.addWidget(self.status_filter, 1, 0, 1, 2)
@@ -106,10 +117,12 @@ class CommentsPanel(ViewPanel):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.search)
-        layout.addLayout(filters)
+        layout.addWidget(self.filters)
         layout.addWidget(self.tree, 1)
+        layout.addWidget(self.empty, 1)
         layout.addLayout(buttons)
         self.threads: list[Thread] = []
+        self._show_empty(True)
 
     # -- content --------------------------------------------------------------------------
     def rebuild(self) -> None:
@@ -123,6 +136,16 @@ class CommentsPanel(ViewPanel):
         authors = {a.author for t in self.threads for a in (t.comment, *t.replies) if a.author}
         self._reset_filter(self.author_filter, sorted(authors))
         self._fill()
+        self._show_empty(not self.threads)
+
+    def _show_empty(self, empty: bool) -> None:
+        # Searching and filtering an empty list is pointless; importing still makes sense.
+        for w in (self.search, self.filters, self.tree, self.reply_button, self.export_button):
+            w.setVisible(not empty)
+        self.empty.setVisible(empty)
+
+    def badge_count(self) -> int:
+        return len(self.threads)
 
     @staticmethod
     def _reset_filter(combo: QComboBox, values: list[str]) -> None:

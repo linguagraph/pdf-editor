@@ -148,6 +148,19 @@ class AppSettings:
     def ribbon_collapsed(self, value: bool) -> None:
         self.qs.setValue("ribbon/collapsed", "true" if value else "false")
 
+    # side panels: which panel each rail has open ("" = collapsed) and its width
+    def side_panel(self, side: str, default: str) -> str:
+        return self._str(f"panels/{side}_open", default)
+
+    def set_side_panel(self, side: str, key: str) -> None:
+        self.qs.setValue(f"panels/{side}_open", key)
+
+    def side_panel_width(self, side: str, default: int) -> int:
+        return min(1200, max(120, self._int(f"panels/{side}_width", default)))
+
+    def set_side_panel_width(self, side: str, width: int) -> None:
+        self.qs.setValue(f"panels/{side}_width", int(width))
+
     @property
     def cache_mb(self) -> int:
         """Render cache budget; applies on next start."""

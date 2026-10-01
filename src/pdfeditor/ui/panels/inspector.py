@@ -24,7 +24,7 @@ from pdfeditor.core.commands import ChangeKind, UpdateAnnotationCommand
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.color import Color
 from pdfeditor.services.comments import type_label
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.view.document_view import DocumentView
 
 FILL_TYPES = {
@@ -118,8 +118,15 @@ class InspectorPanel(ViewPanel):
         self.editor.setLayout(self.form)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
+        self.empty = EmptyState(
+            "sliders-horizontal",
+            "Nothing selected",
+            "Select a comment or shape on the page to change its color, line, opacity and text.",
+            self,
+        )
         layout.addWidget(self.heading)
         layout.addWidget(self.editor)
+        layout.addWidget(self.empty, 1)
         layout.addStretch()
         self.model: AnnotationModel | None = None
         self._loading = False
@@ -134,6 +141,8 @@ class InspectorPanel(ViewPanel):
         selected = self.view.selected_models() if self.view is not None else []
         self.model = selected[0] if len(selected) == 1 else None
         self.editor.setVisible(self.model is not None)
+        self.empty.setVisible(not selected)
+        self.heading.setVisible(bool(selected))
         if self.model is None:
             self.heading.setText(
                 f"{len(selected)} comments selected." if selected else "No comment selected."

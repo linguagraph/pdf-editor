@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.core.commands import ChangeKind
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
-from pdfeditor.ui.panels.base import ViewPanel
+from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 
 ROLE = Qt.ItemDataRole.UserRole
 
@@ -37,14 +37,25 @@ class RedactionsPanel(ViewPanel):
         self.apply_selected = QPushButton("Apply Selected", self)
         self.remove_selected = QPushButton("Remove", self)
         self.apply_all = QPushButton("Apply All…", self)
-        row = QHBoxLayout()
+        self.empty = EmptyState(
+            "eraser",
+            "No redaction marks",
+            "Mark text or areas to remove them for good. The marks are listed here so you can "
+            "review them before applying.",
+            self,
+        )
+        self.buttons = QWidget(self)
+        row = QHBoxLayout(self.buttons)
+        row.setContentsMargins(0, 0, 0, 0)
         for b in (self.apply_selected, self.remove_selected, self.apply_all):
             row.addWidget(b)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.summary)
         layout.addWidget(self.list, 1)
-        layout.addLayout(row)
+        layout.addWidget(self.empty, 1)
+        layout.addWidget(self.buttons)
+        self._count = 0
         # wired by the Protect controller
         self.on_apply: Callable[[list[AnnotationModel] | None], object] = lambda marks: None
         self.on_remove: Callable[[list[AnnotationModel]], object] = lambda marks: None
@@ -77,6 +88,13 @@ class RedactionsPanel(ViewPanel):
         )
         for b in (self.apply_selected, self.remove_selected, self.apply_all):
             b.setEnabled(bool(marks))
+        self._count = len(marks)
+        for w in (self.summary, self.list, self.buttons):
+            w.setVisible(bool(marks))
+        self.empty.setVisible(not marks)
+
+    def badge_count(self) -> int:
+        return self._count
 
     def selected_marks(self) -> list[AnnotationModel]:
         return [item.data(ROLE) for item in self.list.selectedItems()]
