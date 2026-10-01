@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,49 +23,58 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.core.jobs import CancelToken
 from pdfeditor.services.pages import parse_page_ranges
+from pdfeditor.ui.dialogs.base import FormDialog, add_row
 from pdfeditor.ui.printing import PrintOptions, Scaling, print_pages
+from pdfeditor.ui.style.tokens import METRICS
 from pdfeditor.ui.view.document_view import DocumentView
 
 
-class PrintDialog(QDialog):
+class PrintDialog(FormDialog):
     def __init__(self, view: DocumentView, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(
+            "Print",
+            view.session.display_name,
+            parent,
+            window_title=f"Print — {view.session.display_name}",
+            primary="Print",
+        )
         self.view = view
-        self.setWindowTitle(f"Print — {view.session.display_name}")
         self.printer = QPrinter(QPrinter.PrinterMode.HighResolution)
 
         self.printer_label = QLabel(self)
         setup = QPushButton("Printer…", self)
+        setup.setToolTip("Choose the printer, paper and copies")
         setup.clicked.connect(self.choose_printer)
         printer_row = QHBoxLayout()
-        printer_row.addWidget(QLabel("Printer:"))
         printer_row.addWidget(self.printer_label, 1)
         printer_row.addWidget(setup)
 
-        pages_box = QGroupBox("Pages to print", self)
         self.all_pages = QRadioButton(f"All ({view.page_count} pages)")
         self.current_page = QRadioButton(f"Current page ({view.page_label(view.current_page)})")
         self.range_pages = QRadioButton("Pages:")
         self.range_edit = QLineEdit(self)
         self.range_edit.setPlaceholderText("e.g. 1-3, 5, 8-")
         self.range_edit.textEdited.connect(lambda _t: self.range_pages.setChecked(True))
+        self.range_edit.setAccessibleName("Page range")
         self.all_pages.setChecked(True)
-        grid = QGridLayout(pages_box)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setVerticalSpacing(METRICS.space(1))
         grid.addWidget(self.all_pages, 0, 0, 1, 2)
         grid.addWidget(self.current_page, 1, 0, 1, 2)
         grid.addWidget(self.range_pages, 2, 0)
         grid.addWidget(self.range_edit, 2, 1)
 
-        scale_box = QGroupBox("Page sizing", self)
         self.scale_group = QButtonGroup(self)
-        scale_layout = QVBoxLayout(scale_box)
+        scale_layout = QVBoxLayout()
+        scale_layout.setSpacing(METRICS.space(1))
         self.scale_buttons: dict[Scaling, QRadioButton] = {}
         for scaling, text in (
             (Scaling.FIT, "Fit to printable area"),
             (Scaling.SHRINK, "Shrink oversized pages"),
             (Scaling.ACTUAL, "Actual size"),
         ):
-            button = QRadioButton(text, scale_box)
+            button = QRadioButton(text, self)
             self.scale_group.addButton(button)
             self.scale_buttons[scaling] = button
             scale_layout.addWidget(button)
@@ -78,25 +86,32 @@ class PrintDialog(QDialog):
         self.annotations.setChecked(True)
         self.grayscale = QCheckBox("Print in grayscale", self)
 
-        buttons = QDialogButtonBox(self)
-        self.print_button = buttons.addButton("Print", QDialogButtonBox.ButtonRole.AcceptRole)
-        preview = buttons.addButton("Preview…", QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._print)
-        buttons.rejected.connect(self.reject)
+        self.as_image = QCheckBox("Print as image", self)
+
+        assert self.primary_button is not None
+        self.print_button = self.primary_button
+        preview = self.button_box.addButton("Preview…", QDialogButtonBox.ButtonRole.ActionRole)
         preview.clicked.connect(self.preview)
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(printer_row)
-        layout.addWidget(pages_box)
-        layout.addWidget(scale_box)
-        layout.addWidget(self.auto_rotate)
-        layout.addWidget(self.annotations)
-        layout.addWidget(self.grayscale)
-        self.as_image = QCheckBox("Print as image (for pages that print incorrectly)", self)
-        layout.addWidget(self.as_image)
-        layout.addWidget(buttons)
+        form = self.add_form()
+        add_row(form, "Printer:", printer_row)
+        add_row(form, "Pages:", grid)
+        add_row(form, "Page sizing:", scale_layout)
+        self.options_section = self.add_section("Options")
+        options = self.options_section.form()
+        for box in (self.auto_rotate, self.annotations, self.grayscale):
+            options.addRow("", box)
+        self.advanced_section = self.add_section("Advanced", expanded=False)
+        add_row(
+            self.advanced_section.form(),
+            "",
+            self.as_image,
+            "Slower, but helps with pages that print incorrectly.",
+        )
         self._update_printer_label()
+
+    def primary_clicked(self) -> None:
+        self._print()
 
     def _update_printer_label(self) -> None:
         name = self.printer.printerName() or "(default printer)"

@@ -77,7 +77,7 @@ QPushButton:default:focus {{ border: 2px solid {c.accent_text}; }}
 QPushButton:default:disabled {{
     background: {c.hover}; color: {c.text_disabled}; border-color: {c.border};
 }}
-QPushButton[role="danger"] {{
+QPushButton[role="danger"], QPushButton[role="danger"]:default {{
     background: {c.danger if c.scheme == "light" else c.surface};
     color: {"#ffffff" if c.scheme == "light" else c.danger}; border-color: {c.danger};
 }}
@@ -155,6 +155,24 @@ QWidget#Ribbon {{ background: {c.window}; border-bottom: 1px solid {c.border}; }
 QWidget#Ribbon QTabBar::tab {{ padding: {m.space(1)}px {m.space(3)}px; }}
 QLabel[role="caption"] {{ color: {c.text_muted}; font-size: 8pt; padding-top: 1px; }}
 RibbonTab::separator {{ margin: {m.space(1)}px {m.space(1)}px {m.space(2)}px {m.space(1)}px; }}
+
+/* dialogs (ui/dialogs/base.py) */
+QToolButton[role="section"] {{
+    border: none; border-radius: {m.radius_small}px; font-weight: 600;
+    padding: {m.space(1)}px {m.space(1)}px; text-align: left;
+}}
+QToolButton[role="section"]:checked {{ background: transparent; }}
+QToolButton[role="section"]:hover {{ background: {c.hover}; }}
+QToolButton[role="section"]:focus {{ border: 1px solid {c.accent_text}; }}
+QListWidget[role="sidebar"] {{
+    background: {c.window}; border: none; border-radius: {m.radius_large}px;
+    padding: {m.space(1)}px; outline: 0;
+}}
+QListWidget[role="sidebar"]::item {{
+    padding: {m.space(2)}px {m.space(3)}px; border-radius: {m.radius_small}px;
+}}
+QListWidget[role="sidebar"]::item:selected {{ background: {c.accent_subtle}; color: {c.text}; }}
+QListWidget[role="sidebar"]:focus {{ border: 1px solid {c.accent_text}; }}
 
 QLabel[role="error"] {{ color: {c.danger}; }}
 QLabel[role="success"] {{ color: {c.success}; }}

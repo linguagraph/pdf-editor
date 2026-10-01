@@ -10,9 +10,7 @@ from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -26,39 +24,40 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.model.geometry import Point
 from pdfeditor.services.compare import Change, CompareOptions, CompareResult, change_color
+from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
 from pdfeditor.ui.view.document_view import DocumentView
 
 PDF_FILTER = "PDF documents (*.pdf)"
 
 
-class CompareFilesDialog(QDialog):
+class CompareFilesDialog(FormDialog):
     def __init__(self, old: Path | None = None, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Compare Files")
+        super().__init__(
+            "Compare Files",
+            "Shows what changed between two versions of a document. Files are compared as "
+            "saved on disk.",
+            parent,
+            primary="Compare",
+        )
         self.old = QLineEdit(str(old) if old else "", self)
         self.new = QLineEdit(self)
         self.text = QCheckBox("Compare text (word by word)", self)
         self.text.setChecked(True)
         self.visual = QCheckBox("Compare appearance where the text is the same", self)
         self.visual.setChecked(True)
-        form = QFormLayout()
-        form.addRow("Old version:", self._row(self.old))
-        form.addRow("New version:", self._row(self.new))
-        form.addRow("", self.text)
-        form.addRow("", self.visual)
-        note = QLabel("Files are compared as saved on disk.", self)
-        note.setEnabled(False)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
+        form = self.add_form()
+        add_row(form, "Old version:", self._row(self.old))
+        add_row(form, "New version:", self._row(self.new))
+        self.options_section = self.add_section("Options")
+        options = self.options_section.form()
+        options.addRow("", self.text)
+        options.addRow("", self.visual)
+        add_row(
+            options,
+            "",
+            caption("Appearance checks find changed pictures, drawings and colors.", self),
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Compare")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(note)
-        layout.addWidget(buttons)
-        self.resize(560, self.sizeHint().height())
+        self.resize(600, self.sizeHint().height())
 
     def _row(self, edit: QLineEdit) -> QHBoxLayout:
         browse = QPushButton("Browse…", self)

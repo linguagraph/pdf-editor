@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QLabel,
     QPlainTextEdit,
     QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from pdfeditor import SOURCE_URL, __version__
 from pdfeditor.licenses import about_text, license_text, notices
+from pdfeditor.ui.dialogs.base import FormDialog
 
 
 def _text(content: str, name: str) -> QPlainTextEdit:
@@ -23,27 +21,25 @@ def _text(content: str, name: str) -> QPlainTextEdit:
     return box
 
 
-class AboutDialog(QDialog):
+class AboutDialog(FormDialog):
     def __init__(self, engine_version: str = "", parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("About pdfeditor")
-        self.resize(640, 520)
-        head = QLabel(
-            f"<h2>pdfeditor {__version__}</h2>"
-            "<p>An open-source PDF editor.</p>"
-            + (f"<p>{engine_version}</p>" if engine_version else "")
-            + f'<p>Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a></p>',
-            self,
+        super().__init__(
+            f"pdfeditor {__version__}",
+            "An open-source PDF editor." + (f" {engine_version}" if engine_version else ""),
+            parent,
+            window_title="About pdfeditor",
+            primary=None,
+            cancel="Close",
         )
+        self.resize(640, 520)
+        head = QLabel(f'Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>', self)
         head.setOpenExternalLinks(True)
         head.setWordWrap(True)
         self.tabs = QTabWidget(self)
+        self.tabs.setAccessibleName("About pages")
+        self.tabs.tabBar().setAccessibleName("About pages")
         self.tabs.addTab(_text(about_text(), "About"), "About")
         self.tabs.addTab(_text(notices(), "Third-party licenses"), "Third-Party Licenses")
         self.tabs.addTab(_text(license_text(), "License"), "License (AGPL-3.0)")
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(head)
-        layout.addWidget(self.tabs, 1)
-        layout.addWidget(buttons)
+        self.add_widget(head)
+        self.add_widget(self.tabs, 1)

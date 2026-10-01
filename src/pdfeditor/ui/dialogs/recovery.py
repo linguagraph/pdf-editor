@@ -6,36 +6,35 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
-    QLabel,
     QListWidget,
     QListWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from pdfeditor.core.autosave import RecoveryEntry
+from pdfeditor.ui.dialogs.base import FormDialog
 
 
-class RecoveryDialog(QDialog):
+class RecoveryDialog(FormDialog):
     """Result: :attr:`selected` entries to reopen; :attr:`discard_rest` says what to do with
     the others (True = delete them, False = ask again next time)."""
 
     def __init__(self, entries: list[RecoveryEntry], parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Recover Unsaved Documents")
+        super().__init__(
+            "Recover Unsaved Documents",
+            "pdfeditor closed unexpectedly. These documents had unsaved changes. "
+            "Select the ones to recover:",
+            parent,
+            primary="Recover",
+            cancel="Decide Later",
+        )
         self.entries = entries
         self.selected: list[RecoveryEntry] = []
         self.discard_rest = False
 
-        intro = QLabel(
-            "pdfeditor closed unexpectedly. These documents had unsaved changes. "
-            "Select the ones to recover:",
-            self,
-        )
-        intro.setWordWrap(True)
         self.list = QListWidget(self)
+        self.list.setAccessibleName("Recovered documents")
         for entry in entries:
             when = datetime.fromtimestamp(entry.saved_at).strftime("%Y-%m-%d %H:%M")
             where = f" ({entry.original_path})" if entry.original_path else ""
@@ -44,19 +43,15 @@ class RecoveryDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked)
             self.list.addItem(item)
 
-        buttons = QDialogButtonBox(self)
-        recover = buttons.addButton("Recover", QDialogButtonBox.ButtonRole.AcceptRole)
-        discard = buttons.addButton("Discard All", QDialogButtonBox.ButtonRole.DestructiveRole)
-        later = buttons.addButton("Decide Later", QDialogButtonBox.ButtonRole.RejectRole)
-        recover.clicked.connect(self._recover)
+        discard = self.button_box.addButton(
+            "Discard All", QDialogButtonBox.ButtonRole.DestructiveRole
+        )
         discard.clicked.connect(self._discard)
-        later.clicked.connect(self.reject)
+        self.add_widget(self.list, 1)
+        self.resize(580, 360)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(intro)
-        layout.addWidget(self.list)
-        layout.addWidget(buttons)
-        self.resize(560, 320)
+    def primary_clicked(self) -> None:
+        self._recover()
 
     def _recover(self) -> None:
         self.selected = [
