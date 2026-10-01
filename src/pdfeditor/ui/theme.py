@@ -44,6 +44,7 @@ class ThemeManager(QObject):
         self.system_accent = app.palette().color(QPalette.ColorRole.Accent).name()
         self.colors: Colors = build_colors("light", self.system_accent)
         self._applying = False
+        self._applied: tuple[Colors, bool] | None = None
         hints = QGuiApplication.styleHints()
         hints.colorSchemeChanged.connect(self._reapply)
         hints.accessibility().contrastPreferenceChanged.connect(self._reapply)
@@ -80,12 +81,19 @@ class ThemeManager(QObject):
                     Qt.ColorScheme.Dark if scheme == "dark" else Qt.ColorScheme.Light
                 )
             self.colors = build_colors(scheme, self.accent or self.system_accent)
-            if self.high_contrast():
-                self._app.setStyleSheet("")
+            # Setting the app style sheet repolishes every widget in the process, so skip it
+            # when nothing changed (each new main window applies the saved theme again).
+            high_contrast = self.high_contrast()
+            sheet = "" if high_contrast else stylesheet(self.colors)
+            applied = (self.colors, high_contrast)
+            if applied == self._applied and self._app.styleSheet() == sheet:
+                return
+            self._applied = applied
+            if high_contrast:
                 self._app.setPalette(QPalette())  # empty resolve mask: the system palette
             else:
                 self._app.setPalette(build_palette(self.colors))
-                self._app.setStyleSheet(stylesheet(self.colors))
+            self._app.setStyleSheet(sheet)
         finally:
             self._applying = False
         self.changed.emit()

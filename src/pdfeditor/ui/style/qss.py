@@ -151,6 +151,11 @@ QScrollBar::handle:hover, QScrollBar::handle:pressed {{ background: {c.scrollbar
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
+QWidget#Ribbon {{ background: {c.window}; border-bottom: 1px solid {c.border}; }}
+QWidget#Ribbon QTabBar::tab {{ padding: {m.space(1)}px {m.space(3)}px; }}
+QLabel[role="caption"] {{ color: {c.text_muted}; font-size: 8pt; padding-top: 1px; }}
+RibbonTab::separator {{ margin: {m.space(1)}px {m.space(1)}px {m.space(2)}px {m.space(1)}px; }}
+
 QLabel[role="error"] {{ color: {c.danger}; }}
 QLabel[role="success"] {{ color: {c.success}; }}
 QLabel[role="warning"] {{ color: {c.warning}; }}

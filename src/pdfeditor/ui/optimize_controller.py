@@ -39,7 +39,7 @@ class OptimizeController:
             a.setVisible(enabled)
 
     def ribbon(self) -> None:
-        self.w.ribbon.tab("Tools").add_group(self.act_reduce, self.act_audit)
+        self.w.ribbon.tab("Tools").add_group(self.act_reduce, self.act_audit, title="Optimize")
 
     def _session(self) -> DocumentSession | None:
         view = self.w.current_view()

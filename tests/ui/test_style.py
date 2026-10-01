@@ -249,3 +249,16 @@ def test_dock_separator_is_easy_to_grab(app: QApplication, qtbot) -> None:
     )
     assert extent >= 4
     window.close()
+
+
+@pytest.mark.gui
+def test_unchanged_theme_is_not_reapplied(app: QApplication, monkeypatch) -> None:
+    """Re-setting the app style sheet repolishes every widget; new windows mustn't trigger it."""
+    apply_theme(app, Theme.DARK, "#8764b8")
+    calls: list[str] = []
+    monkeypatch.setattr(app, "setStyleSheet", lambda sheet: calls.append(sheet))
+    apply_theme(app, Theme.DARK, "#8764b8")
+    assert calls == []
+    monkeypatch.undo()
+    apply_theme(app, Theme.LIGHT, "#8764b8")
+    assert app.styleSheet() == stylesheet(build_colors("light", "#8764b8"))

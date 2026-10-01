@@ -60,15 +60,14 @@ class ExportController:
         self.act_from_office = act(
             "Create PDF from &Office File…", "file-input", self.from_office, False
         )
-        self.act_from_office.setToolTip(
-            "Word, Excel, PowerPoint and OpenDocument files; needs LibreOffice installed"
-        )
         self.last_message = ""
 
     def ribbon(self) -> None:
         r = self.w.ribbon.tab("Tools")
-        r.add_group(self.act_export, self.act_extract_images, self.act_extract_fonts)
-        r.add_group(self.act_from_office)
+        r.add_group(
+            self.act_export, self.act_extract_images, self.act_extract_fonts, title="Export"
+        )
+        r.add_group(self.act_from_office, title="Create")
 
     def fill_menu(self, menu: object) -> None:
         from PySide6.QtWidgets import QMenu
