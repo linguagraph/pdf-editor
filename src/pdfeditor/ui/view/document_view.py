@@ -2,17 +2,35 @@
 
 from __future__ import annotations
 
+import bisect
+import contextlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from itertools import accumulate
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QPointF,
+    QRect,
+    QRectF,
+    Qt,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
+    QHideEvent,
     QKeyEvent,
     QMouseEvent,
+    QNativeGestureEvent,
+    QPainter,
     QResizeEvent,
+    QShowEvent,
     QTransform,
     QWheelEvent,
 )
@@ -22,6 +40,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsView,
     QMenu,
+    QStyle,
     QToolTip,
     QWidget,
 )
@@ -43,9 +62,11 @@ from pdfeditor.model.objects import PageObject
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.model.text import SearchHit
 from pdfeditor.services.text import TextIndexCache, TextPos, TextSelection
+from pdfeditor.ui.theme import current_colors, theme_manager
 from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.select import SelectTool
-from pdfeditor.ui.view.page_item import PageItem, qrect
+from pdfeditor.ui.view import motion
+from pdfeditor.ui.view.page_item import PageItem, qrect, shadow_strips
 from pdfeditor.ui.view.renderer import TileRenderer
 
 log = logging.getLogger(__name__)
@@ -59,6 +80,10 @@ ZOOM_STEPS = (
 SELECTION_COLOR = QColor(51, 136, 255, 90)
 SEARCH_HIT_COLOR = QColor(255, 225, 0, 130)
 CURRENT_HIT_COLOR = QColor(255, 140, 0, 170)
+
+# Page drop shadow, in device pixels: (spread, drop, alpha) per translucent layer. A few flat
+# rounded rects per visible page cost next to nothing, unlike a blur effect per item.
+SHADOW_LAYERS = ((1, 1, 30), (2, 2, 18), (4, 3, 10), (7, 4, 5))
 
 
 class FitMode(Enum):
@@ -90,6 +115,8 @@ class DocumentView(QGraphicsView):
     annotation_context_menu = Signal(object, object)  # AnnotationModel, global QPoint
     note_clicked = Signal(object, object)  # AnnotationModel (sticky note), global QPoint
     document_changed = Signal(object)  # tuple[Change, ...] after the view has updated itself
+    user_activity = Signal()  # mouse moved, wheel turned or pinched over the pages
+    geometry_changed = Signal()  # resized, shown or hidden (floating overlays re-place)
 
     def __init__(
         self, session: DocumentSession, renderer: TileRenderer, parent: QWidget | None = None
@@ -101,8 +128,13 @@ class DocumentView(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setBackgroundBrush(QColor(0x5A, 0x5D, 0x63))
-        self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.page_outline = QColor()
+        self._shadow = QColor()
+        self._apply_theme()
+        theme_manager().changed.connect(self._apply_theme)
+        # Horizontal centring is done by _update_scene_rect: QGraphicsView's own centring is
+        # off by half a scroll bar while the vertical scroll bar shows.
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
@@ -116,6 +148,7 @@ class DocumentView(QGraphicsView):
         self._current = 0
         self._page_rects: list[Rect] = []
         self._scene_rects: list[Rect] = []
+        self._max_bottoms: list[float] = []  # running max of page bottoms, for bisecting
         self._items: list[PageItem] = []
         self._links: dict[int, tuple[int, list[Link]]] = {}
         self._labels: list[str] | None = None
@@ -139,6 +172,22 @@ class DocumentView(QGraphicsView):
         self.author = ""
         self.tool: Tool = SelectTool()
         self.tool.activate(self)
+        # Animated zoom: PageItem paints only cached tiles while it runs (no render requests
+        # for the in-between scales), then the final scale is rendered as usual.
+        self.zoom_animating = False
+        self._zoom_anim = QVariantAnimation(self)
+        self._zoom_anim.setDuration(motion.DURATION_MS)
+        self._zoom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._zoom_anim.valueChanged.connect(self._on_zoom_frame)
+        self._zoom_anim.finished.connect(self._on_zoom_animation_done)
+        self._zoom_target = 1.0
+        self._zoom_anchor = (QPointF(), QPointF())  # (scene point, viewport point)
+        self._scroll_anim = QVariantAnimation(self)
+        self._scroll_anim.setDuration(motion.DURATION_MS)
+        self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._scroll_anim.valueChanged.connect(self._on_scroll_frame)
+        self._scroll_anim.finished.connect(self._on_scroll_animation_done)
+        self._after_scroll: Callable[[], None] | None = None
 
         renderer.tile_ready.connect(self._on_tile_ready)
         self.verticalScrollBar().valueChanged.connect(self._update_current_page)
@@ -204,6 +253,10 @@ class DocumentView(QGraphicsView):
         self.document_changed.emit(tuple(event.changes))
 
     def close_view(self) -> None:
+        self._zoom_anim.stop()
+        self._scroll_anim.stop()
+        with contextlib.suppress(RuntimeError, TypeError):  # already disconnected
+            theme_manager().changed.disconnect(self._apply_theme)
         self._unsubscribe()
         self.renderer.tile_ready.disconnect(self._on_tile_ready)
         self.renderer.unregister(self.session)
@@ -257,6 +310,53 @@ class DocumentView(QGraphicsView):
         self._relayout()
         self.go_to_page(page, record=False)
 
+    def _apply_theme(self) -> None:
+        colors = current_colors()
+        self.setBackgroundBrush(QColor(colors.canvas))
+        self.page_outline = QColor(colors.page_outline)
+        self._shadow = QColor(colors.shadow)
+        self.viewport().update()
+
+    def drawBackground(self, painter: QPainter, rect: QRectF | QRect) -> None:
+        super().drawBackground(painter, rect)
+        if not self._scene_rects:
+            return
+        transform = painter.worldTransform()
+        if transform.m11() * PAGE_GAP < 2:  # pages nearly touch: a shadow would only smudge
+            return
+        # Drawn in whole device pixels so the shadow is the same size at every zoom, and only
+        # around each page (never under it): a handful of thin non-antialiased fills.
+        painter.save()
+        painter.resetTransform()
+        color = QColor(self._shadow)
+        for i in self._pages_in(QRectF(rect)):
+            page = transform.mapRect(qrect(self._scene_rects[i])).toAlignedRect()
+            for spread, drop, alpha in SHADOW_LAYERS:
+                color.setAlpha(alpha)
+                for strip in shadow_strips(page, spread, drop):
+                    painter.fillRect(strip, color)
+        painter.restore()
+
+    def _pages_in(self, rect: QRectF) -> list[int]:
+        """Visible pages whose shadow may reach into scene ``rect`` (a bisect, not a scan)."""
+        if self._mode is LayoutMode.SINGLE:
+            return [self._current] if self._scene_rects else []
+        margin = PAGE_GAP
+        top, bottom = rect.top() - margin, rect.bottom() + margin
+        out: list[int] = []
+        i = bisect.bisect_left(self._max_bottoms, top)
+        while i < len(self._scene_rects) and self._scene_rects[i].y0 <= bottom:
+            out.append(i)
+            i += 1
+        # the right-hand page of a two-up row can start above its left neighbour
+        if (
+            i < len(self._scene_rects)
+            and self._mode is not LayoutMode.CONTINUOUS
+            and self._scene_rects[i].y0 - margin <= bottom
+        ):
+            out.append(i)
+        return out
+
     def set_night_mode(self, on: bool) -> None:
         self.night_mode = on
         self.renderer.cancel(lambda k: k.doc_id == self.session.id)
@@ -265,6 +365,7 @@ class DocumentView(QGraphicsView):
     def _relayout(self) -> None:
         sizes = [(r.width, r.height) for r in self._page_rects]
         self._scene_rects = compute_layout(sizes, self._mode, self.rotation)
+        self._max_bottoms = list(accumulate((r.y1 for r in self._scene_rects), max))
         for item, rect in zip(self._items, self._scene_rects, strict=True):
             item.setPos(rect.x0, rect.y0)
         self._apply_single_page_visibility()
@@ -273,17 +374,37 @@ class DocumentView(QGraphicsView):
         self.layout_changed.emit()
 
     def _apply_single_page_visibility(self) -> None:
+        if self._scene_rects:
+            single = self._mode is LayoutMode.SINGLE
+            for i, item in enumerate(self._items):
+                item.setVisible(not single or i == self._current)
+        self._update_scene_rect()
+
+    def _update_scene_rect(self) -> None:
+        """Scene rect: the pages plus gaps, widened to the viewport so pages sit centred."""
         if not self._scene_rects:
             self._scene.setSceneRect(0, 0, 1, 1)
             return
         if self._mode is LayoutMode.SINGLE:
-            for i, item in enumerate(self._items):
-                item.setVisible(i == self._current)
-            self._scene.setSceneRect(qrect(self._scene_rects[self._current].inflated(PAGE_GAP)))
+            r = self._scene_rects[self._current].inflated(PAGE_GAP)
         else:
-            for item in self._items:
-                item.setVisible(True)
-            self._scene.setSceneRect(qrect(layout_bounds(self._scene_rects)))
+            r = layout_bounds(self._scene_rects)
+        k = self.transform().m11()
+        vw = self.viewport().width()
+        # QGraphicsView decides on the horizontal scroll bar with the style's default scroll
+        # bar width, not the (narrower) styled one: stay within both.
+        fits = self.maximumViewportSize().width()
+        if self.verticalScrollBar().isVisible():
+            fits -= self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, self)
+        width = min(vw, fits)
+        if k > 0 and r.width * k < width:
+            # Qt also rounds the scene's pixel edges outwards, so start on a whole pixel and
+            # end a hair inside.
+            left_px = round((r.x0 + r.x1) / 2 * k - vw / 2)
+            r = Rect((left_px + 1e-6) / k, r.y0, (left_px + width - 1e-6) / k, r.y1)
+        rect = qrect(r)
+        if rect != self._scene.sceneRect():
+            self._scene.setSceneRect(rect)
 
     # -- zoom -----------------------------------------------------------------------------
     @property
@@ -306,6 +427,7 @@ class DocumentView(QGraphicsView):
         self._zoom = zoom
         k = zoom * self._points_to_pixels()
         self.setTransform(QTransform.fromScale(k, k))
+        self._update_scene_rect()
         current_scale = k * self.devicePixelRatioF()
         # Drop queued tiles for other zoom levels; they'd only delay the ones we need now.
         self.renderer.cancel(
@@ -317,11 +439,80 @@ class DocumentView(QGraphicsView):
         )
         self.zoom_changed.emit(zoom)
 
-    def zoom_in(self) -> None:
-        self.set_zoom(next((z for z in ZOOM_STEPS if z > self._zoom + 1e-6), MAX_ZOOM))
+    def zoom_in(self, animated: bool = True) -> None:
+        base = self._zoom_target if self.zoom_animating else self._zoom
+        target = next((z for z in ZOOM_STEPS if z > base + 1e-6), MAX_ZOOM)
+        self.zoom_at(target, self._viewport_center(), animated)
 
-    def zoom_out(self) -> None:
-        self.set_zoom(next((z for z in reversed(ZOOM_STEPS) if z < self._zoom - 1e-6), MIN_ZOOM))
+    def zoom_out(self, animated: bool = True) -> None:
+        base = self._zoom_target if self.zoom_animating else self._zoom
+        target = next((z for z in reversed(ZOOM_STEPS) if z < base - 1e-6), MIN_ZOOM)
+        self.zoom_at(target, self._viewport_center(), animated)
+
+    def _viewport_center(self) -> QPointF:
+        return QPointF(self.viewport().width() / 2, self.viewport().height() / 2)
+
+    def zoom_at(self, zoom: float, pos: QPointF, animated: bool = False) -> None:
+        """Zoom keeping the document point under viewport position ``pos`` where it is.
+
+        ``animated`` eases there over ~150 ms (when the system allows animations); a zoom
+        requested while one runs continues from the current value towards the new target.
+        """
+        zoom = min(MAX_ZOOM, max(MIN_ZOOM, zoom))
+        running = self._zoom_anim.state() is QAbstractAnimation.State.Running
+        if running and self._zoom_anchor[1] == pos:
+            scene = self._zoom_anchor[0]  # same anchor: no rounding drift between frames
+        else:
+            scene = self.mapToScene(0, 0) + QPointF(pos) / max(self.transform().m11(), 1e-9)
+        self._zoom_anchor = (scene, QPointF(pos))
+        if not animated or not motion.animations_enabled():
+            self._zoom_anim.stop()
+            self._set_zoom_anchored(zoom)
+            return
+        self._zoom_target = zoom
+        self._zoom_anim.stop()
+        self._zoom_anim.setStartValue(self._zoom)
+        self._zoom_anim.setEndValue(zoom)
+        self.zoom_animating = True
+        self._zoom_anim.start()
+
+    def _set_zoom_anchored(self, zoom: float) -> None:
+        scene, pos = self._zoom_anchor
+        anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        try:
+            self.set_zoom(zoom)
+        finally:
+            self.setTransformationAnchor(anchor)
+        # where the anchor ended up (mapFromScene would round to whole pixels)
+        now = (scene - self.mapToScene(0, 0)) * self.transform().m11()
+        h, v = self.horizontalScrollBar(), self.verticalScrollBar()
+        h.setValue(h.value() + round(now.x() - pos.x()))
+        v.setValue(v.value() + round(now.y() - pos.y()))
+
+    def _on_zoom_frame(self, value: object) -> None:
+        if self.zoom_animating and isinstance(value, float):
+            self._set_zoom_anchored(value)
+
+    def _on_zoom_animation_done(self) -> None:
+        self.zoom_animating = False
+        self.viewport().update()  # now request tiles at the final scale
+
+    def stop_animations(self) -> None:
+        """Jump to the end of running zoom/scroll animations (the user took over)."""
+        if self._zoom_anim.state() is QAbstractAnimation.State.Running:
+            self._zoom_anim.stop()
+            self._set_zoom_anchored(self._zoom_target)
+            self._on_zoom_animation_done()
+        if self._scroll_anim.state() is QAbstractAnimation.State.Running:
+            end = self._scroll_anim.endValue()
+            self._scroll_anim.stop()
+            self._scrolling_programmatically = True  # keep the page the jump chose
+            try:
+                self._on_scroll_frame(end)
+            finally:
+                self._scrolling_programmatically = False
+            self._on_scroll_animation_done()
 
     def fit_width(self) -> None:
         self._fit = FitMode.WIDTH
@@ -362,15 +553,46 @@ class DocumentView(QGraphicsView):
         super().resizeEvent(event)
         if self._fit is not FitMode.NONE:
             self._apply_fit()
+        self.geometry_changed.emit()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.geometry_changed.emit()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        super().hideEvent(event)
+        self.geometry_changed.emit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             steps = event.angleDelta().y() / 120
             if steps:
-                self.set_zoom(self._zoom * (1.1**steps))
+                if self._scroll_anim.state() is QAbstractAnimation.State.Running:
+                    self.stop_animations()
+                base = self._zoom_target if self.zoom_animating else self._zoom
+                # high-resolution wheels and touchpads send many small steps: don't animate
+                # those, they already arrive as a smooth stream
+                self.zoom_at(base * (1.1**steps), event.position(), animated=abs(steps) >= 1)
             event.accept()
             return
+        self.stop_animations()
         super().wheelEvent(event)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Resize:  # also when a scroll bar comes or goes
+            self._update_scene_rect()
+        if event.type() in (QEvent.Type.MouseMove, QEvent.Type.Wheel, QEvent.Type.NativeGesture):
+            self.user_activity.emit()
+        if (
+            event.type() == QEvent.Type.NativeGesture
+            and isinstance(event, QNativeGestureEvent)
+            and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture
+        ):
+            self.stop_animations()
+            self.zoom_at(self._zoom * (1.0 + event.value()), event.position())
+            event.accept()
+            return True
+        return super().viewportEvent(event)
 
     # -- navigation -----------------------------------------------------------------------
     @property
@@ -387,6 +609,8 @@ class DocumentView(QGraphicsView):
             return
         if self._scrolling_programmatically:
             return
+        if self._scroll_anim.state() is QAbstractAnimation.State.Running:
+            return  # a page jump is under way; it already set the current page
         top = self.mapToScene(0, 0).y()
         bottom = self.mapToScene(0, self.viewport().height()).y()
         self._set_current(page_at(self._scene_rects, top + (bottom - top) / 3))
@@ -399,10 +623,17 @@ class DocumentView(QGraphicsView):
         frac = (top - rect.y0) / rect.height if rect.height else 0.0
         return ViewLocation(self._current, min(1.0, max(0.0, frac)))
 
-    def go_to_page(self, index: int, point: Point | None = None, record: bool = True) -> None:
-        """Scroll so page ``index`` (optionally the page-space ``point``) is at the top."""
+    def go_to_page(
+        self, index: int, point: Point | None = None, record: bool = True, animated: bool = False
+    ) -> None:
+        """Scroll so page ``index`` (optionally the page-space ``point``) is at the top.
+
+        ``animated`` (user-initiated jumps) eases the last stretch of the scroll over ~150 ms
+        when the system allows animations; the current page changes immediately either way.
+        """
         if not 0 <= index < self.page_count:
             return
+        self.stop_animations()
         if record:
             self._push_history()
         previous = self._current
@@ -418,10 +649,25 @@ class DocumentView(QGraphicsView):
             target_x = rect.x0 + local.x
         k = self.transform().m11()
         scene_top = self.sceneRect().top()
+        bar = self.verticalScrollBar()
+        target = min(bar.maximum(), max(bar.minimum(), round((target_y - scene_top) * k)))
+        animate = (
+            animated
+            and self._mode is not LayoutMode.SINGLE
+            and target != bar.value()
+            and motion.animations_enabled()
+        )
         # In two-up rows the scroll position alone can't tell which page was requested.
         self._scrolling_programmatically = True
         try:
-            self.verticalScrollBar().setValue(round((target_y - scene_top) * k))
+            if animate:
+                # Long jumps start a screen away from the target, so only pages near it get
+                # painted (and rendered) on the way.
+                reach = self.viewport().height()
+                start = max(target - reach, min(target + reach, bar.value()))
+                bar.setValue(start)
+            else:
+                bar.setValue(target)
             if target_x is not None and self.horizontalScrollBar().maximum() > 0:
                 left = self.sceneRect().left()
                 self.horizontalScrollBar().setValue(round((target_x - left) * k))
@@ -429,22 +675,38 @@ class DocumentView(QGraphicsView):
             self._scrolling_programmatically = False
         if index != previous:
             self.current_page_changed.emit(index)
-        if record:
+        if animate:
+            self._after_scroll = self._push_history if record else None
+            self._scroll_anim.setStartValue(bar.value())
+            self._scroll_anim.setEndValue(target)
+            self._scroll_anim.start()
+        elif record:
             self._push_history()
 
-    def next_page(self) -> None:
+    def _on_scroll_frame(self, value: object) -> None:
+        if isinstance(value, int):
+            self.verticalScrollBar().setValue(value)
+
+    def _on_scroll_animation_done(self) -> None:
+        after, self._after_scroll = self._after_scroll, None
+        if after is not None:
+            after()
+
+    # The commands behind buttons, menus and keys: user-initiated, so they animate.
+    def next_page(self, animated: bool = True) -> None:
         step = 2 if self._mode in (LayoutMode.TWO_UP, LayoutMode.TWO_UP_COVER) else 1
-        self.go_to_page(min(self.page_count - 1, self._current + step), record=False)
+        target = min(self.page_count - 1, self._current + step)
+        self.go_to_page(target, record=False, animated=animated)
 
-    def previous_page(self) -> None:
+    def previous_page(self, animated: bool = True) -> None:
         step = 2 if self._mode in (LayoutMode.TWO_UP, LayoutMode.TWO_UP_COVER) else 1
-        self.go_to_page(max(0, self._current - step), record=False)
+        self.go_to_page(max(0, self._current - step), record=False, animated=animated)
 
-    def first_page(self) -> None:
-        self.go_to_page(0)
+    def first_page(self, animated: bool = True) -> None:
+        self.go_to_page(0, animated=animated)
 
-    def last_page(self) -> None:
-        self.go_to_page(self.page_count - 1)
+    def last_page(self, animated: bool = True) -> None:
+        self.go_to_page(self.page_count - 1, animated=animated)
 
     # history: a browser-style list; go_to_page records where we were and where we went
     def _push_history(self) -> None:
@@ -516,6 +778,7 @@ class DocumentView(QGraphicsView):
             if self.tool.name != "select":
                 self.escape_pressed.emit()
             return
+        self.stop_animations()
         single = self._mode is LayoutMode.SINGLE
         if key == Qt.Key.Key_Home and not event.modifiers():
             self.first_page()
@@ -559,7 +822,7 @@ class DocumentView(QGraphicsView):
 
     def activate_link(self, link: Link) -> None:
         if link.kind is LinkKind.GOTO and link.dest is not None:
-            self.go_to_page(link.dest.page_index, link.dest.point)
+            self.go_to_page(link.dest.page_index, link.dest.point, animated=True)
         else:
             self.link_activated.emit(link)
 
@@ -589,6 +852,7 @@ class DocumentView(QGraphicsView):
             self._annotation_tip(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.stop_animations()
         if event.button() == Qt.MouseButton.LeftButton:
             link = self.link_at(self.mapToScene(event.position().toPoint()))
             if link is not None:

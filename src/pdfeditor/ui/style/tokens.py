@@ -113,6 +113,9 @@ class Colors:
     tooltip_text: str
     scrollbar: str
     scrollbar_hover: str
+    canvas: str  # behind the pages in the document view
+    page_outline: str  # hairline around each page, so pages read even where shadows don't
+    shadow: str  # page and card drop shadows (painted translucent)
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,9 @@ _BASE: dict[Scheme, dict[str, str]] = {
         "note_text": "#1b1b1b",
         "tooltip_bg": "#ffffff",
         "tooltip_text": "#1b1b1b",
+        "canvas": "#d4d5d7",
+        "page_outline": "#b4b4b4",
+        "shadow": "#000000",
     },
     "dark": {
         "window": "#202020",
@@ -163,6 +169,9 @@ _BASE: dict[Scheme, dict[str, str]] = {
         "note_text": "#f3f3f3",
         "tooltip_bg": "#2c2c2c",
         "tooltip_text": "#f3f3f3",
+        "canvas": "#141414",
+        "page_outline": "#4d4d4d",
+        "shadow": "#000000",
     },
 }
 
@@ -217,8 +226,16 @@ def build_colors(scheme: Scheme, accent: str | None = None) -> Colors:
         tooltip_text=base["tooltip_text"],
         scrollbar=scrollbar,
         scrollbar_hover=scrollbar_hover,
+        canvas=base["canvas"],
+        page_outline=base["page_outline"],
+        shadow=base["shadow"],
     )
 
+
+# Page edges against the canvas (non-text contrast): a white page, and the black page of night
+# mode, must stand out from the canvas through the page itself or its outline.
+PAGE_COLORS: tuple[str, ...] = ("#ffffff", "#000000")
+PAGE_EDGE_MIN = 1.3
 
 # Text/background pairs that must meet AA, checked by tests for every scheme and accent.
 TEXT_PAIRS: tuple[tuple[str, str], ...] = (
