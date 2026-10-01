@@ -68,13 +68,17 @@ class ThemeManager(QObject):
         self._applying = True
         try:
             hints = QGuiApplication.styleHints()
+            scheme: Scheme
             if self.theme is Theme.SYSTEM:
                 hints.unsetColorScheme()
+                scheme = "dark" if hints.colorScheme() == Qt.ColorScheme.Dark else "light"
             else:
+                # The user's choice wins even where the platform ignores the request (no
+                # platform theme, offscreen), which only affects the native frame then.
+                scheme = "dark" if self.theme is Theme.DARK else "light"
                 hints.setColorScheme(
-                    Qt.ColorScheme.Dark if self.theme is Theme.DARK else Qt.ColorScheme.Light
+                    Qt.ColorScheme.Dark if scheme == "dark" else Qt.ColorScheme.Light
                 )
-            scheme: Scheme = "dark" if hints.colorScheme() == Qt.ColorScheme.Dark else "light"
             self.colors = build_colors(scheme, self.accent or self.system_accent)
             if self.high_contrast():
                 self._app.setStyleSheet("")
