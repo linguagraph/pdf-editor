@@ -9,18 +9,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -28,6 +23,7 @@ from pdfeditor.model.text import TableData
 from pdfeditor.services.export import TextFormat
 from pdfeditor.services.export.images import ImageFormat, PageImageOptions
 from pdfeditor.services.export.structure import StructureOptions
+from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
 from pdfeditor.ui.dialogs.pages import PageRangeBox
 
 
@@ -71,7 +67,7 @@ class ExportFormat(Enum):
         }.get(self)
 
 
-class ExportDialog(QDialog):
+class ExportDialog(FormDialog):
     def __init__(
         self,
         page_count: int,
@@ -81,8 +77,12 @@ class ExportDialog(QDialog):
         fmt: ExportFormat = ExportFormat.WORD,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Export PDF")
+        super().__init__(
+            "Export PDF",
+            "Save the document, or some of its pages, in another format.",
+            parent,
+            primary="Export",
+        )
         self.source = source
         self.format_combo = QComboBox(self)
         for f in ExportFormat:
@@ -113,36 +113,26 @@ class ExportDialog(QDialog):
         self.multipage.setChecked(True)
         self.annotations = QCheckBox("Include comments", self)
         self.annotations.setChecked(True)
-        self.hint = QLabel(self)
-        self.hint.setWordWrap(True)
+        self.hint = caption("", self)
         self.range = PageRangeBox(page_count, current, selected, self)
 
         target_row = QHBoxLayout()
         target_row.addWidget(self.target, 1)
         target_row.addWidget(browse)
-        self.form = QFormLayout()
-        self.form.addRow("Format:", self.format_combo)
-        self.form.addRow("Save as:", target_row)
-        self.form.addRow("Layout:", self.layout_mode)
+        self.form = self.add_form()
+        add_row(self.form, "Format:", self.format_combo)
+        self.form.addRow("", self.hint)
+        add_row(self.form, "Save as:", target_row)
+        add_row(self.form, "Layout:", self.layout_mode)
         self.form.addRow("", self.pictures)
         self.form.addRow("", self.tables)
         self.form.addRow("", self.page_breaks)
-        self.form.addRow("Resolution:", self.dpi)
+        add_row(self.form, "Resolution:", self.dpi)
         self.form.addRow("", self.grayscale)
-        self.form.addRow("JPEG quality:", self.quality)
+        add_row(self.form, "JPEG quality:", self.quality)
         self.form.addRow("", self.multipage)
         self.form.addRow("", self.annotations)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Export")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(self.form)
-        layout.addWidget(self.hint)
-        layout.addWidget(self.range)
-        layout.addWidget(buttons)
+        self.add_widget(self.range)
         self.format_combo.currentIndexChanged.connect(lambda _i: self._format_changed())
         self.layout_mode.currentIndexChanged.connect(lambda _i: self._format_changed())
         self.set_format(fmt)
@@ -169,23 +159,23 @@ class ExportDialog(QDialog):
             self.form.setRowVisible(row, fmt.is_image)
         self.form.setRowVisible(self.quality, fmt is ExportFormat.JPEG)
         self.form.setRowVisible(self.multipage, fmt is ExportFormat.TIFF)
-        self.hint.setText(
-            {
-                ExportFormat.WORD: "Every page looks like the PDF: text stays editable at its "
-                "place, drawings and pictures are kept behind it."
-                if keep_layout
-                else "Text is reflowed into editable paragraphs; headings, tables and pictures "
-                "are kept. Complex layouts may need touching up.",
-                ExportFormat.EXCEL: "Tables are detected on the chosen pages; you pick which "
-                "ones to export, one sheet each.",
-                ExportFormat.MARKDOWN: "Pictures are saved in a folder next to the file.",
-            }.get(
-                fmt,
-                "Several pages are written as numbered files."
-                if fmt in (ExportFormat.PNG, ExportFormat.JPEG)
-                else "",
-            )
+        hint = {
+            ExportFormat.WORD: "Every page looks like the PDF: text stays editable at its "
+            "place, drawings and pictures are kept behind it."
+            if keep_layout
+            else "Text is reflowed into editable paragraphs; headings, tables and pictures "
+            "are kept. Complex layouts may need touching up.",
+            ExportFormat.EXCEL: "Tables are detected on the chosen pages; you pick which "
+            "ones to export, one sheet each.",
+            ExportFormat.MARKDOWN: "Pictures are saved in a folder next to the file.",
+        }.get(
+            fmt,
+            "Several pages are written as numbered files."
+            if fmt in (ExportFormat.PNG, ExportFormat.JPEG)
+            else "",
         )
+        self.hint.setText(hint)
+        self.form.setRowVisible(self.hint, bool(hint))
         current = self.target.text()
         base = Path(current) if current else self._default_target()
         self.target.setText(str(base.with_suffix(fmt.suffix)))
@@ -231,16 +221,21 @@ class ExportDialog(QDialog):
         )
 
 
-class TablePickerDialog(QDialog):
+class TablePickerDialog(FormDialog):
     """Choose which detected tables go to the workbook (all checked by default)."""
 
     def __init__(self, tables: list[TableData], parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Export Tables to Excel")
-        self.resize(560, 380)
+        super().__init__(
+            "Export Tables to Excel",
+            f"{len(tables)} table(s) found. Choose the ones to export, one sheet each.",
+            parent,
+            primary="Export",
+        )
+        self.resize(600, 420)
         self.tables = tables
         self.tree = QTreeWidget(self)
         self.tree.setHeaderLabels(["Table", "Size", "First row"])
+        self.tree.setAccessibleName("Tables")
         for i, t in enumerate(tables):
             rows, cols = t.size
             first = " | ".join((c or "") for c in t.rows[0]) if t.rows else ""
@@ -252,16 +247,7 @@ class TablePickerDialog(QDialog):
             item.setCheckState(0, Qt.CheckState.Checked)
             self.tree.addTopLevelItem(item)
         self.tree.resizeColumnToContents(0)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Export")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"{len(tables)} table(s) found. Choose the ones to export:"))
-        layout.addWidget(self.tree)
-        layout.addWidget(buttons)
+        self.add_widget(self.tree, 1)
 
     def chosen(self) -> list[TableData]:
         out = []

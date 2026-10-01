@@ -8,10 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,13 +17,13 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from pdfeditor.engine.base import OptimizeOptions
 from pdfeditor.model.metadata import SpaceUsage
 from pdfeditor.services.optimize import PRESETS, ReduceOptions, ReduceResult
+from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
 
 
 def human_size(n: int) -> str:
@@ -38,14 +35,18 @@ def human_size(n: int) -> str:
     return f"{n} bytes"
 
 
-class ReduceSizeDialog(QDialog):
+class ReduceSizeDialog(FormDialog):
     """Pick a preset or custom settings, estimate, then save the smaller copy."""
 
     def __init__(
         self, source: Path | None, current_size: int | None, parent: QWidget | None = None
     ):
-        super().__init__(parent)
-        self.setWindowTitle("Reduce File Size")
+        super().__init__(
+            "Reduce File Size",
+            "Saves a smaller copy; the open document is left unchanged.",
+            parent,
+            primary="Save",
+        )
         self.current_size = current_size
         self.estimate: ReduceResult | None = None
         self.estimate_for: ReduceOptions | None = None
@@ -53,8 +54,7 @@ class ReduceSizeDialog(QDialog):
         for p in PRESETS:
             self.preset.addItem(p.label, p.key)
         self.preset.addItem("Custom", "custom")
-        self.description = QLabel(self)
-        self.description.setWordWrap(True)
+        self.description = caption("", self)
         self.keep_images = QCheckBox("Keep image resolution", self)
         self.dpi = QSpinBox(self)
         self.dpi.setRange(36, 1200)
@@ -68,6 +68,8 @@ class ReduceSizeDialog(QDialog):
         self.object_streams = QCheckBox("Compress document structure (object streams)", self)
         self.linearize = QCheckBox("Optimize for fast web view", self)
         self.estimate_label = QLabel(self)
+        self.estimate_label.setProperty("role", "muted")
+        self.estimate_label.setWordWrap(True)
         self.estimate_button = QPushButton("Estimate Size", self)
         self.target = QLineEdit(self)
         base = (
@@ -79,32 +81,31 @@ class ReduceSizeDialog(QDialog):
         browse = QPushButton("Browse…", self)
         browse.clicked.connect(self._browse)
 
-        form = QFormLayout()
-        form.addRow("Preset:", self.preset)
+        form = self.add_form()
+        add_row(form, "Preset:", self.preset)
         form.addRow("", self.description)
-        form.addRow("", self.keep_images)
-        form.addRow("Image resolution:", self.dpi)
-        form.addRow("JPEG quality:", self.quality)
-        for box in (self.grayscale, self.subset, self.thumbnails, self.metadata,
-                    self.object_streams, self.linearize):  # fmt: skip
-            form.addRow("", box)
         row = QHBoxLayout()
         row.addWidget(self.target, 1)
         row.addWidget(browse)
-        form.addRow("Save as:", row)
+        add_row(form, "Save as:", row)
+
+        self.images_section = self.add_section("Images")
+        images = self.images_section.form()
+        images.addRow("", self.keep_images)
+        add_row(images, "Image resolution:", self.dpi)
+        add_row(images, "JPEG quality:", self.quality)
+        images.addRow("", self.grayscale)
+        # rarely changed by hand: the presets set them
+        self.advanced_section = self.add_section("Fonts and structure", expanded=False)
+        advanced = self.advanced_section.form()
+        for box in (self.subset, self.thumbnails, self.metadata, self.object_streams,
+                    self.linearize):  # fmt: skip
+            advanced.addRow("", box)
+
         est = QHBoxLayout()
         est.addWidget(self.estimate_button)
         est.addWidget(self.estimate_label, 1)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Save")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addLayout(est)
-        layout.addWidget(buttons)
+        self.content.addLayout(est)
 
         self.preset.currentIndexChanged.connect(lambda _i: self._load_preset())
         self.keep_images.toggled.connect(lambda on: self.dpi.setEnabled(not on))
@@ -191,16 +192,22 @@ class ReduceSizeDialog(QDialog):
         return Path(self.target.text()).with_suffix(".pdf")
 
 
-class SpaceAuditDialog(QDialog):
+class SpaceAuditDialog(FormDialog):
     def __init__(self, usage: SpaceUsage, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Space Usage")
-        self.resize(520, 400)
+        super().__init__(
+            "Space Usage",
+            f"Total: {human_size(usage.total)}. What takes up room in the file.",
+            parent,
+            primary=None,
+            cancel="Close",
+        )
+        self.resize(560, 440)
         rows = sorted(
             ((k, v) for k, v in usage.categories.items() if v), key=lambda kv: kv[1], reverse=True
         )
         self.table = QTableWidget(len(rows), 3, self)
         self.table.setHorizontalHeaderLabels(["Category", "Size", "Share"])
+        self.table.setAccessibleName("Space by category")
         self.table.verticalHeader().setVisible(False)
         for r, (name, size) in enumerate(rows):
             self.table.setItem(r, 0, QTableWidgetItem(name))
@@ -212,9 +219,4 @@ class SpaceAuditDialog(QDialog):
             self.table.setCellWidget(r, 2, bar)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setStretchLastSection(True)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Total: {human_size(usage.total)}"))
-        layout.addWidget(self.table)
-        layout.addWidget(buttons)
+        self.add_widget(self.table, 1)

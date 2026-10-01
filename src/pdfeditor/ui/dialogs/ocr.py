@@ -8,12 +8,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -24,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.services.ocr import COMMON_LANGUAGES, OcrOptions, installed_languages
+from pdfeditor.ui.dialogs.base import FormDialog, Section, add_row, form_layout
 from pdfeditor.ui.dialogs.pages import PageRangeBox
 
 
@@ -33,6 +30,7 @@ class LanguageList(QListWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMaximumHeight(140)
+        self.setAccessibleName("OCR languages")
         self.reload()
 
     def reload(self, checked: set[str] | None = None) -> None:
@@ -75,14 +73,21 @@ class OcrOptionsBox(QWidget):
         download = QHBoxLayout()
         download.addWidget(self.download_combo, 1)
         download.addWidget(self.download_button)
-        form = QFormLayout(self)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.addRow("Languages:", self.languages)
-        form.addRow("Get more:", download)
-        form.addRow("Resolution:", self.dpi)
+        self.download_combo.setAccessibleName("Language to download")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        form = form_layout()
+        layout.addLayout(form)
+        add_row(form, "Languages:", self.languages)
+        add_row(form, "Get more:", download, "Downloaded languages are kept for next time.")
         form.addRow("", self.skip_text)
-        form.addRow("", self.preprocess)
-        form.addRow("", self.deskew)
+        # the defaults suit most scans; these are for poor ones
+        self.advanced = Section("Scan quality", self, expanded=False)
+        layout.addWidget(self.advanced)
+        advanced = self.advanced.form()
+        add_row(advanced, "Resolution:", self.dpi, "Higher is slower but reads small print better.")
+        advanced.addRow("", self.preprocess)
+        advanced.addRow("", self.deskew)
 
     def options(self) -> OcrOptions:
         """Raises ValueError when no language is chosen."""
@@ -98,36 +103,32 @@ class OcrOptionsBox(QWidget):
         )
 
 
-class OcrDialog(QDialog):
+class OcrDialog(FormDialog):
     def __init__(
         self, page_count: int, current: int, selected: list[int], parent: QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Recognize Text (OCR)")
-        intro = QLabel(
-            "Adds an invisible text layer so scanned pages can be searched, selected and copied."
+        super().__init__(
+            "Recognize Text (OCR)",
+            "Adds an invisible text layer so scanned pages can be searched, selected and copied.",
+            parent,
+            primary="Recognize",
         )
-        intro.setWordWrap(True)
         self.box = OcrOptionsBox(self)
         self.range = PageRangeBox(page_count, current, selected, self)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Recognize")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(intro)
-        layout.addWidget(self.box)
-        layout.addWidget(self.range)
-        layout.addWidget(buttons)
+        self.add_widget(self.box)
+        self.add_widget(self.range)
 
 
-class BatchOcrDialog(QDialog):
+class BatchOcrDialog(FormDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Batch OCR")
+        super().__init__(
+            "Batch OCR",
+            "Makes searchable copies of several scanned PDFs; the originals stay unchanged.",
+            parent,
+            primary="Start",
+        )
         self.files = QListWidget(self)
+        self.files.setAccessibleName("Files")
         add = QPushButton("Add Files…", self)
         add.clicked.connect(self._add)
         self.out_dir = QLineEdit(self)
@@ -137,20 +138,16 @@ class BatchOcrDialog(QDialog):
         out = QHBoxLayout()
         out.addWidget(self.out_dir, 1)
         out.addWidget(browse)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Start")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Files:"))
-        layout.addWidget(self.files)
-        layout.addWidget(add)
-        layout.addWidget(QLabel("Save searchable copies to:"))
-        layout.addLayout(out)
-        layout.addWidget(self.box)
-        layout.addWidget(buttons)
+        files = QVBoxLayout()
+        files.addWidget(self.files)
+        add_row_layout = QHBoxLayout()
+        add_row_layout.addWidget(add)
+        add_row_layout.addStretch()
+        files.addLayout(add_row_layout)
+        form = self.add_form()
+        add_row(form, "Files:", files)
+        add_row(form, "Save copies to:", out)
+        self.add_widget(self.box)
 
     def add_path(self, path: Path) -> None:
         self.files.addItem(str(path))

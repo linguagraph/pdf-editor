@@ -13,11 +13,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -40,20 +37,12 @@ from pdfeditor.model.pages import FONTS, LabelStyle, PageLabelRule
 from pdfeditor.services.assembly import IMAGE_SUFFIXES, MergeSource, SplitMode
 from pdfeditor.services.pages import format_page_ranges, parse_page_ranges
 from pdfeditor.services.stamping import TOKENS_HELP, HeaderFooter, Slot, Watermark
+from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
+from pdfeditor.ui.style.tokens import METRICS
 
 PDF_OR_IMAGES = (
     "PDF and images (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp);;All files (*)"
 )
-
-
-def _buttons(dialog: QDialog, ok_text: str = "OK") -> QDialogButtonBox:
-    box = QDialogButtonBox(
-        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog
-    )
-    box.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
-    box.accepted.connect(dialog.accept)
-    box.rejected.connect(dialog.reject)
-    return box
 
 
 class PageRangeBox(QGroupBox):
@@ -72,8 +61,10 @@ class PageRangeBox(QGroupBox):
         self.custom = QRadioButton("Pages:")
         self.edit = QLineEdit()
         self.edit.setPlaceholderText("e.g. 1-3, 5, 8-")
+        self.edit.setAccessibleName("Page range")
         self.edit.textEdited.connect(lambda _t: self.custom.setChecked(True))
         grid = QGridLayout(self)
+        grid.setVerticalSpacing(METRICS.space(1))
         grid.addWidget(self.all, 0, 0, 1, 2)
         grid.addWidget(self.current, 1, 0, 1, 2)
         grid.addWidget(self.sel, 2, 0, 1, 2)
@@ -123,17 +114,17 @@ class ColorButton(QPushButton):
 
 
 # -- insert -------------------------------------------------------------------------------------
-class InsertPagesDialog(QDialog):
+class InsertPagesDialog(FormDialog):
     """Where to insert and what: a blank page, pages from a file, or the clipboard image."""
 
     def __init__(self, page_count: int, current: int, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Insert Pages")
+        super().__init__("Insert Pages", parent=parent, primary="Insert")
         self.blank = QRadioButton("Blank page")
         self.file = QRadioButton("From file:")
         self.clipboard = QRadioButton("Image from clipboard")
         self.blank.setChecked(True)
         self.path_edit = QLineEdit()
+        self.path_edit.setAccessibleName("File to insert from")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         self.path_edit.textEdited.connect(lambda _t: self.file.setChecked(True))
@@ -141,26 +132,26 @@ class InsertPagesDialog(QDialog):
         self.range_edit.setPlaceholderText("all pages")
         self.where = QComboBox()
         self.where.addItems(["After", "Before"])
+        self.where.setAccessibleName("Insert after or before")
         self.page = QSpinBox()
+        self.page.setAccessibleName("Page number")
         self.page.setRange(1, page_count)
         self.page.setValue(current + 1)
         file_row = QHBoxLayout()
         file_row.addWidget(self.path_edit, 1)
         file_row.addWidget(browse)
-        form = QFormLayout()
+        form = self.add_form()
         form.addRow(self.blank)
         form.addRow(self.file, file_row)
-        form.addRow("Pages of that file:", self.range_edit)
+        add_row(form, "Pages of that file:", self.range_edit, "Empty inserts every page.")
         form.addRow(self.clipboard)
         where = QHBoxLayout()
+        where.setSpacing(METRICS.space(2))
         where.addWidget(self.where)
         where.addWidget(QLabel("page"))
         where.addWidget(self.page)
         where.addStretch()
         form.addRow("Insert:", where)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(_buttons(self, "Insert"))
 
     def _browse(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(self, "Insert From File", "", PDF_OR_IMAGES)
@@ -174,28 +165,34 @@ class InsertPagesDialog(QDialog):
 
 
 # -- extract ------------------------------------------------------------------------------------
-class ExtractDialog(QDialog):
+class ExtractDialog(FormDialog):
     def __init__(
         self, page_count: int, current: int, selected: list[int], parent: QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Extract Pages")
+        super().__init__(
+            "Extract Pages",
+            "Copies the chosen pages into a new document.",
+            parent,
+            primary="Extract",
+        )
         self.range = PageRangeBox(page_count, current, selected, self)
         if len(selected) <= 1:
             self.range.current.setChecked(True)
         self.delete_after = QCheckBox("Delete pages after extracting")
         self.separate = QCheckBox("Extract each page as a separate file")
-        layout = QVBoxLayout(self)
         for w in (self.range, self.delete_after, self.separate):
-            layout.addWidget(w)
-        layout.addWidget(_buttons(self, "Extract"))
+            self.add_widget(w)
 
 
 # -- split --------------------------------------------------------------------------------------
-class SplitDialog(QDialog):
+class SplitDialog(FormDialog):
     def __init__(self, stem: str, folder: Path, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Split Document")
+        super().__init__(
+            "Split Document",
+            "Saves the parts as separate files; this document is left unchanged.",
+            parent,
+            primary="Split",
+        )
         self.group = QButtonGroup(self)
         self.by_pages = QRadioButton("Every")
         self.by_bookmarks = QRadioButton("At each top-level bookmark")
@@ -207,17 +204,21 @@ class SplitDialog(QDialog):
         self.pages = QSpinBox()
         self.pages.setRange(1, 100000)
         self.pages.setValue(1)
+        self.pages.setAccessibleName("Pages per file")
         self.size_mb = QDoubleSpinBox()
+        self.size_mb.setAccessibleName("Maximum file size")
         self.size_mb.setRange(0.05, 10000)
         self.size_mb.setValue(10)
         self.size_mb.setSuffix(" MB")
         self.ranges = QLineEdit()
         self.ranges.setPlaceholderText("e.g. 1-3; 4-10; 11-")
+        self.ranges.setAccessibleName("Page ranges")
         self.folder = QLineEdit(str(folder))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         self.stem = QLineEdit(stem)
         grid = QGridLayout()
+        grid.setVerticalSpacing(METRICS.space(2))
         grid.addWidget(self.by_pages, 0, 0)
         row = QHBoxLayout()
         row.addWidget(self.pages)
@@ -229,16 +230,13 @@ class SplitDialog(QDialog):
         grid.addWidget(self.size_mb, 2, 1)
         grid.addWidget(self.by_ranges, 3, 0, 1, 2)
         grid.addWidget(self.ranges, 4, 0, 1, 2)
-        out = QFormLayout()
+        self.content.addLayout(grid)
+        out = self.add_form()
         folder_row = QHBoxLayout()
         folder_row.addWidget(self.folder, 1)
         folder_row.addWidget(browse)
-        out.addRow("Output folder:", folder_row)
-        out.addRow("File name prefix:", self.stem)
-        layout = QVBoxLayout(self)
-        layout.addLayout(grid)
-        layout.addLayout(out)
-        layout.addWidget(_buttons(self, "Split"))
+        add_row(out, "Output folder:", folder_row)
+        add_row(out, "File name prefix:", self.stem, "Parts are numbered after the prefix.")
 
     def _browse(self) -> None:
         chosen = QFileDialog.getExistingDirectory(self, "Output Folder", self.folder.text())
@@ -264,14 +262,19 @@ class SplitDialog(QDialog):
 
 
 # -- combine ------------------------------------------------------------------------------------
-class CombineDialog(QDialog):
+class CombineDialog(FormDialog):
     """Pick and order files (PDFs and images) to combine into a new document."""
 
     def __init__(self, initial: list[Path] | None = None, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Combine Files")
-        self.resize(560, 380)
+        super().__init__(
+            "Combine Files",
+            "Drag to reorder. Double-click a PDF to choose its pages.",
+            parent,
+            primary="Combine",
+        )
+        self.resize(600, 440)
         self.list = QListWidget(self)
+        self.list.setAccessibleName("Files to combine")
         self.list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.list.setToolTip("Drag to reorder. Double-click a PDF to choose its pages.")
         self.list.itemDoubleClicked.connect(self._edit_range)
@@ -294,10 +297,8 @@ class CombineDialog(QDialog):
         top = QHBoxLayout()
         top.addWidget(self.list, 1)
         top.addLayout(side)
-        layout = QVBoxLayout(self)
-        layout.addLayout(top)
-        layout.addWidget(self.bookmarks)
-        layout.addWidget(_buttons(self, "Combine"))
+        self.content.addLayout(top, 1)
+        self.add_widget(self.bookmarks)
         for path in initial or []:
             self.add_path(path)
 
@@ -350,7 +351,7 @@ class CombineDialog(QDialog):
 
 
 # -- crop ---------------------------------------------------------------------------------------
-class CropDialog(QDialog):
+class CropDialog(FormDialog):
     def __init__(
         self,
         page_count: int,
@@ -359,26 +360,27 @@ class CropDialog(QDialog):
         margins: tuple[float, float, float, float] = (0, 0, 0, 0),
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Crop Pages")
+        super().__init__(
+            "Crop Pages",
+            "Hides the margins from view and print; the content stays in the file.",
+            parent,
+            primary="Crop",
+        )
         self.spins = []
-        form = QFormLayout()
+        form = self.add_form()
         for label, value in zip(("Left", "Top", "Right", "Bottom"), margins, strict=True):
             spin = QDoubleSpinBox()
             spin.setRange(0, 5000)
             spin.setSuffix(" pt")
             spin.setValue(value)
             self.spins.append(spin)
-            form.addRow(f"{label}:", spin)
-        self.trim = QCheckBox("Remove white margins automatically (ignores the values above)")
+            add_row(form, f"{label}:", spin)
+        self.trim = QCheckBox("Remove white margins automatically")
+        add_row(form, "", self.trim, "Ignores the values above.")
         self.range = PageRangeBox(page_count, current, selected, self)
         if len(selected) <= 1 and any(margins):
             self.range.current.setChecked(True)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.trim)
-        layout.addWidget(self.range)
-        layout.addWidget(_buttons(self, "Crop"))
+        self.add_widget(self.range)
 
     def margins(self) -> tuple[float, float, float, float]:
         left, top, right, bottom = (s.value() for s in self.spins)
@@ -396,14 +398,18 @@ _STYLE_NAMES = [
 ]
 
 
-class PageLabelsDialog(QDialog):
+class PageLabelsDialog(FormDialog):
     def __init__(
         self, rules: list[PageLabelRule], page_count: int, parent: QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Page Labels")
+        super().__init__(
+            "Page Labels",
+            "Labels replace page numbers in the navigator, thumbnails and printing dialogs.",
+            parent,
+        )
         self.page_count = page_count
         self.table = QTableWidget(0, 4, self)
+        self.table.setAccessibleName("Label ranges")
         self.table.setHorizontalHeaderLabels(["From page", "Style", "Prefix", "Start at"])
         self.table.horizontalHeader().setStretchLastSection(True)
         add = QPushButton("Add Range")
@@ -414,28 +420,26 @@ class PageLabelsDialog(QDialog):
         row.addWidget(add)
         row.addWidget(remove)
         row.addStretch()
-        layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel("Labels replace page numbers in the navigator, thumbnails and printing dialogs.")
-        )
-        layout.addWidget(self.table)
-        layout.addLayout(row)
-        layout.addWidget(_buttons(self))
+        self.add_widget(self.table, 1)
+        self.content.addLayout(row)
         for rule in rules:
             self.add_rule(rule)
-        self.resize(520, 300)
+        self.resize(560, 360)
 
     def add_rule(self, rule: PageLabelRule) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         start = QSpinBox()
+        start.setAccessibleName("From page")
         start.setRange(1, self.page_count)
         start.setValue(rule.start + 1)
         style = QComboBox()
+        style.setAccessibleName("Numbering style")
         for s, name in _STYLE_NAMES:
             style.addItem(name, s)
         style.setCurrentIndex(max(0, style.findData(rule.style)))
         first = QSpinBox()
+        first.setAccessibleName("Start at")
         first.setRange(1, 100000)
         first.setValue(rule.first)
         self.table.setCellWidget(r, 0, start)
@@ -456,7 +460,7 @@ class PageLabelsDialog(QDialog):
 
 
 # -- header / footer / Bates --------------------------------------------------------------------
-class HeaderFooterDialog(QDialog):
+class HeaderFooterDialog(FormDialog):
     def __init__(
         self,
         page_count: int,
@@ -465,10 +469,15 @@ class HeaderFooterDialog(QDialog):
         bates: bool = False,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Bates Numbering" if bates else "Header & Footer")
+        super().__init__(
+            "Bates Numbering" if bates else "Header & Footer",
+            "Text stamped at the top and bottom of each page.",
+            parent,
+            primary="Apply",
+        )
         self.slots: dict[Slot, QLineEdit] = {}
         grid = QGridLayout()
+        grid.setHorizontalSpacing(METRICS.space(2))
         grid.addWidget(QLabel("Left"), 0, 1)
         grid.addWidget(QLabel("Center"), 0, 2)
         grid.addWidget(QLabel("Right"), 0, 3)
@@ -476,13 +485,13 @@ class HeaderFooterDialog(QDialog):
             grid.addWidget(QLabel(prefix.capitalize() + ":"), row, 0)
             for col, side in ((1, "left"), (2, "center"), (3, "right")):
                 edit = QLineEdit()
+                edit.setAccessibleName(f"{prefix.capitalize()} {side}")
                 slot = Slot(f"{prefix}_{side}")
                 self.slots[slot] = edit
                 grid.addWidget(edit, row, col)
         if bates:
             self.slots[Slot.FOOTER_RIGHT].setText("<<bates>>")
-        help_label = QLabel(f"Fields: {TOKENS_HELP}")
-        help_label.setWordWrap(True)
+        help_label = caption(f"Fields: {TOKENS_HELP}")
         self.font_box = QComboBox()
         self.font_box.addItems(FONTS)
         self.size_box = QDoubleSpinBox()
@@ -503,26 +512,23 @@ class HeaderFooterDialog(QDialog):
         self.bates_digits.setRange(1, 15)
         self.bates_digits.setValue(6)
         self.bates_suffix = QLineEdit()
-        style = QFormLayout()
-        style.addRow("Font:", self.font_box)
-        style.addRow("Size:", self.size_box)
-        style.addRow("Color:", self.color_button)
-        style.addRow("Side margin:", self.margin_x)
-        style.addRow("Top/bottom margin:", self.margin_y)
-        bates_box = QGroupBox("Bates number (<<bates>>)")
-        bates_form = QFormLayout(bates_box)
-        bates_form.addRow("Prefix:", self.bates_prefix)
-        bates_form.addRow("Start at:", self.bates_start)
-        bates_form.addRow("Digits:", self.bates_digits)
-        bates_form.addRow("Suffix:", self.bates_suffix)
+        self.content.addLayout(grid)
+        self.add_widget(help_label)
+        self.style_section = self.add_section("Text style", expanded=False)
+        style = self.style_section.form()
+        add_row(style, "Font:", self.font_box)
+        add_row(style, "Size:", self.size_box)
+        add_row(style, "Color:", self.color_button)
+        add_row(style, "Side margin:", self.margin_x)
+        add_row(style, "Top/bottom margin:", self.margin_y)
+        self.bates_section = self.add_section("Bates number (<<bates>>)", expanded=bates)
+        bates_form = self.bates_section.form()
+        add_row(bates_form, "Prefix:", self.bates_prefix)
+        add_row(bates_form, "Start at:", self.bates_start)
+        add_row(bates_form, "Digits:", self.bates_digits)
+        add_row(bates_form, "Suffix:", self.bates_suffix)
         self.range = PageRangeBox(page_count, current, selected, self)
-        layout = QVBoxLayout(self)
-        layout.addLayout(grid)
-        layout.addWidget(help_label)
-        layout.addLayout(style)
-        layout.addWidget(bates_box)
-        layout.addWidget(self.range)
-        layout.addWidget(_buttons(self, "Apply"))
+        self.add_widget(self.range)
 
     def spec(self) -> HeaderFooter:
         return HeaderFooter(
@@ -541,18 +547,21 @@ class HeaderFooterDialog(QDialog):
 
 
 # -- watermark / background ---------------------------------------------------------------------
-class WatermarkDialog(QDialog):
+class WatermarkDialog(FormDialog):
     def __init__(
         self, page_count: int, current: int, selected: list[int], parent: QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Watermark")
+        super().__init__(
+            "Watermark", "Text or an image stamped across the pages.", parent, primary="Apply"
+        )
         self.use_text = QRadioButton("Text:")
         self.use_image = QRadioButton("Image:")
         self.use_text.setChecked(True)
         self.text = QLineEdit("CONFIDENTIAL")
+        self.text.setAccessibleName("Watermark text")
         self.text.textEdited.connect(lambda _t: self.use_text.setChecked(True))
         self.image_path = QLineEdit()
+        self.image_path.setAccessibleName("Watermark image file")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         self.font_box = QComboBox()
@@ -579,20 +588,19 @@ class WatermarkDialog(QDialog):
         img_row = QHBoxLayout()
         img_row.addWidget(self.image_path, 1)
         img_row.addWidget(browse)
-        form = QFormLayout()
+        form = self.add_form()
         form.addRow(self.use_text, self.text)
         form.addRow(self.use_image, img_row)
-        form.addRow("Font:", self.font_box)
-        form.addRow("Size:", self.size_box)
-        form.addRow("Color:", self.color_button)
-        form.addRow("Opacity:", self.opacity)
-        form.addRow("Rotation:", self.angle)
-        form.addRow("Image size:", self.scale_box)
-        form.addRow("", self.behind)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.range)
-        layout.addWidget(_buttons(self, "Apply"))
+        self.appearance_section = self.add_section("Appearance")
+        look = self.appearance_section.form()
+        add_row(look, "Font:", self.font_box)
+        add_row(look, "Size:", self.size_box)
+        add_row(look, "Color:", self.color_button)
+        add_row(look, "Opacity:", self.opacity)
+        add_row(look, "Rotation:", self.angle)
+        add_row(look, "Image size:", self.scale_box)
+        look.addRow("", self.behind)
+        self.add_widget(self.range)
 
     def _browse(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(self, "Watermark Image", "", PDF_OR_IMAGES)
@@ -616,22 +624,18 @@ class WatermarkDialog(QDialog):
         )
 
 
-class BackgroundDialog(QDialog):
+class BackgroundDialog(FormDialog):
     def __init__(
         self, page_count: int, current: int, selected: list[int], parent: QWidget | None = None
     ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Background")
+        super().__init__("Background", "A color behind the page content.", parent, primary="Apply")
         self.color_button = ColorButton(Color(1, 1, 0.9))
         self.opacity = QSpinBox()
         self.opacity.setRange(5, 100)
         self.opacity.setValue(100)
         self.opacity.setSuffix(" %")
         self.range = PageRangeBox(page_count, current, selected, self)
-        form = QFormLayout()
-        form.addRow("Color:", self.color_button)
-        form.addRow("Opacity:", self.opacity)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.range)
-        layout.addWidget(_buttons(self, "Apply"))
+        form = self.add_form()
+        add_row(form, "Color:", self.color_button)
+        add_row(form, "Opacity:", self.opacity)
+        self.add_widget(self.range)

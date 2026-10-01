@@ -8,10 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -30,75 +27,73 @@ from pdfeditor.model.redaction import (
 )
 from pdfeditor.model.text import SearchHit
 from pdfeditor.services.redaction import PRESETS, MarkStyle
+from pdfeditor.ui.dialogs.base import FormDialog, add_row
 from pdfeditor.ui.dialogs.pages import ColorButton
+from pdfeditor.ui.style.tokens import METRICS
 
 
-def _buttons(dialog: QDialog, ok_text: str) -> QDialogButtonBox:
-    box = QDialogButtonBox(
-        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dialog
-    )
-    box.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
-    box.accepted.connect(dialog.accept)
-    box.rejected.connect(dialog.reject)
-    return box
-
-
-class RedactionPropertiesDialog(QDialog):
+class RedactionPropertiesDialog(FormDialog):
     def __init__(self, style: MarkStyle, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Redaction Properties")
+        super().__init__("Redaction Properties", "How applied redactions look on the page.", parent)
         self.fill = ColorButton(style.fill)
         self.overlay = QLineEdit(style.overlay_text)
         self.overlay.setPlaceholderText("e.g. REDACTED (optional)")
         self.text_color = ColorButton(style.text_color)
-        form = QFormLayout()
-        form.addRow("Box color:", self.fill)
-        form.addRow("Overlay text:", self.overlay)
-        form.addRow("Overlay text color:", self.text_color)
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(_buttons(self, "OK"))
+        form = self.add_form()
+        add_row(form, "Box color:", self.fill)
+        add_row(form, "Overlay text:", self.overlay, "Printed on each box, e.g. an exemption code.")
+        add_row(form, "Overlay text color:", self.text_color)
 
     def mark_style(self) -> MarkStyle:
         return MarkStyle(self.fill.color, self.overlay.text(), self.text_color.color)
 
 
-class MarkTextDialog(QDialog):
+class MarkTextDialog(FormDialog):
     """Find sensitive text (presets or a custom pattern), review matches, mark the chosen ones."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Find Text to Redact")
-        self.resize(560, 520)
+        super().__init__(
+            "Find Text to Redact",
+            "Find, review, then mark matches for redaction. Nothing is removed until you "
+            "apply the marks.",
+            parent,
+            primary="Mark Selected",
+        )
+        self.resize(580, 600)
         self.preset_boxes: dict[str, QCheckBox] = {}
-        presets = QGroupBox("Patterns")
-        presets_layout = QVBoxLayout(presets)
+        self.patterns_section = self.add_section("Patterns")
+        presets_layout = QVBoxLayout()
+        presets_layout.setSpacing(METRICS.space(1))
         for name in PRESETS:
             box = QCheckBox(name)
             self.preset_boxes[name] = box
             presets_layout.addWidget(box)
         self.custom = QLineEdit()
         self.custom.setPlaceholderText("Custom regular expression or plain words")
+        self.custom.setAccessibleName("Custom search text")
         self.custom_is_regex = QCheckBox("Custom text is a regular expression")
         presets_layout.addWidget(self.custom)
         presets_layout.addWidget(self.custom_is_regex)
+        self.patterns_section.set_layout(presets_layout)
         self.search_button = QPushButton("Find")
         self.results = QListWidget()
+        self.results.setAccessibleName("Matches")
         self.summary = QLabel()
+        self.summary.setProperty("role", "muted")
         select_all = QPushButton("Select All")
         select_all.clicked.connect(lambda: self._check_all(True))
         select_none = QPushButton("Select None")
         select_none.clicked.connect(lambda: self._check_all(False))
-        layout = QVBoxLayout(self)
-        layout.addWidget(presets)
-        layout.addWidget(self.search_button)
-        layout.addWidget(self.summary)
-        layout.addWidget(self.results, 1)
-        row = QVBoxLayout()
+        find_row = QHBoxLayout()
+        find_row.addWidget(self.search_button)
+        find_row.addWidget(self.summary, 1)
+        self.content.addLayout(find_row)
+        self.add_widget(self.results, 1)
+        row = QHBoxLayout()
         row.addWidget(select_all)
         row.addWidget(select_none)
-        layout.addLayout(row)
-        layout.addWidget(_buttons(self, "Mark Selected"))
+        row.addStretch()
+        self.content.addLayout(row)
         self.hits: list[SearchHit] = []
 
     def patterns(self) -> list[str]:
@@ -136,15 +131,16 @@ class MarkTextDialog(QDialog):
         ]
 
 
-class ApplyRedactionsDialog(QDialog):
+class ApplyRedactionsDialog(FormDialog):
     def __init__(self, total: int, selected: int, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Apply Redactions")
-        intro = QLabel(
-            "Applying removes the content under the marks permanently. It can be undone until you "
-            "close the document, but once saved the removed content is gone from the file."
+        super().__init__(
+            "Apply Redactions",
+            "Applying removes the content under the marks permanently. It can be undone until "
+            "you close the document, but once saved the removed content is gone from the file.",
+            parent,
+            primary="Apply",
+            danger=True,
         )
-        intro.setWordWrap(True)
         self.all = QRadioButton(f"All marks in the document ({total})")
         self.selected = QRadioButton(f"Selected marks only ({selected})")
         self.selected.setEnabled(selected > 0)
@@ -163,21 +159,22 @@ class ApplyRedactionsDialog(QDialog):
             (GraphicsRedaction.NONE, "Leave vector graphics unchanged"),
         ):
             self.graphics.addItem(text, gvalue)
-        form = QFormLayout()
-        form.addRow("Images:", self.images)
-        form.addRow("Vector graphics:", self.graphics)
-        layout = QVBoxLayout(self)
-        layout.addWidget(intro)
-        layout.addWidget(self.all)
-        layout.addWidget(self.selected)
-        layout.addLayout(form)
-        layout.addWidget(_buttons(self, "Apply"))
+        scope = self.add_form()
+        marks = QVBoxLayout()
+        marks.setSpacing(METRICS.space(1))
+        marks.addWidget(self.all)
+        marks.addWidget(self.selected)
+        scope.addRow("Apply:", marks)
+        self.content_section = self.add_section("Images and graphics under the marks")
+        form = self.content_section.form()
+        add_row(form, "Images:", self.images)
+        add_row(form, "Vector graphics:", self.graphics)
 
     def options(self) -> RedactOptions:
         return RedactOptions(images=self.images.currentData(), graphics=self.graphics.currentData())
 
 
-class SanitizeDialog(QDialog):
+class SanitizeDialog(FormDialog):
     ITEMS = (
         ("metadata", "Document properties (title, author, …)"),
         ("xmp", "XMP metadata"),
@@ -193,19 +190,23 @@ class SanitizeDialog(QDialog):
     )
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Sanitize Document")
-        intro = QLabel("Remove hidden information that isn't visible on the pages:")
-        intro.setWordWrap(True)
+        super().__init__(
+            "Sanitize Document",
+            "Remove hidden information that isn't visible on the pages. Everything checked "
+            "is deleted from the document.",
+            parent,
+            primary="Sanitize",
+            danger=True,
+        )
         self.boxes: dict[str, QCheckBox] = {}
-        layout = QVBoxLayout(self)
-        layout.addWidget(intro)
+        items = QVBoxLayout()
+        items.setSpacing(METRICS.space(1))
         for key, text in self.ITEMS:
             box = QCheckBox(text)
             box.setChecked(True)
             self.boxes[key] = box
-            layout.addWidget(box)
-        layout.addWidget(_buttons(self, "Sanitize"))
+            items.addWidget(box)
+        self.content.addLayout(items)
 
     def options(self) -> SanitizeOptions:
         return SanitizeOptions(**{key: box.isChecked() for key, box in self.boxes.items()})
