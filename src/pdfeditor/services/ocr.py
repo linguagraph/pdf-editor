@@ -37,6 +37,7 @@ COMMON_LANGUAGES = {
     "kor": "Korean",
     "ara": "Arabic",
 }
+DOWNLOAD_CHUNK = 64 * 1024
 MIN_TEXT_CHARS = 20  # pages with at least this much extractable text are skipped
 
 
@@ -79,17 +80,44 @@ def tessdata_for(languages: Sequence[str]) -> Path:
     return merged
 
 
-def download_language(lang: str, token: CancelToken | None = None) -> Path:
-    """Fetch a language into the user folder (the only feature that uses the network)."""
+def language_name(code: str) -> str:
+    """``Bulgarian (bul)``, or just the code for a language without a known name."""
+    name = COMMON_LANGUAGES.get(code)
+    return f"{name} ({code})" if name else code
+
+
+def download_language(
+    lang: str, token: CancelToken | None = None, progress: ProgressFn = no_progress
+) -> Path:
+    """Fetch a language into the user folder (the only feature that uses the network).
+
+    ``progress(received, total)`` reports bytes; ``total`` is 0 when the server doesn't say
+    how big the file is. A cancelled or failed download leaves nothing behind.
+    """
     target = user_tessdata() / f"{lang}.traineddata"
     tmp = target.with_suffix(".part")
     url = DOWNLOAD_URL.format(lang=lang)
-    with urllib.request.urlopen(url, timeout=120) as response, tmp.open("wb") as out:
-        while chunk := response.read(256 * 1024):
-            if token is not None:
-                token.check()
-            out.write(chunk)
-    tmp.replace(target)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, tmp.open("wb") as out:
+            try:
+                total = max(0, int(response.headers.get("Content-Length") or 0))
+            except ValueError:
+                total = 0
+            received = 0
+            progress(0, total)
+            while chunk := response.read(DOWNLOAD_CHUNK):
+                if token is not None:
+                    token.check()
+                out.write(chunk)
+                received += len(chunk)
+                progress(received, max(total, received) if total else 0)
+        if token is not None:
+            token.check()
+        if received == 0:
+            raise OSError(f"The download of {language_name(lang)} was empty.")
+        tmp.replace(target)
+    finally:
+        tmp.unlink(missing_ok=True)
     return target
 
 

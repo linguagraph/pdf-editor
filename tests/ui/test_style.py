@@ -8,8 +8,10 @@ from collections.abc import Iterator
 import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPalette, QPixmap
-from PySide6.QtWidgets import QApplication, QColorDialog, QLabel
+from PySide6.QtWidgets import QApplication, QLabel
 
+from pdfeditor.model.color import Color
+from pdfeditor.ui.dialogs import preferences
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.icons import page_icon
 from pdfeditor.ui.settings import AppSettings
@@ -204,11 +206,11 @@ def test_preferences_custom_accent(app: QApplication, qtbot, monkeypatch) -> Non
     dialog = PreferencesDialog(settings)
     qtbot.addWidget(dialog)
     custom = dialog.accent.findData("custom")
-    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor("#123456"))
+    monkeypatch.setattr(preferences, "pick_color", lambda *a, **k: Color.from_hex("#123456"))
     dialog.accent.setCurrentIndex(custom)
     dialog._accent_activated(custom)
     assert dialog.accent.currentData() == "#123456"
-    monkeypatch.setattr(QColorDialog, "getColor", lambda *a, **k: QColor())  # cancelled
+    monkeypatch.setattr(preferences, "pick_color", lambda *a, **k: None)  # cancelled
     custom = dialog.accent.findData("custom")
     dialog.accent.setCurrentIndex(custom)
     dialog._accent_activated(custom)

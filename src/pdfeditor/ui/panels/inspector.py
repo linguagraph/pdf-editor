@@ -5,10 +5,8 @@ from __future__ import annotations
 import copy
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
@@ -24,6 +22,7 @@ from pdfeditor.core.commands import ChangeKind, UpdateAnnotationCommand
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.color import Color
 from pdfeditor.services.comments import type_label
+from pdfeditor.ui.color_picker import pick_color, swatch_icon
 from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.view.document_view import DocumentView
 
@@ -45,12 +44,9 @@ class ColorButton(QPushButton):
 
     def set_color(self, color: Color | None) -> None:
         self.color = color
-        if color is None:
-            self.setText("None")
-            self.setStyleSheet("")
-        else:
-            self.setText("")
-            self.setStyleSheet(f"background-color: {color.to_hex()}")
+        self.setText("None" if color is None else "")
+        self.setIcon(swatch_icon(color))
+        self.setToolTip("" if color is None else color.to_hex())
 
 
 class InspectorPanel(ViewPanel):
@@ -195,9 +191,9 @@ class InspectorPanel(ViewPanel):
         if self.model is None:
             return
         current = getattr(self.model, field) or Color(1, 0, 0)
-        chosen = QColorDialog.getColor(QColor.fromRgbF(*current.rgb()), self, "Choose Color")
-        if chosen.isValid():
-            self.set_color(field, Color(chosen.redF(), chosen.greenF(), chosen.blueF()))
+        chosen = pick_color(current, self, "Fill Color" if field == "fill" else "Color")
+        if chosen is not None:
+            self.set_color(field, chosen)
 
     def set_color(self, field: str, color: Color | None) -> None:
         """Apply a color (split out of the dialog so tests can call it)."""

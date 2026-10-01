@@ -8,7 +8,7 @@ app style sheet paints ``QPushButton:default`` in the accent color, or ``role=da
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QPushButton,
     QSizePolicy,
+    QSpacerItem,
     QStackedWidget,
     QTabWidget,
     QToolButton,
@@ -125,6 +126,9 @@ class Section(QWidget):
         self.header.setCheckable(True)
         self.header.setChecked(expanded)
         self.header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        # an icon box no bigger than the chevron, so the chevron starts at the left edge,
+        # lined up with form labels and group box titles
+        self.header.setIconSize(QSize(METRICS.space(2), METRICS.space(2)))
         self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.header.setAccessibleName(f"{title} section")
         self.header.toggled.connect(self.set_expanded)
@@ -158,20 +162,37 @@ class Section(QWidget):
             return
         if self.content.isHidden() != expanded:
             return  # already in that state
+        dialog = self.window()
+        resize = isinstance(dialog, QDialog) and dialog.isVisible()
+        size = dialog.size()  # before the layout grows the window to a new minimum
+        before = _preferred_height(dialog, size.width()) if resize else 0
         self._sync(expanded)
         self.toggled.emit(expanded)
-        dialog = self.window()
-        if isinstance(dialog, QDialog) and dialog.isVisible():
-            # Grow for the opened content; shrink back when closing it.
-            layout = dialog.layout()
-            if layout is not None:
-                layout.activate()
-            dialog.adjustSize()
+        if resize:
+            # Grow or shrink by exactly the content's height at the current width, so
+            # everything above the section stays put and only what's below it (and the
+            # dialog's bottom edge) moves. Extra height the user gave the dialog is kept.
+            after = _preferred_height(dialog, size.width())
+            dialog.resize(
+                max(size.width(), dialog.minimumWidth()),
+                max(size.height() + after - before, dialog.minimumHeight()),
+            )
 
     def _sync(self, expanded: bool) -> None:
         self.header.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
         self.header.setToolTip(("Hide " if expanded else "Show ") + self.header.text().lower())
         self.content.setVisible(expanded)
+
+
+def _preferred_height(window: QWidget, width: int) -> int:
+    """The window's preferred height at ``width``, after pending layout changes (shown or
+    hidden widgets). Word-wrapped labels make it depend on the width."""
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+    layout = window.layout()
+    if layout is not None:
+        layout.activate()
+    height = window.heightForWidth(width) if window.hasHeightForWidth() else -1
+    return height if height >= 0 else window.sizeHint().height()
 
 
 class FormDialog(QDialog):
@@ -221,6 +242,7 @@ class FormDialog(QDialog):
         self.content = QVBoxLayout()
         self.content.setSpacing(m.space(3))
         outer.addLayout(self.content, 1)
+        self._tail: QSpacerItem | None = None  # see _pack_content
 
         self.button_box = QDialogButtonBox(self)
         self.primary_button: QPushButton | None = None
@@ -282,8 +304,42 @@ class FormDialog(QDialog):
                 target = field.widget() or field.layout()
                 if target is not None:
                     _name_fields(target, label.widget().text())  # type: ignore[union-attr]
+        self._pack_content()
         self._align_forms()
+        self._fit_wrapped_text()
         super().showEvent(event)
+
+    def _fit_wrapped_text(self) -> None:
+        """Make room for word-wrapped labels at the dialog's actual width.
+
+        Qt sizes a new window from its preferred width, where wrapped text takes fewer lines
+        than at the (narrower) width it gets; the fields would then be squeezed, and spring
+        back to full height as soon as a section is toggled.
+        """
+        needed = _preferred_height(self, self.width())
+        if needed > self.height():
+            self.resize(self.width(), needed)
+
+    def _pack_content(self) -> None:
+        """Keep the content packed at the top, with any extra height below the last item.
+
+        Without this the content layout spreads spare height between its items, so they
+        float apart and jump whenever a section opens or closes. A dialog whose content has
+        a stretching item (a table, a list) gives the spare height to that item instead.
+        """
+        layout = self.content
+        if self._tail is not None:
+            index = layout.indexOf(self._tail)
+            if index == layout.count() - 1:
+                return  # still the last item
+            if index >= 0:
+                layout.takeAt(index)
+            self._tail = None
+        if any(layout.stretch(i) > 0 for i in range(layout.count())):
+            return
+        self._tail = QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        layout.addItem(self._tail)
+        layout.setStretch(layout.count() - 1, 1)
 
     def _align_forms(self) -> None:
         """Line up the field column of the dialog's top-level forms and section forms.

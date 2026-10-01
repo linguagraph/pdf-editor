@@ -156,14 +156,16 @@ QWidget#Ribbon QTabBar::tab {{ padding: {m.space(1)}px {m.space(3)}px; }}
 QLabel[role="caption"] {{ color: {c.text_muted}; font-size: 8pt; padding-top: 1px; }}
 RibbonTab::separator {{ margin: {m.space(1)}px {m.space(1)}px {m.space(2)}px {m.space(1)}px; }}
 
-/* dialogs (ui/dialogs/base.py) */
-QToolButton[role="section"] {{
-    border: none; border-radius: {m.radius_small}px; font-weight: 600;
-    padding: {m.space(1)}px {m.space(1)}px; text-align: left;
+/* dialogs (ui/dialogs/base.py). Section headers, group box titles, form labels and help
+   text all start at the content's left edge; a header looks the same open or closed. */
+QToolButton[role="section"], QToolButton[role="section"]:checked {{
+    background: transparent; border: 1px solid transparent; border-radius: {m.radius_small}px;
+    font-weight: 600; padding: {m.space(1)}px {m.space(1)}px {m.space(1)}px 0; text-align: left;
 }}
-QToolButton[role="section"]:checked {{ background: transparent; }}
-QToolButton[role="section"]:hover {{ background: {c.hover}; }}
-QToolButton[role="section"]:focus {{ border: 1px solid {c.accent_text}; }}
+QToolButton[role="section"]:hover, QToolButton[role="section"]:checked:hover,
+QToolButton[role="section"]:pressed {{ background: {c.hover}; }}
+QToolButton[role="section"]:focus {{ border-color: {c.accent_text}; }}
+QDialog QGroupBox::title {{ left: 0; padding: 0; }}
 QListWidget[role="sidebar"] {{
     background: {c.window}; border: none; border-radius: {m.radius_large}px;
     padding: {m.space(1)}px; outline: 0;

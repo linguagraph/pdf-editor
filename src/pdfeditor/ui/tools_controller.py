@@ -14,11 +14,10 @@ from pdfeditor.services.ocr import (
     OcrOptions,
     OcrResult,
     apply,
-    download_language,
     ocr_files,
     recognize,
 )
-from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog, OcrOptionsBox
+from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog
 from pdfeditor.ui.dialogs.pages import checked_pages
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
@@ -49,19 +48,6 @@ class ToolsController:
         r.add_group(self.act_ocr, self.act_batch_ocr, title="Recognize Text")
 
     # -- helpers ----------------------------------------------------------------------------
-    def _wire_download(self, box: OcrOptionsBox) -> None:
-        def download() -> None:
-            code = str(box.download_combo.currentData())
-            checked = set(box.languages.languages()) | {code}
-            try:
-                self.run_job(f"Downloading {code}…", lambda job: download_language(code, job.token))
-            except Exception as exc:  # network errors are reported, never fatal
-                QMessageBox.warning(self.w, "OCR Languages", f"Couldn't download {code}:\n\n{exc}")
-                return
-            box.languages.reload(checked)
-
-        box.download_button.clicked.connect(download)
-
     def run_job(self, label: str, work: Callable[[Job], object], total: int = 0) -> object:
         return run_modal(self.w, label, work, total)
 
@@ -73,7 +59,6 @@ class ToolsController:
         view = tab.view
         if dialog is None:
             dialog = OcrDialog(view.page_count, view.current_page, tab.target_pages(), self.w)
-            self._wire_download(dialog.box)
         if not dialog.result() and not dialog.exec():
             return None
         pages = checked_pages(self.w, dialog.range)
@@ -113,7 +98,6 @@ class ToolsController:
     def batch_ocr(self, dialog: BatchOcrDialog | None = None) -> list[Path]:
         if dialog is None:
             dialog = BatchOcrDialog(self.w)
-            self._wire_download(dialog.box)
         if not dialog.result() and not dialog.exec():
             return []
         paths, out_dir = dialog.paths(), Path(dialog.out_dir.text())
