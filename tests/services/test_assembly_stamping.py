@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import pikepdf
+import pypdfium2 as pdfium
 import pytest
 from PIL import Image
 
@@ -191,3 +192,36 @@ def test_size_split_is_log_linear_and_correct() -> None:
     assert len(calls) < 400  # was ~1000 measurements with the linear scan
     # a page bigger than the limit still ends up in a group of its own
     assert _groups_by_size(3, 10, lambda g: 50 * len(g)) == [[0], [1], [2]]
+
+
+def test_duplicated_page_stamped_alone_round_trip(fixture_pdf, tmp_path: Path) -> None:
+    """Issue #49: a header/footer or watermark on one duplicate leaves the other untouched."""
+    path = tmp_path / "dup.pdf"
+    shutil.copy2(fixture_pdf("text_multipage"), path)
+    doc = ENGINE.open(path)
+    doc.select_pages([0, 0, 1])
+    footer = HeaderFooter(texts={Slot.FOOTER_CENTER: "FOOT <<page>>"})
+    apply_header_footer(ENGINE, doc, footer, [1])
+    apply_watermark(ENGINE, doc, Watermark(text="DRAFT"), [0])
+    doc.save()
+    doc.close()
+
+    doc = ENGINE.open(path)
+    texts = [doc.page(i).text_page(with_chars=False).text for i in range(doc.page_count)]
+    assert "FOOT 2" in texts[1] and "FOOT" not in texts[0] and "FOOT" not in texts[2]
+    assert "DRAFT" in texts[0] and "DRAFT" not in texts[1]
+    if ENGINE.capabilities.page_marks:
+        kinds = [[m.kind for m in doc.page(i).page_marks()] for i in range(3)]
+        assert len(kinds[0]) == len(kinds[1]) == 1 and kinds[0] != kinds[1] and not kinds[2]
+    doc.close()
+
+    with pikepdf.open(path) as pdf:
+        assert len(pdf.pages) == 3
+    pd = pdfium.PdfDocument(path)
+    try:
+        pdfium_texts = [pd[i].get_textpage().get_text_range() for i in range(len(pd))]
+        assert "FOOT" not in pdfium_texts[0] and "FOOT 2" in pdfium_texts[1]
+        assert "DRAFT" in pdfium_texts[0] and "DRAFT" not in pdfium_texts[1]
+        assert pd[1].render(scale=0.5).to_pil().size[0] > 0
+    finally:
+        pd.close()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -83,6 +84,80 @@ def test_duplicate_insert_blank_and_images(ops: Engine, fixture_pdf, tmp_path: P
     pd = pdfium.PdfDocument(path)
     assert len(pd) == 9
     pd.close()
+
+
+def _objgens(items) -> set[tuple[int, int]]:
+    return {o.objgen for o in items}
+
+
+def _contents(page: pikepdf.Page) -> set[tuple[int, int]]:
+    contents = page.obj.Contents
+    return _objgens(contents) if isinstance(contents, pikepdf.Array) else {contents.objgen}
+
+
+def test_duplicate_is_an_independent_copy(ops: Engine, fixture_pdf, tmp_path: Path) -> None:
+    """Issue #49: editing one duplicate (content or annotations) must not change the other."""
+    doc, path = _open(ops, fixture_pdf, tmp_path, "annotations")
+    notes = doc.page(0).annotations()
+    doc.select_pages([0, 0])
+    copy = doc.page(1)
+    assert len(copy.annotations()) == len(notes)
+    copy.stamp_text(TextStamp("ONLY ON THE COPY", Point(72, 800)))
+    copy.delete_annotation(copy.annotations()[0].id)
+    moved = copy.annotations()[0]
+    copy.update_annotation(replace(moved, rect=moved.rect.translated(5, 5), contents="moved"))
+    assert "ONLY ON THE COPY" not in doc.page(0).text_page(with_chars=False).text
+    assert doc.page(0).annotations() == notes
+    doc.save()
+    doc.close()
+
+    doc = ops.open(path)
+    assert "ONLY ON THE COPY" in doc.page(1).text_page(with_chars=False).text
+    assert "ONLY ON THE COPY" not in doc.page(0).text_page(with_chars=False).text
+    assert [(a.type, a.rect, a.contents) for a in doc.page(0).annotations()] == [
+        (a.type, a.rect, a.contents) for a in notes
+    ]
+    assert len(doc.page(1).annotations()) == len(notes) - 1
+    assert len({a.name for p in (0, 1) for a in doc.page(p).annotations()}) == 2 * len(notes) - 1
+    doc.close()
+
+    with pikepdf.open(path) as pdf:
+        first, second = pdf.pages
+        assert first.objgen != second.objgen
+        assert not _contents(first) & _contents(second)
+        assert not _objgens(first.obj.Annots) & _objgens(second.obj.Annots)
+        for page in (first, second):
+            for annot in page.obj.Annots:
+                assert "/P" not in annot or annot.P.objgen == page.objgen
+                if "/Popup" in annot:  # the popup pairs up within the same page
+                    assert annot.Popup.objgen in _objgens(page.obj.Annots)
+                    assert annot.Popup.Parent.objgen == annot.objgen
+    pd = pdfium.PdfDocument(path)
+    try:
+        texts = [pd[i].get_textpage().get_text_range() for i in range(len(pd))]
+        assert "ONLY ON THE COPY" not in texts[0] and "ONLY ON THE COPY" in texts[1]
+        for i in range(len(pd)):
+            assert pd[i].render(scale=0.5).to_pil().size[0] > 0
+    finally:
+        pd.close()
+
+
+def test_duplicate_shares_images_and_fonts(ops: Engine, fixture_pdf, tmp_path: Path) -> None:
+    """Copies get their own page and content streams but not another copy of the images."""
+    doc, path = _open(ops, fixture_pdf, tmp_path, "images")
+    before = path.stat().st_size
+    doc.select_pages([0, 0, 0])
+    doc.page(2).stamp_text(TextStamp("third", Point(72, 72)))
+    doc.save()
+    doc.close()
+    with pikepdf.open(path) as pdf:
+        images = [{x.objgen for x in page.obj.Resources.XObject.values()} for page in pdf.pages]
+        assert images[0] and images[0] == images[1] == images[2]
+        assert len({page.objgen for page in pdf.pages}) == 3
+        streams = [_contents(page) for page in pdf.pages]
+        assert not streams[0] & streams[1] and not streams[1] & streams[2]
+        image_bytes = sum(len(x.read_raw_bytes()) for x in pdf.pages[0].Resources.XObject.values())
+    assert path.stat().st_size < before + image_bytes // 2
 
 
 def test_insert_pages_from_other_document(ops: Engine, fixture_pdf, tmp_path: Path) -> None:

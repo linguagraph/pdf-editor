@@ -106,8 +106,12 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         doc.select_pages([0, 0])
         spec = HeaderFooter(texts={Slot.FOOTER_CENTER: "<<page>>/<<pages>>"})
         apply_header_footer(session.engine, doc, spec, [0, 1])
-        if "2/2" not in doc.page(1).text_page(with_chars=False).text:
+        footers = [doc.page(i).text_page(with_chars=False).text for i in (0, 1)]
+        # each copy is its own page (issue #49): one footer each, not both on both
+        if "1/2" not in footers[0] or "2/2" not in footers[1]:
             raise AssertionError("footer text missing")
+        if "2/2" in footers[0] or "1/2" in footers[1]:
+            raise AssertionError("duplicated pages share their content")
         if trimmed_rect(doc, 0) is None:  # needs Pillow in the bundle
             raise AssertionError("content bounds not found")
         doc.select_pages([0])

@@ -14,6 +14,7 @@ import pymupdf
 
 from pdfeditor.engine.base import EngineError
 from pdfeditor.engine.mupdf.marks import marked
+from pdfeditor.engine.mupdf.pagecopy import select_with_copies
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.pages import ImageStamp, LabelStyle, MarkKind, PageLabelRule, TextStamp
 
@@ -80,14 +81,18 @@ def _prune_dangling_outline(doc: MuDocument) -> None:
 
 
 def select(doc: MuDocument, order: Sequence[int]) -> None:
-    """Keep exactly ``order`` (indices may repeat, i.e. duplicate pages) in that order."""
+    """Keep exactly ``order`` (indices may repeat, i.e. duplicate pages) in that order.
+
+    Repeats become independent copies, never the same page object twice, and catalog entries
+    MuPDF's selection drops (form, language, output intents, ...) are kept.
+    """
     count = doc.page_count
     if not order:
         raise EngineError("a document must keep at least one page")
     if any(not 0 <= i < count for i in order):
         raise EngineError("page index out of range")
     rules = label_rules(doc)
-    doc.fz.select(list(order))
+    select_with_copies(doc.fz, order)
     doc.structure_changed()
     _prune_dangling_outline(doc)
     if rules:
