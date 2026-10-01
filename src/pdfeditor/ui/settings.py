@@ -6,6 +6,8 @@ import getpass
 
 from PySide6.QtCore import QSettings
 
+from pdfeditor.ui.style.tokens import is_color
+
 DEFAULT_ZOOMS = ("fit_width", "fit_page", "100")
 
 
@@ -95,6 +97,27 @@ class AppSettings:
     @language.setter
     def language(self, value: str) -> None:
         self.qs.setValue("language", value)
+
+    # appearance
+    @property
+    def theme(self) -> str:
+        """One of system, light or dark (``Theme`` values)."""
+        value = self._str("theme", "system")
+        return value if value in ("system", "light", "dark") else "system"
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        self.qs.setValue("theme", value)
+
+    @property
+    def accent(self) -> str:
+        """Accent color as #rrggbb ("" = follow the Windows accent)."""
+        value = self._str("prefs/accent", "")
+        return value if is_color(value) else ""
+
+    @accent.setter
+    def accent(self, value: str) -> None:
+        self.qs.setValue("prefs/accent", value)
 
     @property
     def cache_mb(self) -> int:

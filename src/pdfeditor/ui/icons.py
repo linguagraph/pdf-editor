@@ -26,8 +26,7 @@ def _color(mode: QIcon.Mode) -> QColor:
     palette = QGuiApplication.palette()
     if mode is QIcon.Mode.Disabled:
         return palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText)
-    if mode is QIcon.Mode.Selected:
-        return palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText)
+    # Selected rows use a light accent tint with normal text (see ui/style), so no special case.
     return palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.WindowText)
 
 
@@ -81,3 +80,14 @@ def icon(name: str) -> QIcon:
     """Bundled icon ``data/icons/<name>.svg``; raises if the file is missing."""
     _svg(name)  # fail early, not at first paint
     return QIcon(_TintedSvgEngine(name))
+
+
+def page_icon(pixmap: QPixmap) -> QIcon:
+    """A page image as an item-view icon that looks the same when selected.
+
+    Views draw selected items' icons in Selected mode, which Qt generates by tinting the pixmap
+    with the highlight color. That suits glyphs, not page previews: it washed thumbnails out.
+    """
+    ic = QIcon(pixmap)
+    ic.addPixmap(pixmap, QIcon.Mode.Selected)
+    return ic

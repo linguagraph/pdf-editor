@@ -22,6 +22,7 @@ from pdfeditor.core.layout import rotated_size
 from pdfeditor.core.render_cache import THUMBNAIL_TILE, TileKey
 from pdfeditor.services.assembly import IMAGE_SUFFIXES
 from pdfeditor.ui import page_ops
+from pdfeditor.ui.icons import page_icon
 from pdfeditor.ui.view import tiles
 from pdfeditor.ui.view.document_view import DocumentView
 
@@ -60,7 +61,7 @@ class OrganizerModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return self.view.page_label(row)
         if role == Qt.ItemDataRole.DecorationRole:
-            return self._pixmap(row)
+            return page_icon(self._pixmap(row))
         return None
 
     def _pixmap(self, row: int) -> QPixmap:

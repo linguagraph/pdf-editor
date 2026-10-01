@@ -33,7 +33,6 @@ class NotePopup(QFrame):
         self.view = view
         self.note = note
         self.setFrameShape(QFrame.Shape.Box)
-        self.setStyleSheet("NotePopup { background: #fff9c4; }")
         when = note.modified or note.created
         header = QLabel(
             f"<b>{note.author or 'Unknown'}</b>" + (f"  {when:%Y-%m-%d %H:%M}" if when else "")

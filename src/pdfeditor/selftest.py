@@ -199,9 +199,16 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         image = actions[0].icon().pixmap(24, 24).toImage()
         if not any(image.pixelColor(x, y).alpha() for x in range(24) for y in range(24)):
             raise AssertionError("toolbar icon rendered blank")
+        # the theme (tokens -> palette + style sheet) is applied by the main window
+        from pdfeditor.ui.theme import theme_manager
+
+        assert isinstance(app, QApplication)
+        if not app.styleSheet() and not theme_manager().high_contrast():
+            raise AssertionError("the app style sheet was not applied")
         window.close()
         QSettings().clear()
-        return f"Qt {qVersion()}, main window OK, {len(actions)} toolbar icons"
+        scheme = theme_manager().scheme
+        return f"Qt {qVersion()}, main window OK, {len(actions)} toolbar icons, {scheme} theme"
 
     def printing() -> str:
         from pdfeditor.core.session import DocumentSession as Session

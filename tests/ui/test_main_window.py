@@ -169,8 +169,8 @@ def test_thumbnails_render_and_navigate(qtbot, window: MainWindow, fixture_pdf) 
     assert thumbs.model is not None and thumbs.model.rowCount() == 5
     thumbs.model.data(thumbs.model.index(1), Qt.ItemDataRole.DecorationRole)  # triggers render
     wait_rendered(qtbot, view)
-    pixmap = thumbs.model.data(thumbs.model.index(1), Qt.ItemDataRole.DecorationRole)
-    assert pixmap.width() >= 150
+    page = thumbs.model.data(thumbs.model.index(1), Qt.ItemDataRole.DecorationRole)
+    assert page.availableSizes()[0].width() >= 150
     thumbs._on_clicked(thumbs.model.index(3))
     assert view.current_page == 3
     assert thumbs.list.currentIndex().row() == 3

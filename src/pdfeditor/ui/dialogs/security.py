@@ -66,7 +66,7 @@ class SecurityDialog(QDialog):
             form.addRow(box)
 
         self.error = QLabel(self)
-        self.error.setStyleSheet("color: #c0392b")
+        self.error.setProperty("role", "error")  # colored by the app style sheet
         self.error.setWordWrap(True)
         note = QLabel("The security is applied when you save the document.", self)
         note.setEnabled(False)
