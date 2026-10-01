@@ -9,8 +9,16 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeyEvent, QPalette, QTextOption
+from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontDatabase,
+    QKeyEvent,
+    QPalette,
+    QTextOption,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -165,7 +173,15 @@ class TextStyleBar(QFrame):
 
 class InlineTextEditor(QPlainTextEdit):
     """Commits on Ctrl+Enter or when focus leaves the editor and its style bar; Escape
-    cancels. ``on_commit(text, style)`` runs only if something changed (see ``changed``)."""
+    cancels. ``on_commit(text, style)`` runs only if something changed (see ``changed``).
+
+    The mouse wheel over a box whose text doesn't fit scrolls that text and never the page,
+    even at the first or last line: a flick that ran on into the page would carry the box away
+    from under the pointer mid-edit. A box with nothing to scroll lets the wheel scroll the
+    page. Ctrl+wheel always zooms the page (not the editor's font), and the box follows the
+    zoom when it was placed with :meth:`follow`."""
+
+    _anchor: tuple[DocumentView, int, Rect] | None = None
 
     def __init__(
         self,
@@ -300,6 +316,61 @@ class InlineTextEditor(QPlainTextEdit):
             self.commit()
             return
         super().keyPressEvent(event)
+
+    # -- wheel and zoom ---------------------------------------------------------------------
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        delta = event.angleDelta()
+        horizontal = abs(delta.x()) > abs(delta.y())
+        bar = self.horizontalScrollBar() if horizontal else self.verticalScrollBar()
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._pass_to_page(event)  # zoom the page, not the editor's font
+        elif bar.maximum() <= bar.minimum():
+            self._pass_to_page(event)  # nothing to scroll here
+        else:
+            super().wheelEvent(event)
+            event.accept()  # at the first or last line too: see the class docstring
+
+    def _pass_to_page(self, event: QWheelEvent) -> None:
+        """Hand the wheel to the page area under the editor.
+
+        Sent explicitly rather than by ignoring the event: Qt propagates only spontaneous wheel
+        events to the parent, so this way it behaves the same for every source."""
+        page_area = self.parentWidget()
+        if page_area is None:
+            event.ignore()
+            return
+        forwarded = QWheelEvent(
+            QPointF(self.viewport().mapTo(page_area, event.position())),
+            event.globalPosition(),
+            event.pixelDelta(),
+            event.angleDelta(),
+            event.buttons(),
+            event.modifiers(),
+            event.phase(),
+            event.inverted(),
+            event.source(),
+            event.pointingDevice(),
+        )
+        QApplication.sendEvent(page_area, forwarded)
+        event.accept()
+
+    def follow(self, view: DocumentView, page: int, rect: Rect) -> None:
+        """Place the box over ``rect`` of ``page`` and keep it there when the view zooms."""
+        self._anchor = (view, page, rect)
+        self.place(viewport_rect(view, page, rect))
+        view.zoom_changed.connect(self._on_zoom_changed)
+
+    def _on_zoom_changed(self, _zoom: float) -> None:
+        # after the view has scrolled to keep its zoom anchor in place
+        QTimer.singleShot(0, self._replace)
+
+    def _replace(self) -> None:
+        if self._done or self._anchor is None:
+            return
+        view, page, rect = self._anchor
+        self._zoom = view.transform().m11()
+        self._restyle()
+        self.place(viewport_rect(view, page, rect))
 
 
 def viewport_rect(view: DocumentView, page: int, rect: Rect) -> tuple[int, int, int, int]:

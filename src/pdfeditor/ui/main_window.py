@@ -98,9 +98,11 @@ from pdfeditor.ui.tools.hand import HandTool
 from pdfeditor.ui.tools.select import SelectTool
 from pdfeditor.ui.tools_controller import ToolsController
 from pdfeditor.ui.view.document_view import DocumentView
+from pdfeditor.ui.view.mode_banner import Mode, ModeBanner
 from pdfeditor.ui.view.note_popup import NotePopup
 from pdfeditor.ui.view.pill import CanvasPill
 from pdfeditor.ui.view.renderer import TileRenderer
+from pdfeditor.ui.view.text_editor import InlineTextEditor
 
 log = logging.getLogger(__name__)
 
@@ -126,6 +128,17 @@ COMMENT_TOOLS = (
 EDIT_TOOL_NAMES = {name for name, _t, _k in EDIT_TOOLS}
 # Tools that aren't "make one thing" tools: they don't switch back after use.
 STAY_ACTIVE = {"select", "hand", "edit"}
+# What the mode banner over the page says for tools that change how clicks on the page work
+# (other tools show their own name). Framed modes also get an accent frame around the pages.
+TOOL_MODES = {
+    "edit": Mode("Editing text & images", "file-pen-line", framed=True),
+    "add_text": Mode("Adding text", "type", framed=True),
+    "add_image": Mode("Adding an image", "image-plus", framed=True),
+    "add_rectangle": Mode("Adding a rectangle", "square", framed=True),
+    "add_ellipse": Mode("Adding an ellipse", "circle", framed=True),
+    "add_line": Mode("Adding a line", "slash", framed=True),
+    "redact": Mode("Marking for redaction", "eraser", framed=True, danger=True),
+}
 MARKUP_TOOLS = {
     "highlight": AnnotationType.HIGHLIGHT,
     "underline": AnnotationType.UNDERLINE,
@@ -263,6 +276,8 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.tool_exit)
         self.tool_label.hide()
         self.tool_exit.hide()
+        self.mode_banner = ModeBanner(self)
+        self.mode_banner.done.connect(lambda: self.set_tool("select"))
 
         self._create_actions()
         self.organize = OrganizeController(self)
@@ -390,7 +405,6 @@ class MainWindow(QMainWindow):
         self.stamp_name = STANDARD_STAMPS[0]
         self.stamp_menu = StampMenu(self, self.choose_stamp, self.prefs)
         self.tool_actions["stamp"].setMenu(self.stamp_menu)
-        self.current_tool = self.prefs.default_tool
         self.tool_actions[self.current_tool].setChecked(True)
         self.act_paste = a(
             "&Paste Comments",
@@ -777,13 +791,14 @@ class MainWindow(QMainWindow):
         view.annotation_selection_changed.connect(self._update_ui)
         view.annotation_activated.connect(self.edit_annotation)
         view.annotation_context_menu.connect(self.annotation_menu)
-        view.escape_pressed.connect(lambda: self.set_tool("select"))
-        view.back_to_select.connect(lambda: self.set_tool("select"))
-        view.tool_used.connect(self.tool_used)
+        # Tools belong to their document: these act on the view that sent them.
+        view.escape_pressed.connect(lambda: self.set_tool("select", view))
+        view.back_to_select.connect(lambda: self.set_tool("select", view))
+        view.tool_used.connect(lambda: self.tool_used(view))
         view.note_clicked.connect(self.open_note)
         view.object_selection_changed.connect(self._update_ui)
         view.author = self.prefs.author
-        view.set_tool(self._make_tool(self.current_tool))
+        view.set_tool(self._make_tool(self.prefs.default_tool))  # a new document starts fresh
         session.subscribe(lambda event: self._on_session_event(view, event))
         index = self.tabs.addTab(DocumentTab(view), session.display_name)
         target = session.save_target()
@@ -818,8 +833,12 @@ class MainWindow(QMainWindow):
         if not isinstance(tab, DocumentTab):
             return True
         view = tab.view
+        # Text typed into an open inline editor counts as a change (as when focus leaves it).
+        for editor in view.viewport().findChildren(InlineTextEditor):
+            editor.commit()
         if ask and not self._confirm_discard(view):
             return False
+        view.set_tool(SelectTool())  # end the document's tool (outlines, editors, previews)
         self.tabs.removeTab(index)
         tab.close_tab()
         self.autosaver.forget(view.session)  # saved or deliberately discarded
@@ -983,6 +1002,7 @@ class MainWindow(QMainWindow):
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
         self.pill.attach(view)
+        self._sync_tool_ui()
         self.nav_panels.set_has_document(has_doc)
         self.inspector_panels.set_has_document(has_doc)
         self.organize.update_state()
@@ -1006,8 +1026,6 @@ class MainWindow(QMainWindow):
             self.act_delete_annots.setEnabled(bool(view.selected_annotations))
             self.act_find_next.setEnabled(bool(self.search_panel.hits))
             self.act_find_prev.setEnabled(bool(self.search_panel.hits))
-            if view.tool.name in self.tool_actions:
-                self.tool_actions[view.tool.name].setChecked(True)
             self.act_prev.setEnabled(view.current_page > 0)
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         else:
@@ -1277,40 +1295,71 @@ class MainWindow(QMainWindow):
         self._note_popup.show_at(pos + QPoint(12, 12))
         return self._note_popup
 
-    def tool_used(self) -> None:
+    def tool_used(self, view: DocumentView | None = None) -> None:
         """A creation tool finished its job: back to Select unless tools should stay."""
-        if not self.prefs.keep_tools and self.current_tool not in STAY_ACTIVE:
-            self.set_tool("select")
+        view = view or self.current_view()
+        if view is None:
+            return
+        if not self.prefs.keep_tools and view.tool.name not in STAY_ACTIVE:
+            self.set_tool("select", view)
 
-    def set_tool(self, name: str) -> None:
+    @property
+    def current_tool(self) -> str:
+        """The current document's tool. Each document keeps its own tool (a document left in
+        edit mode is still in it when you come back); with none open, the default tool."""
         view = self.current_view()
+        return view.tool.name if view is not None else self.prefs.default_tool
+
+    def set_tool(self, name: str, view: DocumentView | None = None) -> None:
+        """Switch ``view`` (default: the current document) to tool ``name``."""
+        view = view or self.current_view()
+        if view is None:
+            self._sync_tool_ui()
+            return
         markup = MARKUP_TOOLS.get(name)
-        if markup is not None and view is not None and view.has_selection():
+        if markup is not None and view.has_selection():
             # Acrobat-style: select text first, then pick Highlight, and it's applied at once.
             annotate.apply_markup(view, markup, self.tool_actions[name].text().replace("&", ""))
-            self.tool_actions[self.current_tool].setChecked(True)
+            self._sync_tool_ui()
             return
-        if name in EDIT_TOOL_NAMES and view is not None and not self.edit.confirm_signed(view):
-            self.tool_actions[self.current_tool].setChecked(True)
+        if name in EDIT_TOOL_NAMES and not self.edit.confirm_signed(view):
+            self._sync_tool_ui()
             return
-        self.current_tool = name
-        for v in self.views():
-            v.set_tool(self._make_tool(name))
-        self.tool_actions[name].setChecked(True)
+        view.set_tool(self._make_tool(name))
+        if view is not self.current_view():
+            self.mode_banner.reserve(view, self._tool_mode(name) is not None)
+        self._sync_tool_ui()
+
+    def _sync_tool_ui(self) -> None:
+        """Ribbon check state, status-bar indicator and mode banner follow the current
+        document's tool."""
+        name = self.current_tool
+        action = self.tool_actions.get(name)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
         self._update_tool_indicator()
+        view = self.current_view()
+        self.mode_banner.attach(view)
+        self.mode_banner.set_mode(self._tool_mode(name) if view is not None else None)
+
+    def _tool_text(self, name: str) -> str:
+        text = self.tool_actions[name].text()
+        return text.replace("&&", "\0").replace("&", "").replace("\0", "&")
+
+    def _tool_mode(self, name: str) -> Mode | None:
+        if name in ("select", "hand") or name not in self.tool_actions:
+            return None
+        mode = TOOL_MODES.get(name)
+        if mode is not None:
+            return mode
+        icon_name = self.tool_actions[name].icon().name() or "mouse-pointer-2"
+        return Mode(f"{self._tool_text(name)} tool", icon_name)
 
     def _update_tool_indicator(self) -> None:
         name = self.current_tool
-        active = name not in ("select", "hand")
+        active = self.current_view() is not None and name not in ("select", "hand")
         if active:
-            text = (
-                self.tool_actions[name]
-                .text()
-                .replace("&&", "\0")
-                .replace("&", "")
-                .replace("\0", "&")
-            )
-            self.tool_label.setText(f"Tool: {text}  (Esc: back to Select)")
+            self.tool_label.setText(f"Tool: {self._tool_text(name)}  (Esc: back to Select)")
         self.tool_label.setVisible(active)
         self.tool_exit.setVisible(active)
 

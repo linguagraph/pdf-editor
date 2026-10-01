@@ -190,4 +190,21 @@ QLabel[role="muted"] {{ color: {c.text_muted}; }}
 
 NotePopup {{ background: {c.note_bg}; border: 1px solid {c.border_strong}; }}
 NotePopup > QLabel {{ color: {c.note_text}; }}
+
+ModeBanner QLabel {{ color: {c.on_accent}; background: transparent; }}
+ModeBanner QLabel#modeText {{ font-weight: 600; }}
+ModeBanner QToolButton {{
+    color: {c.on_accent}; background: transparent; font-weight: 600;
+    border: 1px solid {c.on_accent}; border-radius: {m.radius_large}px;
+    padding: 1px {m.space(3)}px;
+}}
+ModeBanner QToolButton:hover {{ background: {_alpha(c.on_accent, 0.18)}; }}
+ModeBanner QToolButton:pressed {{ background: {_alpha(c.on_accent, 0.30)}; }}
+ModeBanner QToolButton:focus {{ border-width: 2px; padding: 0px {m.space(3) - 1}px; }}
 """
+
+
+def _alpha(color: str, alpha: float) -> str:
+    """``color`` (#rrggbb) as a translucent rgba() for the style sheet."""
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r}, {g}, {b}, {round(alpha * 255)})"
