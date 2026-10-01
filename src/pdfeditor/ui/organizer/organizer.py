@@ -25,6 +25,7 @@ from pdfeditor.ui import page_ops
 from pdfeditor.ui.icons import page_icon
 from pdfeditor.ui.view import tiles
 from pdfeditor.ui.view.document_view import DocumentView
+from pdfeditor.ui.view.page_card import PageCardDelegate
 
 MIME_PAGES = "application/x-pdfeditor-pages"
 THUMB_PX = 200
@@ -145,6 +146,8 @@ class OrganizerWidget(QWidget):
         self.grid.setGridSize(QSize(THUMB_PX + 40, int(THUMB_PX * 1.42) + 44))
         self.grid.setSpacing(8)
         self.grid.setUniformItemSizes(True)
+        self.grid.setItemDelegate(PageCardDelegate(self.grid))
+        self.grid.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.grid.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.grid.setDefaultDropAction(Qt.DropAction.MoveAction)

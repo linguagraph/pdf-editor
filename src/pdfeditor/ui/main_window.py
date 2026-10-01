@@ -24,12 +24,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMenuBar,
@@ -102,6 +99,7 @@ from pdfeditor.ui.tools.select import SelectTool
 from pdfeditor.ui.tools_controller import ToolsController
 from pdfeditor.ui.view.document_view import DocumentView
 from pdfeditor.ui.view.note_popup import NotePopup
+from pdfeditor.ui.view.pill import CanvasPill
 from pdfeditor.ui.view.renderer import TileRenderer
 
 log = logging.getLogger(__name__)
@@ -162,104 +160,6 @@ SETTINGS_STATE = "window/state"
 # U3: icon-rail docks).
 STATE_VERSION = 3
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
-
-
-class PageNavigator(QWidget):
-    """First/prev/[page]/of N/next/last controls; accepts page labels or numbers."""
-
-    def __init__(self, window: MainWindow) -> None:
-        super().__init__(window)
-        self._window = window
-
-        def button(name: str, tip: str, slot: Callable[[], None]) -> QToolButton:
-            b = QToolButton(self)
-            b.setIcon(icon(name))
-            b.setToolTip(tip)
-            b.setAutoRaise(True)
-            b.clicked.connect(slot)
-            return b
-
-        self.first = button("chevrons-up", "First page", window.first_page)
-        self.prev = button("chevron-up", "Previous page", window.previous_page)
-        self.edit = QLineEdit(self)
-        self.edit.setAccessibleName("Page number")
-        self.edit.setFixedWidth(56)
-        self.edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.edit.returnPressed.connect(self._jump)
-        self.total = QLabel(self)
-        self.next = button("chevron-down", "Next page", window.next_page)
-        self.last = button("chevrons-down", "Last page", window.last_page)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        for w in (self.first, self.prev, self.edit, self.total, self.next, self.last):
-            layout.addWidget(w)
-
-    def update_state(self, view: DocumentView | None) -> None:
-        enabled = view is not None and view.page_count > 0
-        for w in (self.first, self.prev, self.edit, self.next, self.last):
-            w.setEnabled(enabled)
-        if view is None or not enabled:
-            self.edit.clear()
-            self.total.clear()
-            return
-        page = view.current_page
-        label = view.page_label(page)
-        self.edit.setText(label)
-        numeric = label == str(page + 1)
-        self.total.setText(
-            f"of {view.page_count}" if numeric else f"({page + 1} of {view.page_count})"
-        )
-        self.first.setEnabled(page > 0)
-        self.prev.setEnabled(page > 0)
-        self.next.setEnabled(page < view.page_count - 1)
-        self.last.setEnabled(page < view.page_count - 1)
-
-    def _jump(self) -> None:
-        view = self._window.current_view()
-        if view is None:
-            return
-        index = view.page_index_for_label(self.edit.text())
-        if index is None:
-            QApplication.beep()
-            self.update_state(view)
-        else:
-            view.go_to_page(index)
-            view.setFocus()
-
-
-class ZoomBox(QComboBox):
-    PRESETS = ("Fit Width", "Fit Page", "50%", "75%", "100%", "125%", "150%", "200%", "400%")
-
-    def __init__(self, window: MainWindow) -> None:
-        super().__init__(window)
-        self._window = window
-        self.setEditable(True)
-        self.setAccessibleName("Zoom")
-        edit = self.lineEdit()
-        if edit is not None:
-            edit.setAccessibleName("Zoom")
-        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.addItems(self.PRESETS)
-        self.setMinimumContentsLength(8)
-        self.textActivated.connect(self._apply)
-
-    def show_zoom(self, zoom: float) -> None:
-        self.setEditText(f"{zoom * 100:.0f}%")
-
-    def _apply(self, text: str) -> None:
-        view = self._window.current_view()
-        if view is None:
-            return
-        if text == "Fit Width":
-            view.fit_width()
-        elif text == "Fit Page":
-            view.fit_page()
-        else:
-            try:
-                view.set_zoom(float(text.strip().rstrip("%")) / 100)
-            except ValueError:
-                self.show_zoom(view.zoom)
-        view.setFocus()
 
 
 class MainWindow(QMainWindow):
@@ -349,8 +249,10 @@ class MainWindow(QMainWindow):
         self._state_restored = False
         self._docks_sized = False
 
-        self.navigator = PageNavigator(self)
-        self.zoom_box = ZoomBox(self)
+        # Page and zoom controls float over the current page view (see _update_ui).
+        self.pill = CanvasPill(self)
+        self.navigator = self.pill.navigator
+        self.zoom_box = self.pill.zoom_box
         self.tool_label = QLabel(self)
         self.tool_exit = QToolButton(self)
         self.tool_exit.setIcon(icon("x"))
@@ -361,8 +263,6 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.tool_exit)
         self.tool_label.hide()
         self.tool_exit.hide()
-        self.statusBar().addPermanentWidget(self.navigator)
-        self.statusBar().addPermanentWidget(self.zoom_box)
 
         self._create_actions()
         self.organize = OrganizeController(self)
@@ -871,9 +771,6 @@ class MainWindow(QMainWindow):
         view.setAccessibleName(f"Pages of {session.display_name}")
         view.viewport().setAccessibleName("Page area")
         view.current_page_changed.connect(lambda _p: self._update_ui())
-        view.zoom_changed.connect(
-            lambda z: self.zoom_box.show_zoom(z) if view is self.current_view() else None
-        )
         view.history_changed.connect(self._update_ui)
         view.link_activated.connect(self.open_external_link)
         view.selection_changed.connect(self._update_ui)
@@ -1085,7 +982,7 @@ class MainWindow(QMainWindow):
         for action in self.actions() + self.layout_group.actions():
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
-        self.navigator.update_state(view)
+        self.pill.attach(view)
         self.nav_panels.set_has_document(has_doc)
         self.inspector_panels.set_has_document(has_doc)
         self.organize.update_state()
@@ -1098,7 +995,6 @@ class MainWindow(QMainWindow):
             self.act_undo.setText(f"&Undo {stack.undo_label}".rstrip())
             self.act_redo.setEnabled(stack.can_redo)
             self.act_redo.setText(f"&Redo {stack.redo_label}".rstrip())
-            self.zoom_box.show_zoom(view.zoom)
             self.act_back.setEnabled(view.can_go_back)
             self.act_forward.setEnabled(view.can_go_forward)
             self.layout_actions[view.layout_mode].setChecked(True)
@@ -1116,8 +1012,6 @@ class MainWindow(QMainWindow):
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         else:
             self.setWindowTitle("pdfeditor")
-            self.zoom_box.setEditText("")
-        self.zoom_box.setEnabled(has_doc)
 
     # -- navigation slots -----------------------------------------------------------------
     def first_page(self) -> None:

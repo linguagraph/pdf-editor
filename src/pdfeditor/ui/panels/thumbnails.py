@@ -20,6 +20,7 @@ from pdfeditor.ui.icons import page_icon
 from pdfeditor.ui.panels.base import ViewPanel
 from pdfeditor.ui.view import tiles
 from pdfeditor.ui.view.document_view import DocumentView
+from pdfeditor.ui.view.page_card import PAGE_SIZE_ROLE, PageCardDelegate
 
 ModelIndex = QModelIndex | QPersistentModelIndex
 
@@ -46,6 +47,11 @@ class ThumbnailModel(QAbstractListModel):
             return page_icon(self._pixmap(row))
         if role == Qt.ItemDataRole.ToolTipRole:
             return f"Page {row + 1} of {self.view.page_count}"
+        if role == PAGE_SIZE_ROLE:
+            page_rect = self.view.page_rect(row)
+            w, h = rotated_size(page_rect.width, page_rect.height, self.view.rotation)
+            width = tiles.THUMBNAIL_WIDTH_PX
+            return QSize(width, max(1, round(width * h / max(w, 1.0))))
         return None
 
     def _pixmap(self, row: int) -> QPixmap:
@@ -87,7 +93,9 @@ class ThumbnailsPanel(ViewPanel):
         self.list.setMovement(QListView.Movement.Static)
         self.list.setResizeMode(QListView.ResizeMode.Adjust)
         self.list.setUniformItemSizes(False)
-        self.list.setSpacing(6)
+        self.list.setSpacing(2)  # the cards carry their own padding
+        self.list.setItemDelegate(PageCardDelegate(self.list))
+        self.list.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.list.setIconSize(QSize(tiles.THUMBNAIL_WIDTH_PX, int(tiles.THUMBNAIL_WIDTH_PX * 1.5)))
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

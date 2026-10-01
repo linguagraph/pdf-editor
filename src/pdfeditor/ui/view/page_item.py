@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
@@ -18,6 +18,19 @@ if TYPE_CHECKING:
 
 def qrect(r: Rect) -> QRectF:
     return QRectF(r.x0, r.y0, r.width, r.height)
+
+
+def shadow_strips(page: QRect, spread: int, drop: int) -> list[QRect]:
+    """The part of ``page`` grown by ``spread`` and moved down by ``drop`` outside ``page``."""
+    outer = page.adjusted(-spread, drop - spread, spread, drop + spread)
+    top, bottom = max(outer.top(), page.top()), min(outer.bottom(), page.bottom())
+    out = [
+        QRect(outer.left(), outer.top(), outer.width(), page.top() - outer.top()),
+        QRect(outer.left(), page.bottom() + 1, outer.width(), outer.bottom() - page.bottom()),
+        QRect(outer.left(), top, page.left() - outer.left(), bottom - top + 1),
+        QRect(page.right() + 1, top, outer.right() - page.right(), bottom - top + 1),
+    ]
+    return [r for r in out if r.width() > 0 and r.height() > 0]
 
 
 class PageItem(QGraphicsItem):
@@ -63,7 +76,10 @@ class PageItem(QGraphicsItem):
                 view.session, self.index, self.page_rect, view.rotation, scale, exposed, variant
             )
             for spec in specs:
-                image = tiles.request_tile(view.renderer, spec)
+                if view.zoom_animating:  # in-between scale: only what's already rendered
+                    image = view.renderer.cache.get(spec.key)
+                else:
+                    image = tiles.request_tile(view.renderer, spec)
                 if image is not None:
                     target = spec.target
                     s = spec.key.scale
@@ -123,7 +139,7 @@ class PageItem(QGraphicsItem):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.restore()
 
-        pen = QPen(QColor(0, 0, 0, 70))
+        pen = QPen(view.page_outline)
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)

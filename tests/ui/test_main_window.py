@@ -106,7 +106,7 @@ def test_navigator_and_zoom_box(qtbot, window: MainWindow, fixture_pdf) -> None:
     view = window.open_path(fixture_pdf("outline"))
     assert view is not None
     nav = window.navigator
-    assert nav.edit.text() == "i" and nav.total.text() == "(1 of 6)"
+    assert nav.edit.text() == "i" and nav.total.text() == "(1 / 6)"
     nav.edit.setText("iii")
     nav.edit.returnPressed.emit()
     assert view.current_page == 2

@@ -24,6 +24,16 @@ def isolated_settings(tmp_path: Path) -> Iterator[None]:
     yield
 
 
+@pytest.fixture(autouse=True)
+def no_animations() -> Iterator[None]:
+    """Zoom and page jumps complete synchronously unless a test turns animations on."""
+    from pdfeditor.ui.view import motion
+
+    motion.set_animations_enabled(False)
+    yield
+    motion.set_animations_enabled(None)
+
+
 @pytest.fixture
 def renderer(qtbot) -> Iterator[TileRenderer]:
     r = TileRenderer(RenderCache[QImage](64 * 1024 * 1024))
