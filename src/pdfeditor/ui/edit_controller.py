@@ -91,14 +91,17 @@ class EditController:
 
     def ribbon(self) -> None:
         r = self.w.ribbon.add_tab("Edit")
-        r.add_group(self.tool_actions["edit"])
-        r.add_group(self.tool_actions["add_text"], self.tool_actions["add_image"])
+        r.add_group(self.tool_actions["edit"], title="Edit")
+        r.add_group(self.tool_actions["add_text"], self.tool_actions["add_image"], title="Add")
         r.add_group(
             self.tool_actions["add_rectangle"],
             self.tool_actions["add_ellipse"],
             self.tool_actions["add_line"],
+            title="Shapes",
         )
-        r.add_group(self.act_replace_image, self.act_extract_image, self.act_delete_objects)
+        r.add_group(
+            self.act_replace_image, self.act_extract_image, self.act_delete_objects, title="Objects"
+        )
 
     def update_state(self, view: DocumentView | None) -> None:
         images = [

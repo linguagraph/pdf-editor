@@ -32,7 +32,7 @@ class CompareController:
         self.last_message = ""
 
     def ribbon(self) -> None:
-        self.w.ribbon.tab("Tools").add_group(self.act_compare)
+        self.w.ribbon.tab("Tools").add_group(self.act_compare, title="Compare")
 
     def compare(self, dialog: CompareFilesDialog | None = None) -> CompareWindow | None:
         if dialog is None:

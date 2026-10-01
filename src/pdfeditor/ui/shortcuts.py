@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
@@ -66,6 +66,7 @@ class ShortcutManager:
         self.settings = settings or QSettings()
         self.actions: dict[str, QAction] = {}
         self.defaults: dict[str, tuple[str, ...]] = {}
+        self.changed: list[Callable[[], None]] = []  # called after shortcuts change
         self.register(command_actions(root))
 
     def register(self, actions: Iterable[QAction]) -> None:
@@ -97,6 +98,8 @@ class ShortcutManager:
         action = self.actions[key]
         use = self.defaults[key] if seqs is None else seqs
         action.setShortcuts([QKeySequence(s) for s in use])
+        for callback in self.changed:
+            callback()
 
     def set(self, key: str, seqs: tuple[str, ...]) -> None:
         """Assign shortcuts (an empty tuple removes them); persisted."""

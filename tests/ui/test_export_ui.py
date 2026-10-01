@@ -148,6 +148,6 @@ def test_office_conversion_opens_new_tab(window: MainWindow, fixture_pdf, monkey
 
 
 def test_menus_and_ribbon(window: MainWindow) -> None:
-    assert window.export.act_export in window.ribbon.tab("Tools").actions()
-    texts = [a.text() for a in window.menuBar().actions()]
+    assert window.export.act_export in window.ribbon.tab("Tools").button_actions()
+    texts = [a.text() for a in window.menu_bar.actions()]
     assert "&Tools" in texts

@@ -119,6 +119,35 @@ class AppSettings:
     def accent(self, value: str) -> None:
         self.qs.setValue("prefs/accent", value)
 
+    def _bool(self, key: str, default: bool) -> bool:
+        value = self.qs.value(key, default)
+        return value if isinstance(value, bool) else str(value).lower() == "true"
+
+    @property
+    def show_menu_bar(self) -> bool:
+        """Classic menu bar always visible (off: behind the ☰ button and the Alt key)."""
+        return self._bool("prefs/show_menu_bar", False)
+
+    @show_menu_bar.setter
+    def show_menu_bar(self, value: bool) -> None:
+        self.qs.setValue("prefs/show_menu_bar", "true" if value else "false")
+
+    @property
+    def ribbon_compact(self) -> bool:
+        return self._bool("ribbon/compact", False)
+
+    @ribbon_compact.setter
+    def ribbon_compact(self, value: bool) -> None:
+        self.qs.setValue("ribbon/compact", "true" if value else "false")
+
+    @property
+    def ribbon_collapsed(self) -> bool:
+        return self._bool("ribbon/collapsed", False)
+
+    @ribbon_collapsed.setter
+    def ribbon_collapsed(self, value: bool) -> None:
+        self.qs.setValue("ribbon/collapsed", "true" if value else "false")
+
     @property
     def cache_mb(self) -> int:
         """Render cache budget; applies on next start."""

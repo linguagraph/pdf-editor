@@ -8,7 +8,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -17,7 +17,9 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QImage,
+    QKeyEvent,
     QKeySequence,
+    QShortcut,
     QShowEvent,
 )
 from PySide6.QtWidgets import (
@@ -31,6 +33,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMenuBar,
     QMessageBox,
     QTabWidget,
     QToolButton,
@@ -62,6 +65,7 @@ from pdfeditor.model.annotations import (
 )
 from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.outline import Link, LinkKind
+from pdfeditor.ui.action_help import apply_short_labels, refresh_tooltips
 from pdfeditor.ui.compare_controller import CompareController
 from pdfeditor.ui.dialogs.about import AboutDialog
 from pdfeditor.ui.dialogs.password import password_prompt
@@ -142,6 +146,8 @@ MAX_RECENT = 10
 SETTINGS_RECENT = "recent_files"
 SETTINGS_GEOMETRY = "window/geometry"
 SETTINGS_STATE = "window/state"
+# Bump when the frame changes so old dock layouts aren't restored into it (U2: ribbon moved).
+STATE_VERSION = 2
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
 
 
@@ -274,12 +280,22 @@ class MainWindow(QMainWindow):
             "Open a PDF with Ctrl+O, or drop files here.", alignment=Qt.AlignmentFlag.AlignCenter
         )
 
+        # Menu bar and ribbon sit above the docks, across the whole window.
+        self.menu_bar = QMenuBar(self)
         self.ribbon = Ribbon(self)
+        top = QWidget(self)
+        top_layout = QVBoxLayout(top)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(0)
+        top_layout.addWidget(self.menu_bar)
+        top_layout.addWidget(self.ribbon)
+        self.setMenuWidget(top)
+        self._alt_tap = False  # Alt pressed with no other key yet (see keyReleaseEvent)
+        self._menu_shortcuts: list[QShortcut] = []
         central = QWidget(self)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.ribbon)
         layout.addWidget(self.tabs, 1)
         layout.addWidget(self.welcome, 1)
         self.setCentralWidget(central)
@@ -354,6 +370,9 @@ class MainWindow(QMainWindow):
         self._create_ribbon()
         # after every controller has made its actions: defaults + the user's own shortcuts
         self.shortcuts = ShortcutManager(self)
+        apply_short_labels(self.ribbon.button_actions())
+        self._refresh_tooltips()
+        self.shortcuts.changed.append(self._refresh_tooltips)
         self._restore_settings()
         self._apply_prefs()
         self._update_ui()
@@ -511,6 +530,14 @@ class MainWindow(QMainWindow):
             "rotate-ccw",
         )
         self.act_night = a("&Night Reading", self._toggle_night, "Ctrl+Alt+N", "moon", True, True)
+        self.act_menu_bar = a("&Menu Bar", self._set_menu_bar_shown, None, None, False, True)
+        self.act_compact_ribbon = a(
+            "C&ompact Ribbon", self._set_ribbon_compact, None, None, False, True
+        )
+        self.act_collapse_ribbon = a(
+            "&Collapse Ribbon", self.ribbon.set_collapsed, "Ctrl+F1", None, False, True
+        )
+        self.ribbon.collapsed_changed.connect(self._on_ribbon_collapsed)
         self.act_nav_pane = self.nav_dock.toggleViewAction()
         self.act_nav_pane.setText("&Navigation Pane")
         self.act_nav_pane.setShortcut(QKeySequence("F4"))
@@ -565,7 +592,7 @@ class MainWindow(QMainWindow):
             self.theme_actions[theme] = act
 
     def _create_menus(self) -> None:
-        mb = self.menuBar()
+        mb = self.menu_bar
         file_menu = mb.addMenu("&File")
         file_menu.addAction(self.act_open)
         file_menu.addAction(self.organize.act_combine)
@@ -621,6 +648,10 @@ class MainWindow(QMainWindow):
         theme_menu = view_menu.addMenu("&Theme")
         for act in self.theme_actions.values():
             theme_menu.addAction(act)
+        view_menu.addSeparator()
+        view_menu.addAction(self.act_menu_bar)
+        view_menu.addAction(self.act_compact_ribbon)
+        view_menu.addAction(self.act_collapse_ribbon)
         view_menu.addAction(self.act_nav_pane)
         self.act_inspector = self.inspector_dock.toggleViewAction()
         self.act_inspector.setText("&Properties Panel")
@@ -660,14 +691,31 @@ class MainWindow(QMainWindow):
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
 
+        # The ☰ button offers the same menus; with the bar hidden, Alt+letter still opens them.
+        hamburger = QMenu(self)
+        for action in mb.actions():
+            hamburger.addAction(action)
+            menu = action.menu()
+            if isinstance(menu, QMenu):
+                menu.aboutToHide.connect(lambda: QTimer.singleShot(0, self._hide_menu_bar_after))
+            mnemonic = action.text().partition("&")[2][:1]
+            if mnemonic:
+                shortcut = QShortcut(QKeySequence(f"Alt+{mnemonic.upper()}"), self)
+                shortcut.activated.connect(lambda act=action: self.open_menu(act))
+                self._menu_shortcuts.append(shortcut)
+        self.ribbon.menu_button.setMenu(hamburger)
+
     def _create_ribbon(self) -> None:
         home = self.ribbon.add_tab("Home")
-        home.add_group(self.act_open, self.act_save, self.act_print, self.act_properties)
-        home.add_group(self.act_undo, self.act_redo)
-        home.add_group(self.tool_actions["select"], self.tool_actions["hand"])
-        home.add_group(self.act_find)
-        home.add_group(self.act_back, self.act_forward)
-        home.add_group(self.act_prev, self.act_next)
+        home.add_group(
+            self.act_open, self.act_save, self.act_print, self.act_properties, title="File"
+        )
+        home.add_group(self.act_undo, self.act_redo, title="History")
+        home.add_group(self.tool_actions["select"], self.tool_actions["hand"], title="Tools")
+        home.add_group(self.act_find, title="Search")
+        home.add_group(
+            self.act_back, self.act_forward, self.act_prev, self.act_next, title="Navigate"
+        )
         self.tool_actions["select"].setIconText("Select")
         self.tool_actions["hand"].setIconText("Hand")
         self.ribbon.set_quick_actions(
@@ -684,18 +732,23 @@ class MainWindow(QMainWindow):
         self.protect.ribbon()
         comment = self.ribbon.add_tab("Comment")
         comment.add_group(
-            *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly"))
+            *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly")),
+            title="Text Markup",
         )
         comment.add_group(
-            *(self.tool_actions[n] for n in ("note", "textbox", "callout", "stamp", "attach"))
+            *(self.tool_actions[n] for n in ("note", "textbox", "callout", "stamp", "attach")),
+            title="Comments",
         )
         comment.add_group(
             *(
                 self.tool_actions[n]
                 for n in ("rectangle", "oval", "line", "arrow", "polygon", "polyline", "pen")
-            )
+            ),
+            title="Drawing",
         )
-        comment.add_group(self.act_show_comments, self.act_delete_annots, self.act_flatten)
+        comment.add_group(
+            self.act_show_comments, self.act_delete_annots, self.act_flatten, title="Manage"
+        )
         view = self.ribbon.add_tab("View")
         view.add_group(
             self.act_zoom_out,
@@ -703,9 +756,10 @@ class MainWindow(QMainWindow):
             self.act_fit_width,
             self.act_fit_page,
             self.act_actual,
+            title="Zoom",
         )
-        view.add_group(*self.layout_actions.values())
-        view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night)
+        view.add_group(*self.layout_actions.values(), title="Page Display")
+        view.add_group(self.act_rotate_ccw, self.act_rotate_cw, self.act_night, title="Reading")
         self.tools.ribbon()
         self.export.ribbon()
         self.optimize.ribbon()
@@ -942,6 +996,9 @@ class MainWindow(QMainWindow):
         return self.autosaver.tick([v.session for v in self.views()])
 
     def _apply_prefs(self) -> None:
+        self._set_menu_bar_shown(self.prefs.show_menu_bar)
+        self._set_ribbon_compact(self.prefs.ribbon_compact)
+        self.ribbon.set_collapsed(self.prefs.ribbon_collapsed)
         minutes = self.prefs.autosave_minutes
         if minutes:
             self.autosave_timer.start(minutes * 60 * 1000)
@@ -1342,6 +1399,76 @@ class MainWindow(QMainWindow):
             engine_version = getattr(view.session.engine, "version", "")
         AboutDialog(engine_version or getattr(self.engine(), "version", ""), self).exec()
 
+    # -- menu bar and ribbon --------------------------------------------------------------
+    def _set_menu_bar_shown(self, shown: bool) -> None:
+        self.prefs.show_menu_bar = shown
+        self.act_menu_bar.setChecked(shown)
+        self.menu_bar.setVisible(shown)
+        for shortcut in self._menu_shortcuts:  # the visible bar handles Alt+letter itself
+            shortcut.setEnabled(not shown)
+
+    def open_menu(self, action: QAction) -> None:
+        """Open a top-level menu, showing the menu bar for as long as a menu is open."""
+        self.menu_bar.show()
+        self.menu_bar.setActiveAction(action)
+
+    def _hide_menu_bar_after(self) -> None:
+        if self.prefs.show_menu_bar:
+            return
+        menus = [a.menu() for a in self.menu_bar.actions()]
+        if not any(isinstance(m, QMenu) and m.isVisible() for m in menus):
+            self.menu_bar.hide()
+
+    def _set_ribbon_compact(self, compact: bool) -> None:
+        self.prefs.ribbon_compact = compact
+        self.act_compact_ribbon.setChecked(compact)
+        self.ribbon.set_compact(compact)
+
+    def _on_ribbon_collapsed(self, collapsed: bool) -> None:
+        self.prefs.ribbon_collapsed = collapsed
+        self.act_collapse_ribbon.setChecked(collapsed)
+
+    def _refresh_tooltips(self) -> None:
+        refresh_tooltips(self.shortcuts.actions.values())
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Alt and not event.isAutoRepeat():
+            # Tapping Alt alone opens the menus (Windows convention). Any key or shortcut
+            # pressed while Alt is down cancels the tap; watch for those until it's released.
+            self._alt_tap = True
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Alt and not event.isAutoRepeat():
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
+            if self._alt_tap and self.menu_bar.actions():
+                self._alt_tap = False
+                self.open_menu(self.menu_bar.actions()[0])
+                return
+        super().keyReleaseEvent(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if self._alt_tap and event.type() in (
+            QEvent.Type.KeyPress,
+            QEvent.Type.ShortcutOverride,
+            QEvent.Type.MouseButtonPress,
+        ):
+            key = event.key() if isinstance(event, QKeyEvent) else None
+            if key != Qt.Key.Key_Alt:
+                self._alt_tap = False
+        if event.type() == QEvent.Type.ApplicationDeactivate:
+            # Alt+Tab: the release goes to another window, so stop watching now.
+            self._alt_tap = False
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
+        return False
+
     # -- theme ----------------------------------------------------------------------------
     def set_theme(self, theme: Theme) -> None:
         app = QApplication.instance()
@@ -1391,7 +1518,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         state = self.settings.value(SETTINGS_STATE)
         if state is not None:
-            self._state_restored = bool(self.restoreState(state))
+            self._state_restored = bool(self.restoreState(state, STATE_VERSION))
         self.set_theme(Theme(self.prefs.theme))
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -1428,7 +1555,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
-        self.settings.setValue(SETTINGS_STATE, self.saveState())
+        self.settings.setValue(SETTINGS_STATE, self.saveState(STATE_VERSION))
         self.autosave_timer.stop()
         while self.tabs.count():
             self.close_tab(0, ask=False)

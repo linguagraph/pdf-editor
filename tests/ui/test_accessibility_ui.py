@@ -117,8 +117,8 @@ def test_auto_tag(window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) 
     view = window.open_path(path)
     action = window.pdfa.act_auto_tag
     assert action.isVisible() and "experimental" in action.text()
-    assert action in window.ribbon.tab("Tools").actions()
-    tools_menu = next(a.menu() for a in window.menuBar().actions() if "Tools" in a.text())
+    assert action in window.ribbon.tab("Tools").button_actions()
+    tools_menu = next(a.menu() for a in window.menu_bar.actions() if "Tools" in a.text())
     assert action in tools_menu.actions()
     tags = window.tags_panel
     window.nav_tabs.setCurrentWidget(tags)

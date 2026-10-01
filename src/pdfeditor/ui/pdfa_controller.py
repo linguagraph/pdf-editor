@@ -48,19 +48,20 @@ class PdfaController:
         )
         self.act_auto_tag = act("Auto-&Tag Document (experimental)", "tags", self.auto_tag)
         self.act_auto_tag.setIconText("Auto-Tag")
-        self.act_auto_tag.setToolTip(
-            "Add tags (headings, paragraphs, figures) to an untagged document from its layout"
-        )
         self.act_auto_tag.setVisible(window.engine().capabilities.auto_tag)
         self.last_message = ""
         self.dialog: PdfaReportDialog | None = None
 
     def ribbon(self) -> None:
         self.w.ribbon.tab("Tools").add_group(
-            self.act_preflight, self.act_save_pdfa, self.act_accessibility, self.act_auto_tag
+            self.act_preflight,
+            self.act_save_pdfa,
+            self.act_accessibility,
+            self.act_auto_tag,
+            title="Standards",
         )
         # the Tools menu is built before the ribbon; list auto-tag next to the accessibility check
-        for menu_action in self.w.menuBar().actions():
+        for menu_action in self.w.menu_bar.actions():
             menu = menu_action.menu()
             if isinstance(menu, QMenu) and self.act_accessibility in menu.actions():
                 menu.addAction(self.act_auto_tag)

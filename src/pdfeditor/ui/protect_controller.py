@@ -157,11 +157,17 @@ class ProtectController:
 
     def ribbon(self) -> None:
         r = self.w.ribbon.add_tab("Protect")
-        r.add_group(self.act_redact, self.act_mark_text, self.act_mark_pages, self.act_properties)
-        r.add_group(self.act_apply)
-        r.add_group(self.act_sanitize)
+        r.add_group(
+            self.act_redact,
+            self.act_mark_text,
+            self.act_mark_pages,
+            self.act_properties,
+            self.act_apply,
+            title="Redact",
+        )
+        r.add_group(self.act_sanitize, title="Clean Up")
         if self.w.engine().capabilities.encrypt:
-            r.add_group(self.act_encrypt, self.act_remove_security)
+            r.add_group(self.act_encrypt, self.act_remove_security, title="Security")
 
     # -- marking --------------------------------------------------------------------------
     def add_marks(self, view: DocumentView, marks: list[AnnotationModel], label: str) -> None:

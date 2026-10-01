@@ -46,7 +46,7 @@ class ToolsController:
 
     def ribbon(self) -> None:
         r = self.w.ribbon.add_tab("Tools")
-        r.add_group(self.act_ocr, self.act_batch_ocr)
+        r.add_group(self.act_ocr, self.act_batch_ocr, title="Recognize Text")
 
     # -- helpers ----------------------------------------------------------------------------
     def _wire_download(self, box: OcrOptionsBox) -> None:

@@ -78,6 +78,10 @@ class PreferencesDialog(QDialog):
         self._previous_accent = self.accent.currentIndex()
         self.accent.activated.connect(self._accent_activated)
         form.addRow("Accent color:", self.accent)
+        self.menu_bar = QCheckBox("Always show the menu bar")
+        self.menu_bar.setToolTip("Off: the menus are behind the ☰ button; tap Alt to open them")
+        self.menu_bar.setChecked(settings.show_menu_bar)
+        form.addRow("", self.menu_bar)
 
         documents = QGroupBox("Documents", self)
         form = QFormLayout(documents)
@@ -137,6 +141,7 @@ class PreferencesDialog(QDialog):
         s.keep_tools = self.keep_tools.isChecked()
         s.language = str(self.language.currentData())
         s.theme = str(self.theme.currentData())
+        s.show_menu_bar = self.menu_bar.isChecked()
         accent = self.accent.currentData()
         s.accent = accent if isinstance(accent, str) and accent != CUSTOM else ""
         s.autosave_minutes = self.autosave.value()

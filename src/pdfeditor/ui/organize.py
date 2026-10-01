@@ -115,17 +115,22 @@ class OrganizeController:
 
     def ribbon(self) -> None:
         r = self.w.ribbon.add_tab("Organize")
-        r.add_group(self.act_organize)
+        r.add_group(self.act_organize, title="Organize")
         r.add_group(
             self.act_insert,
             self.act_delete,
             self.act_duplicate,
             self.act_rotate_left,
             self.act_rotate_right,
+            title="Pages",
         )
-        r.add_group(self.act_extract, self.act_replace, self.act_split, self.act_combine)
-        r.add_group(self.act_crop, self.act_labels)
-        r.add_group(self.act_header, self.act_bates, self.act_watermark, self.act_background)
+        r.add_group(
+            self.act_extract, self.act_replace, self.act_split, self.act_combine, title="Assemble"
+        )
+        r.add_group(self.act_crop, self.act_labels, title="Page Setup")
+        r.add_group(
+            self.act_header, self.act_bates, self.act_watermark, self.act_background, title="Marks"
+        )
 
     def menu_actions(self) -> list[QAction | None]:
         return [
