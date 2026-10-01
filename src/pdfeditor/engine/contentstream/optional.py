@@ -90,17 +90,35 @@ def strip_hidden_content(
     ``hidden_properties`` are /Properties resource names of hidden OCGs/OCMDs;
     ``hidden_xobjects`` are /XObject resource names whose /OC is hidden.
     """
+    return strip_sections(
+        ops,
+        lambda _i, op: op.operator == "BDC" and _is_hidden_oc(op, hidden_properties),
+        lambda name: name in hidden_xobjects,
+    )
+
+
+def strip_sections(
+    ops: Sequence[Operation],
+    starts_section: Callable[[int, Operation], bool],
+    drops_xobject: Callable[[str], bool] = lambda _name: False,
+) -> tuple[list[Operation], int]:
+    """Remove what marked-content sections paint, keeping their state changes.
+
+    A section starts at a ``BDC``/``BMC`` (at ``ops[index]``) that ``starts_section`` picks and
+    runs to its matching ``EMC``; ``Do`` of XObjects that ``drops_xobject`` picks is removed
+    anywhere. Returns the new operations and how many sections and calls were removed.
+    """
     out: list[Operation] = []
     removed = 0
-    depth = 0  # marked-content nesting inside the current hidden section (0 = not hidden)
+    depth = 0  # marked-content nesting inside the current removed section (0 = outside)
     path: list[Operation] = []
-    for op in ops:
+    for index, op in enumerate(ops):
         name = op.operator
         if depth == 0:
-            if name == "BDC" and _is_hidden_oc(op, hidden_properties):
+            if name in ("BDC", "BMC") and starts_section(index, op):
                 depth = 1
                 removed += 1
-            elif name == "Do" and op.operands and str(op.operands[0]) in hidden_xobjects:
+            elif name == "Do" and op.operands and drops_xobject(str(op.operands[0])):
                 removed += 1
             else:
                 out.append(op)

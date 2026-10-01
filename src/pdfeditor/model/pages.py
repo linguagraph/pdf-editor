@@ -28,6 +28,28 @@ class PageLabelRule:
     first: int = 1
 
 
+class MarkKind(Enum):
+    """Page content added as one replaceable unit (Acrobat's "pagination artifacts").
+
+    The app wraps what it draws in a marked-content artifact naming the kind, so it can be
+    found again to update or remove, and keeps the settings used next to it.
+    """
+
+    HEADER_FOOTER = "HeaderFooter"
+    BATES = "Bates"
+    WATERMARK = "Watermark"
+    BACKGROUND = "Background"
+
+
+@dataclass(frozen=True, slots=True)
+class PageMark:
+    """A kind of mark found on a page."""
+
+    kind: MarkKind
+    settings: str = ""  # what the app stored when adding it (JSON); "" if unknown
+    foreign: bool = False  # added by another tool (Acrobat), so there are no settings
+
+
 FONTS = ("helv", "hebo", "tiro", "tibo", "cour", "cobo")  # PDF base-14 families (+ bold)
 
 
@@ -43,6 +65,7 @@ class TextStamp:
     opacity: float = 1.0
     angle: float = 0.0  # visible, counter-clockwise degrees
     on_top: bool = True
+    mark: MarkKind | None = None  # tag it as this kind of mark (``capabilities.page_marks``)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,3 +75,4 @@ class ImageStamp:
     opacity: float = 1.0
     on_top: bool = True
     keep_proportion: bool = True
+    mark: MarkKind | None = None

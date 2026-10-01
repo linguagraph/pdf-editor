@@ -152,7 +152,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (dialog with order and ranges, bookmarks merged)
 - [x] Crop (CropBox) with apply-to-range via the Crop dialog (margins), and remove white margins automatically (interactive drag-to-crop tool deferred to Phase 16)
 - [x] Page labels editor; bookmarks editing (add from current view or selection, rename, nest by drag, delete, set destination)
-- [x] Header/footer, Bates numbering, text/image watermark, and background (tokens: page, total, date, file name; position, font, opacity, page ranges)
+- [x] Header/footer, Bates numbering, text/image watermark, and background (tokens: page, total, date, file name; position, font, opacity, page ranges) _(each is added as a marked `/Artifact` with its settings in the page's `/PieceInfo`, so Header & Footer, Bates, Watermark and Background each have Add / Update (pre-filled, replaces) / Remove; adding again asks whether to replace; Acrobat's own marks are recognised (#39, #40))_
 - [x] Create a PDF from images or from multiple files
 
 ### Phase 7: Content editing (XL, the hardest part)

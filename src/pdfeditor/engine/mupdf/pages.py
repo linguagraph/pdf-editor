@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING
 import pymupdf
 
 from pdfeditor.engine.base import EngineError
+from pdfeditor.engine.mupdf.marks import marked
 from pdfeditor.model.geometry import Rect
-from pdfeditor.model.pages import ImageStamp, LabelStyle, PageLabelRule, TextStamp
+from pdfeditor.model.pages import ImageStamp, LabelStyle, MarkKind, PageLabelRule, TextStamp
 
 if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.document import MuDocument
@@ -159,17 +160,18 @@ def stamp_text(page: MuPage, stamp: TextStamp) -> None:
     origin = pymupdf.Point(stamp.origin.x, stamp.origin.y) * fz.derotation_matrix
     # morph angle = page rotation + visible counter-clockwise angle (keeps text upright/at angle)
     morph = (origin, pymupdf.Matrix(fz.rotation + stamp.angle))
-    fz.insert_text(
-        origin,
-        stamp.text,
-        fontsize=stamp.font_size,
-        fontname=stamp.font,
-        color=stamp.color.rgb(),
-        fill_opacity=stamp.opacity,
-        stroke_opacity=stamp.opacity,
-        morph=morph,
-        overlay=stamp.on_top,
-    )
+    with marked(page, stamp.mark, stamp.origin.y < page.rect.height / 2):
+        fz.insert_text(
+            origin,
+            stamp.text,
+            fontsize=stamp.font_size,
+            fontname=stamp.font,
+            color=stamp.color.rgb(),
+            fill_opacity=stamp.opacity,
+            stroke_opacity=stamp.opacity,
+            morph=morph,
+            overlay=stamp.on_top,
+        )
     page._doc.mark_page_changed(page.index)
 
 
@@ -179,13 +181,14 @@ def stamp_image(page: MuPage, stamp: ImageStamp) -> None:
         data = _with_opacity(data, stamp.opacity)
     fz = page.fz
     rect = (pymupdf.Rect(*stamp.rect.as_tuple()) * fz.derotation_matrix).normalize()
-    fz.insert_image(
-        rect,
-        stream=data,
-        keep_proportion=stamp.keep_proportion,
-        overlay=stamp.on_top,
-        rotate=fz.rotation,  # upright in the visible page
-    )
+    with marked(page, stamp.mark, stamp.rect.center.y < page.rect.height / 2):
+        fz.insert_image(
+            rect,
+            stream=data,
+            keep_proportion=stamp.keep_proportion,
+            overlay=stamp.on_top,
+            rotate=fz.rotation,  # upright in the visible page
+        )
     page._doc.mark_page_changed(page.index)
 
 
@@ -200,11 +203,17 @@ def _with_opacity(data: bytes, opacity: float) -> bytes:
     return out.getvalue()
 
 
-def fill_background(page: MuPage, color: tuple[float, float, float], opacity: float = 1.0) -> None:
+def fill_background(
+    page: MuPage,
+    color: tuple[float, float, float],
+    opacity: float = 1.0,
+    mark: MarkKind | None = None,
+) -> None:
     """Paint the whole page behind the existing content."""
     fz = page.fz
     area = (fz.rect * fz.derotation_matrix).normalize()  # the visible page, unrotated coords
-    fz.draw_rect(area, color=None, fill=color, fill_opacity=opacity, overlay=False)
+    with marked(page, mark):
+        fz.draw_rect(area, color=None, fill=color, fill_opacity=opacity, overlay=False)
     page._doc.mark_page_changed(page.index)
 
 
