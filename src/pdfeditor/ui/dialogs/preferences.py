@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.ui.color_picker import pick_color
 from pdfeditor.ui.dialogs.base import FormDialog, add_row, form_layout
 from pdfeditor.ui.i18n import available_languages
 from pdfeditor.ui.settings import AppSettings
@@ -206,12 +206,11 @@ class PreferencesDialog(FormDialog):
 
     def _accent_activated(self, index: int) -> None:
         if self.accent.itemData(index) == CUSTOM:
-            start = QColor(theme_manager().colors.accent)
-            color = QColorDialog.getColor(start, self, "Accent Color")
-            if not color.isValid():
+            color = pick_color(theme_manager().colors.accent, self, "Accent Color")
+            if color is None:
                 self.accent.setCurrentIndex(self._previous_accent)
                 return
-            self._select_accent(color.name())
+            self._select_accent(color.to_hex())
         self._previous_accent = self.accent.currentIndex()
 
     def accept(self) -> None:

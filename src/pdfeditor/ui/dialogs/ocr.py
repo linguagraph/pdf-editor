@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QHideEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -13,15 +14,30 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from pdfeditor.services.ocr import COMMON_LANGUAGES, OcrOptions, installed_languages
-from pdfeditor.ui.dialogs.base import FormDialog, Section, add_row, form_layout
+from pdfeditor.services.ocr import (
+    COMMON_LANGUAGES,
+    OcrOptions,
+    download_language,
+    installed_languages,
+    language_name,
+)
+from pdfeditor.ui.dialogs.base import FormDialog, Section, add_row, caption, form_layout, set_role
 from pdfeditor.ui.dialogs.pages import PageRangeBox
+from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.style.tokens import METRICS
+
+
+def format_bytes(n: int) -> str:
+    if n < 1024 * 1024:
+        return f"{round(n / 1024)} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
 
 
 class LanguageList(QListWidget):
@@ -54,13 +70,38 @@ class LanguageList(QListWidget):
 
 
 class OcrOptionsBox(QWidget):
+    """OCR options, with language downloads shown inline (progress, cancel, errors)."""
+
+    language_installed = Signal(str)  # language code
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.languages = LanguageList(self)
         self.download_combo = QComboBox(self)
-        for code, name in COMMON_LANGUAGES.items():
-            self.download_combo.addItem(f"{name} ({code})", code)
+        for code in COMMON_LANGUAGES:
+            self.download_combo.addItem(language_name(code), code)
         self.download_button = QPushButton("Download", self)
+        self.download_button.clicked.connect(self.start_download)
+        self.download_job: Job | None = None
+        self._downloading = ""
+        # shown under "Get more" once a download starts: what, how far, and a way to stop it
+        self.download_panel = QWidget(self)
+        self.download_status = caption("", self.download_panel)
+        self.download_bar = QProgressBar(self.download_panel)
+        self.download_bar.setAccessibleName("Download progress")
+        self.download_cancel = QPushButton("Cancel", self.download_panel)
+        self.download_cancel.setAccessibleName("Cancel download")
+        self.download_cancel.clicked.connect(self.cancel_download)
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(METRICS.space(2))
+        bar_row.addWidget(self.download_bar, 1)
+        bar_row.addWidget(self.download_cancel)
+        panel = QVBoxLayout(self.download_panel)
+        panel.setContentsMargins(0, 0, 0, 0)
+        panel.setSpacing(METRICS.space(1))
+        panel.addWidget(self.download_status)
+        panel.addLayout(bar_row)
+        self.download_panel.setVisible(False)
         self.dpi = QSpinBox(self)
         self.dpi.setRange(100, 600)
         self.dpi.setSingleStep(50)
@@ -79,7 +120,11 @@ class OcrOptionsBox(QWidget):
         form = form_layout()
         layout.addLayout(form)
         add_row(form, "Languages:", self.languages)
-        add_row(form, "Get more:", download, "Downloaded languages are kept for next time.")
+        get_more = QVBoxLayout()
+        get_more.setSpacing(METRICS.space(2))
+        get_more.addLayout(download)
+        get_more.addWidget(self.download_panel)
+        add_row(form, "Get more:", get_more, "Downloaded languages are kept for next time.")
         form.addRow("", self.skip_text)
         # the defaults suit most scans; these are for poor ones
         self.advanced = Section("Scan quality", self, expanded=False)
@@ -88,6 +133,103 @@ class OcrOptionsBox(QWidget):
         add_row(advanced, "Resolution:", self.dpi, "Higher is slower but reads small print better.")
         advanced.addRow("", self.preprocess)
         advanced.addRow("", self.deskew)
+
+    # -- language download (a background job; the dialog stays usable) ------------------
+    def is_downloading(self) -> bool:
+        return self.download_job is not None
+
+    def start_download(self) -> None:
+        if self.download_job is not None:
+            return
+        code = str(self.download_combo.currentData())
+        job = Job(lambda job: download_language(code, job.token, job.progress))
+        job.progress_changed.connect(self._on_progress)
+        job.finished.connect(self._on_finished)
+        job.failed.connect(self._on_failed)
+        job.cancelled.connect(self._on_cancelled)
+        self.download_job = job
+        self._download_started(code)
+        job.start()
+
+    def cancel_download(self) -> None:
+        if self.download_job is None:
+            return
+        self.download_job.cancel()
+        self.download_cancel.setEnabled(False)
+        self._set_status(f"Cancelling the download of {language_name(self._downloading)}…")
+
+    def _download_started(self, code: str) -> None:
+        self._downloading = code
+        self.download_combo.setEnabled(False)
+        self.download_button.setEnabled(False)
+        self._set_status(f"Connecting to download {language_name(code)}…")
+        self.download_bar.setRange(0, 0)  # busy until the size is known
+        self.download_bar.setVisible(True)
+        self.download_cancel.setVisible(True)
+        self.download_cancel.setEnabled(True)
+        self.download_panel.setVisible(True)
+
+    def _download_progress(self, received: int, total: int) -> None:
+        name = language_name(self._downloading)
+        if total > 0:
+            self.download_bar.setRange(0, total)
+            self.download_bar.setValue(min(received, total))
+            text = f"Downloading {name}: {format_bytes(received)} of {format_bytes(total)}"
+        else:
+            self.download_bar.setRange(0, 0)  # the server didn't say how big it is
+            text = f"Downloading {name}: {format_bytes(received)} received"
+        if self.download_cancel.isEnabled():  # keep "Cancelling…" once asked
+            self._set_status(text)
+
+    def _download_ended(self, message: str, role: str = "caption") -> None:
+        self.download_job = None
+        self.download_combo.setEnabled(True)
+        self.download_button.setEnabled(True)
+        self.download_bar.setVisible(False)
+        self.download_cancel.setVisible(False)
+        self._set_status(message, role)
+
+    def _download_finished(self) -> None:
+        code = self._downloading
+        self.languages.reload(set(self.languages.languages()) | {code})
+        self._download_ended(f"{language_name(code)} is installed and selected.")
+        self.language_installed.emit(code)
+
+    def _download_failed(self, message: str) -> None:
+        self._download_ended(
+            f"Couldn't download {language_name(self._downloading)}: {message}. "
+            "Check the internet connection and try again.",
+            "error",
+        )
+
+    def _set_status(self, text: str, role: str = "caption") -> None:
+        if self.download_status.property("role") != role:
+            set_role(self.download_status, role)
+        self.download_status.setText(text)
+
+    # job signals; a job that was cancelled when the dialog closed no longer counts
+    def _on_progress(self, received: int, total: int) -> None:
+        if self.sender() is self.download_job:
+            self._download_progress(received, total)
+
+    def _on_finished(self, _path: object) -> None:
+        if self.sender() is self.download_job:
+            self._download_finished()
+
+    def _on_failed(self, message: str) -> None:
+        if self.sender() is self.download_job:
+            self._download_failed(message)
+
+    def _on_cancelled(self) -> None:
+        if self.sender() is self.download_job:
+            self._download_ended("Download cancelled.")
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        # the dialog closed (not just minimized): stop downloading
+        if self.download_job is not None and not event.spontaneous():
+            self.download_job.cancel()
+            self._download_ended("Download cancelled.")
+        super().hideEvent(event)
 
     def options(self) -> OcrOptions:
         """Raises ValueError when no language is chosen."""

@@ -7,11 +7,9 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -37,6 +35,7 @@ from pdfeditor.model.pages import FONTS, LabelStyle, PageLabelRule
 from pdfeditor.services.assembly import IMAGE_SUFFIXES, MergeSource, SplitMode
 from pdfeditor.services.pages import format_page_ranges, parse_page_ranges
 from pdfeditor.services.stamping import TOKENS_HELP, HeaderFooter, Slot, Watermark
+from pdfeditor.ui.color_picker import ColorButton
 from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
 from pdfeditor.ui.style.tokens import METRICS
 
@@ -90,27 +89,6 @@ def checked_pages(dialog: QWidget, box: PageRangeBox) -> list[int] | None:
     except ValueError as exc:
         QMessageBox.warning(dialog, dialog.windowTitle(), str(exc))
         return None
-
-
-class ColorButton(QPushButton):
-    def __init__(self, color: Color, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.color = color
-        self.setFixedWidth(60)
-        self.clicked.connect(self._pick)
-        self._paint()
-
-    def _paint(self) -> None:
-        self.setStyleSheet(f"background-color: {self.color.to_hex()}")
-
-    def _pick(self) -> None:
-        chosen = QColorDialog.getColor(QColor.fromRgbF(*self.color.rgb()), self)
-        if chosen.isValid():
-            self.set(Color(chosen.redF(), chosen.greenF(), chosen.blueF()))
-
-    def set(self, color: Color) -> None:
-        self.color = color
-        self._paint()
 
 
 # -- insert -------------------------------------------------------------------------------------

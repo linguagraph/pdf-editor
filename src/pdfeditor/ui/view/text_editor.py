@@ -13,7 +13,6 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeyEvent, QPalette, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
-    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.objects import Align, TextStyle, family_of
+from pdfeditor.ui.color_picker import pick_color
 from pdfeditor.ui.icons import icon
 
 if TYPE_CHECKING:
@@ -143,13 +143,11 @@ class TextStyleBar(QFrame):
     def _pick_color(self) -> None:
         self.picking = True
         try:
-            chosen = QColorDialog.getColor(
-                QColor.fromRgbF(*self._color.rgb()), self.window(), "Text Colour"
-            )
+            chosen = pick_color(self._color, self, "Text Color")
         finally:
             self.picking = False
-        if chosen.isValid():
-            self.set_color(Color(chosen.redF(), chosen.greenF(), chosen.blueF()))
+        if chosen is not None:
+            self.set_color(chosen)
 
     def text_style(self) -> TextStyle:
         align = self.align_combo.currentData()
