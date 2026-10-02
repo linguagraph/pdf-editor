@@ -130,7 +130,7 @@ class Section(QWidget):
         # lined up with form labels and group box titles
         self.header.setIconSize(QSize(METRICS.space(2), METRICS.space(2)))
         self.header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.header.setAccessibleName(f"{title} section")
+        self.header.setAccessibleName(self.tr("{title} section").format(title=title))
         self.header.toggled.connect(self.set_expanded)
         self.content = QWidget(self)
         layout = QVBoxLayout(self)
@@ -180,7 +180,9 @@ class Section(QWidget):
 
     def _sync(self, expanded: bool) -> None:
         self.header.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
-        self.header.setToolTip(("Hide " if expanded else "Show ") + self.header.text().lower())
+        name = self.header.text().replace("&", "").lower()
+        tip = self.tr("Hide {section}") if expanded else self.tr("Show {section}")
+        self.header.setToolTip(tip.format(section=name))
         self.content.setVisible(expanded)
 
 

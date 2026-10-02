@@ -8,7 +8,8 @@ accessibility announcement.
 
 Toasts are children of the main window (above the docks), placed over the bottom right of the
 central area, just above the status bar. When the window is so narrow that they would cover
-the floating page/zoom pill, they move up above it.
+the floating page/zoom pill, they move up above it. F6 reaches them from the keyboard (the
+last region of ``ui/focus_regions.py``); Escape closes the focused one.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING, Literal
 
 from PySide6.QtCore import (
     QAbstractAnimation,
+    QCoreApplication,
     QEvent,
     QObject,
     QPoint,
@@ -30,7 +32,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QAccessible, QColor, QEnterEvent, QKeyEvent
+from PySide6.QtGui import QAccessible, QColor, QEnterEvent, QKeyEvent, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -45,10 +47,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.ui.i18n import QT_TRANSLATE_NOOP
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.reveal import show_in_folder
 from pdfeditor.ui.style.tokens import METRICS
-from pdfeditor.ui.theme import current_colors
+from pdfeditor.ui.theme import current_colors, theme_manager
 from pdfeditor.ui.view import motion
 
 if TYPE_CHECKING:
@@ -68,7 +71,17 @@ TIMEOUTS: dict[Kind, int] = {"info": 5000, "success": 5000, "error": 10000}
 ACTION_EXTRA_MS = 3000
 RESUME_MIN_MS = 1500  # after hover/focus leaves, at least this long before it goes
 _ICONS: dict[Kind, str] = {"info": "info", "success": "circle-check", "error": "circle-alert"}
-_SPOKEN: dict[Kind, str] = {"info": "Notification", "success": "Done", "error": "Error"}
+# What screen readers say before the text, and the kind's name (translated when used).
+_SPOKEN: dict[Kind, str] = {
+    "info": QT_TRANSLATE_NOOP("Toast", "Notification"),
+    "success": QT_TRANSLATE_NOOP("Toast", "Done"),
+    "error": QT_TRANSLATE_NOOP("Toast", "Error"),
+}
+_KIND_NAMES: dict[Kind, str] = {
+    "info": QT_TRANSLATE_NOOP("Toast", "Information"),
+    "success": QT_TRANSLATE_NOOP("Toast", "Success"),
+    "error": QT_TRANSLATE_NOOP("Toast", "Error"),
+}
 
 
 @dataclass
@@ -89,7 +102,7 @@ class ToastAction:
             return False
 
 
-def undo_action(session: DocumentSession, label: str = "Undo") -> ToastAction:
+def undo_action(session: DocumentSession, label: str | None = None) -> ToastAction:
     """Undo the command just executed on ``session``, as long as it's still the latest one."""
     stack = session.undo_stack
     command, version = stack.top, stack.version
@@ -107,10 +120,11 @@ def undo_action(session: DocumentSession, label: str = "Undo") -> ToastAction:
         if latest():  # verified again: the button may be pressed long after it was offered
             session.undo()
 
-    return ToastAction(label, run, latest)
+    return ToastAction(label or QCoreApplication.translate("Toast", "Undo"), run, latest)
 
 
-def folder_action(path: Path, label: str = "Show in folder") -> ToastAction:
+def folder_action(path: Path, label: str | None = None) -> ToastAction:
+    label = label or QCoreApplication.translate("Toast", "Show in folder")
     return ToastAction(label, lambda: show_in_folder(path), lambda: Path(path).exists())
 
 
@@ -138,10 +152,16 @@ class Toast(QWidget):
         self._focused = False
         self.setObjectName("Toast")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setAccessibleName(f"{_SPOKEN[kind]}: {text}")
+        self.setAccessibleName(
+            self.tr("{kind}: {text}").format(kind=self.tr(_SPOKEN[kind]), text=text)
+        )
+        kind_name = self.tr(_KIND_NAMES[kind])
         self.setAccessibleDescription(
-            f"{kind.capitalize()} notification"
-            + (f" with “{action.label}” button" if action else "")
+            self.tr("{kind} notification with “{action}” button").format(
+                kind=kind_name, action=action.label
+            )
+            if action
+            else self.tr("{kind} notification").format(kind=kind_name)
         )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -150,6 +170,11 @@ class Toast(QWidget):
         self.frame = QFrame(self)
         self.frame.setObjectName("ToastFrame")
         self.frame.setProperty("kind", kind)
+        if theme_manager().high_contrast_applied:  # no style sheet: an opaque, framed box
+            self.frame.setFrameShape(QFrame.Shape.Box)
+            self.frame.setLineWidth(2)
+            self.frame.setBackgroundRole(QPalette.ColorRole.Base)
+            self.frame.setAutoFillBackground(True)
         outer.addWidget(self.frame)
         shadow = QGraphicsDropShadowEffect(self.frame)
         shadow.setBlurRadius(SHADOW * 2)
@@ -165,7 +190,7 @@ class Toast(QWidget):
         ink = {"info": colors.accent_text, "success": colors.success, "error": colors.danger}[kind]
         self.icon_label = QLabel(self.frame)
         self.icon_label.setPixmap(icon(_ICONS[kind], ink).pixmap(18, 18))
-        self.icon_label.setAccessibleName(kind.capitalize())
+        self.icon_label.setAccessibleName(kind_name)
         row.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignTop)
         self.label = QLabel(text, self.frame)
         self.label.setObjectName("ToastText")
@@ -184,8 +209,8 @@ class Toast(QWidget):
         self.close_button.setObjectName("ToastClose")
         self.close_button.setIcon(icon("x"))
         self.close_button.setAutoRaise(True)
-        self.close_button.setToolTip("Dismiss")
-        self.close_button.setAccessibleName("Dismiss notification")
+        self.close_button.setToolTip(self.tr("Dismiss (Esc)"))
+        self.close_button.setAccessibleName(self.tr("Dismiss notification"))
         self.close_button.clicked.connect(self.dismiss)
         row.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
         for child in (self.action_button, self.close_button):

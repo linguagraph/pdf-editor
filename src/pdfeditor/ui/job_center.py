@@ -18,7 +18,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, JobFn
 from pdfeditor.ui.style.tokens import METRICS
+from pdfeditor.ui.theme import current_colors
 from pdfeditor.ui.toasts import Kind, announce
 
 if TYPE_CHECKING:
@@ -58,8 +60,10 @@ def elapsed_text(seconds: float) -> str:
 
 def progress_text(job: Job) -> str:
     if job.total > 0:
-        return f"{min(job.done_steps, job.total)} of {job.total}"
-    return "Working…"
+        return QCoreApplication.translate("JobCenter", "{done} of {total}").format(
+            done=min(job.done_steps, job.total), total=job.total
+        )
+    return QCoreApplication.translate("JobCenter", "Working…")
 
 
 class JobCenter(QObject):
@@ -98,12 +102,14 @@ class JobCenter(QObject):
         def failed(message: str) -> object:
             if on_failed is not None:
                 return on_failed(message)
-            return self._notify(f"{title} failed: {message}", "error")
+            text = QCoreApplication.translate("JobCenter", "{task} failed: {message}")
+            return self._notify(text.format(task=title, message=message), "error")
 
         def cancelled() -> object:
             if on_cancelled is not None:
                 return on_cancelled()
-            return self._notify(f"{title} was cancelled.", "info")
+            text = QCoreApplication.translate("JobCenter", "{task} was cancelled.")
+            return self._notify(text.format(task=title), "info")
 
         job.progress_changed.connect(lambda done, t: self._on_progress(job, done, t))
         job.finished.connect(lambda result: self._settle(job, on_done, result))
@@ -192,15 +198,15 @@ class _JobRow(QWidget):
         self.name.setObjectName("JobName")
         grid.addWidget(self.name, 0, 0)
         self.cancel = QToolButton(self)
-        self.cancel.setText("Cancel")
+        self.cancel.setText(self.tr("Cancel"))
         self.cancel.setObjectName("JobCancel")
-        self.cancel.setAccessibleName(f"Cancel {title}")
+        self.cancel.setAccessibleName(self.tr("Cancel {task}").format(task=title))
         self.cancel.clicked.connect(lambda: self._cancel(center))
         grid.addWidget(self.cancel, 0, 1, 2, 1, Qt.AlignmentFlag.AlignVCenter)
         self.bar = QProgressBar(self)
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        self.bar.setAccessibleName(f"{title} progress")
+        self.bar.setAccessibleName(self.tr("{task} progress").format(task=title))
         grid.addWidget(self.bar, 1, 0)
         self.detail = QLabel(self)
         self.detail.setProperty("role", "muted")
@@ -210,7 +216,7 @@ class _JobRow(QWidget):
     def _cancel(self, center: JobCenter) -> None:
         center.cancel(self.job)
         self.cancel.setEnabled(False)
-        self.cancel.setText("Cancelling…")
+        self.cancel.setText(self.tr("Cancelling…"))
 
     def update_row(self) -> None:
         job = self.job
@@ -219,26 +225,32 @@ class _JobRow(QWidget):
             self.bar.setValue(min(job.done_steps, job.total))
         else:
             self.bar.setRange(0, 0)  # busy indicator
-        parts = [progress_text(job), f"{elapsed_text(time.monotonic() - job.created)} elapsed"]
+        elapsed = elapsed_text(time.monotonic() - job.created)
+        parts = [progress_text(job), self.tr("{time} elapsed").format(time=elapsed)]
         if job.session is not None:
             parts.insert(0, job.session.display_name)
         self.detail.setText(" · ".join(parts))
 
 
 class JobDetails(QFrame):
-    """Popup listing the running jobs; opens from the progress chip."""
+    """Popup listing the running jobs; opens from the progress chip.
+
+    Its window is translucent and it paints its own rounded body (from the tokens, which map
+    to the system palette under High Contrast), so no square window corners show behind it.
+    """
 
     def __init__(self, center: JobCenter, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup)
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.NoDropShadowWindowHint)
         self.setObjectName("JobDetails")
-        self.setAccessibleName("Running tasks")
+        self.setAccessibleName(self.tr("Running tasks"))
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.center = center
         self.rows: list[_JobRow] = []
         m = METRICS
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(m.space(3), m.space(3), m.space(3), m.space(3))
         self._layout.setSpacing(m.space(3))
-        heading = QLabel("Running tasks", self)
+        heading = QLabel(self.tr("Running tasks"), self)
         heading.setObjectName("JobDetailsTitle")
         self._layout.addWidget(heading)
         self.setMinimumWidth(m.space(80))
@@ -247,6 +259,18 @@ class JobDetails(QFrame):
         self._timer.start(1000)  # elapsed time
         center.changed.connect(self.refresh)
         self.refresh()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        colors = current_colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(QColor(colors.border_strong))
+        pen.setWidthF(1.0)
+        painter.setPen(pen)
+        painter.setBrush(QColor(colors.surface))
+        radius = float(METRICS.radius_large)
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        painter.end()
 
     def refresh(self) -> None:
         jobs = self.center.running()
@@ -314,10 +338,10 @@ class ProgressChip(QFrame):
             text = _title(job.label)
             if job.total > 0:
                 text += f"  {min(job.done_steps, job.total)}/{job.total}"
-            cancel_name = f"Cancel {_title(job.label)}"
+            cancel_name = self.tr("Cancel {task}").format(task=_title(job.label))
         else:
-            text = f"{len(jobs)} tasks running"
-            cancel_name = "Cancel all tasks"
+            text = self.tr("{count} tasks running").format(count=len(jobs))
+            cancel_name = self.tr("Cancel all tasks")
         totals = [j.total for j in jobs]
         if all(t > 0 for t in totals):
             self.bar.setRange(0, sum(totals))
@@ -325,9 +349,9 @@ class ProgressChip(QFrame):
         else:
             self.bar.setRange(0, 0)
         self.button.setText(text)
-        self.button.setToolTip("Show running tasks")
-        self.button.setAccessibleName(f"{text}. Show details")
-        self.bar.setAccessibleName(f"Progress of {text}")
+        self.button.setToolTip(self.tr("Show running tasks"))
+        self.button.setAccessibleName(self.tr("{status}. Show details").format(status=text))
+        self.bar.setAccessibleName(self.tr("Progress of {status}").format(status=text))
         self.cancel_button.setToolTip(cancel_name)
         self.cancel_button.setAccessibleName(cancel_name)
         if not self.isVisible() and not self._show_timer.isActive():
@@ -341,7 +365,8 @@ class ProgressChip(QFrame):
         new = [j for j in jobs if id(j) not in self._announced]
         if new:
             self._announced.update(id(j) for j in new)
-            announce(self, f"{_title(new[-1].label)} started. Running in the background.")
+            text = self.tr("{task} started. Running in the background.")
+            announce(self, text.format(task=_title(new[-1].label)))
 
     def cancel(self) -> None:
         for job in self.center.running():

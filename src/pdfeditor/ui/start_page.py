@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QCoreApplication,
     QModelIndex,
     QPersistentModelIndex,
     QPoint,
@@ -61,6 +62,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.core.engine_lock import ENGINE_LOCK
 from pdfeditor.engine.base import Engine
 from pdfeditor.services.thumbnails import first_page_thumbnail
+from pdfeditor.ui.flow_layout import FlowLayout
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job
 from pdfeditor.ui.recent_files import RecentFiles
@@ -172,7 +174,11 @@ class RecentFileDelegate(QStyledItemDelegate):
         painter.setFont(font)
         painter.setPen(QColor(c.text_muted))
         path = Path(str(index.data(PATH_ROLE)))
-        detail = "File not found" if missing else (path.parent.name or str(path.parent))
+        detail = (
+            QCoreApplication.translate("StartPage", "File not found")
+            if missing
+            else (path.parent.name or str(path.parent))
+        )
         detail = painter.fontMetrics().elidedText(
             detail, Qt.TextElideMode.ElideMiddle, text_rect.width()
         )
@@ -201,8 +207,10 @@ class RecentFilesView(QListWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("RecentFiles")
-        self.setAccessibleName("Recent files")
-        self.setAccessibleDescription("Enter opens a file, Delete removes it, the menu key pins it")
+        self.setAccessibleName(self.tr("Recent files"))
+        self.setAccessibleDescription(
+            self.tr("Enter opens a file, Delete removes it, the menu key pins it")
+        )
         self.setViewMode(QListView.ViewMode.IconMode)
         self.setMovement(QListView.Movement.Static)
         self.setResizeMode(QListView.ResizeMode.Adjust)
@@ -252,23 +260,23 @@ class RecentFilesView(QListWidget):
         pinned = bool(item.data(PINNED_ROLE))
         missing = bool(item.data(MISSING_ROLE))
         menu = QMenu(self)
-        menu.setAccessibleName(f"Actions for {item.text()}")
+        menu.setAccessibleName(self.tr("Actions for {name}").format(name=item.text()))
         menu.addAction(
-            icon("folder-open"), "&Open", lambda: self.open_requested.emit(path)
+            icon("folder-open"), self.tr("&Open"), lambda: self.open_requested.emit(path)
         ).setEnabled(not missing)
         menu.addAction(
             icon("pin-off" if pinned else "pin"),
-            "Un&pin" if pinned else "&Pin to Top",
+            self.tr("Un&pin") if pinned else self.tr("&Pin to Top"),
             lambda: self.pin_requested.emit(path, not pinned),
         )
         folder = menu.addAction(
-            "Show in &Folder",
+            self.tr("Show in &Folder"),
             lambda: show_in_folder(Path(path)),
         )
         folder.setEnabled(not missing)
         menu.addSeparator()
         remove = menu.addAction(
-            icon("trash-2"), "&Remove from List", lambda: self.remove_requested.emit(path)
+            icon("trash-2"), self.tr("&Remove from List"), lambda: self.remove_requested.emit(path)
         )
         remove.setShortcut(Qt.Key.Key_Delete)
         return menu
@@ -291,8 +299,9 @@ class DropZone(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("DropZone")
-        self.setAccessibleName("Drop zone: drop PDF files here to open them")
+        self.setAccessibleName(self.tr("Drop zone: drop PDF files here to open them"))
         self.setAcceptDrops(True)
+        self.setFrameShape(QFrame.Shape.StyledPanel)  # the style sheet's dashed border wins
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("dragging", False)
         self.setMinimumHeight(88)
@@ -300,8 +309,9 @@ class DropZone(QFrame):
         layout.setContentsMargins(16, 12, 16, 12)
         glyph = QLabel(self)
         glyph.setPixmap(icon("upload").pixmap(QSize(28, 28), self.devicePixelRatioF()))
-        glyph.setAccessibleName("Upload")
-        text = QLabel("Drop PDF files here\nor click to browse", self)
+        glyph.setAccessibleName(self.tr("Upload"))
+        text = QLabel(self.tr("Drop PDF files here\nor click to browse"), self)
+        text.setWordWrap(True)
         text.setProperty("role", "muted")
         layout.addStretch(1)
         layout.addWidget(glyph)
@@ -354,7 +364,7 @@ class StartPage(QWidget):
     def __init__(self, recent: RecentFiles, engine: Engine, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("StartPage")
-        self.setAccessibleName("Start page")
+        self.setAccessibleName(self.tr("Start page"))
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.recent = recent
         self._engine = engine
@@ -370,7 +380,7 @@ class StartPage(QWidget):
         m = METRICS
         scroll = QScrollArea(self)
         scroll.setObjectName("StartScroll")
-        scroll.setAccessibleName("Start page content")
+        scroll.setAccessibleName(self.tr("Start page content"))
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         scroll.viewport().setObjectName("StartScrollViewport")
@@ -392,20 +402,22 @@ class StartPage(QWidget):
         outer.addWidget(column, 100)
         outer.addStretch(1)
 
-        title = QLabel("Welcome to pdfeditor", column)
+        title = QLabel(self.tr("Welcome to pdfeditor"), column)
         title.setObjectName("StartTitle")
-        subtitle = QLabel("Open a PDF to start, or pick up where you left off.", column)
+        title.setWordWrap(True)
+        subtitle = QLabel(self.tr("Open a PDF to start, or pick up where you left off."), column)
         subtitle.setProperty("role", "muted")
+        subtitle.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addSpacing(m.space(2))
 
         top = QHBoxLayout()
         top.setSpacing(m.space(4))
-        self.open_button = QPushButton("  Open File…", column)
+        self.open_button = QPushButton("  " + self.tr("Open File…"), column)
         self.open_button.setObjectName("StartOpenButton")
-        self.open_button.setAccessibleName("Open file")
-        self.open_button.setToolTip("Open a PDF (Ctrl+O)")
+        self.open_button.setAccessibleName(self.tr("Open file"))
+        self.open_button.setToolTip(self.tr("Open a PDF (Ctrl+O)"))
         self.open_button.setIconSize(QSize(20, 20))
         self.open_button.setMinimumHeight(88)
         self.open_button.setMinimumWidth(200)
@@ -418,25 +430,27 @@ class StartPage(QWidget):
         layout.addLayout(top)
 
         layout.addSpacing(m.space(2))
-        layout.addWidget(self._section("Quick actions", column))
-        self.quick_row = QHBoxLayout()
-        self.quick_row.setSpacing(m.space(2))
-        self.quick_row.addStretch(1)
+        layout.addWidget(self._section(self.tr("Quick actions"), column))
+        # A flowing row: quick actions wrap onto more lines in a narrow window or with longer
+        # translations, instead of setting a minimum width for the whole page.
+        self.quick_row = FlowLayout(spacing=m.space(2))
         layout.addLayout(self.quick_row)
 
         layout.addSpacing(m.space(2))
         header = QHBoxLayout()
-        header.addWidget(self._section("Recent files", column))
+        header.addWidget(self._section(self.tr("Recent files"), column))
         header.addStretch(1)
-        hint = QLabel("Right-click a file to pin or remove it", column)
+        hint = QLabel(self.tr("Right-click a file to pin or remove it"), column)
         hint.setProperty("role", "muted")
-        header.addWidget(hint)
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header.addWidget(hint, 1)
         layout.addLayout(header)
         self.recent_view = RecentFilesView(column)
         self.recent_view.open_requested.connect(lambda p: self.open_path_requested.emit(Path(p)))
         self.recent_view.remove_requested.connect(self.recent.forget)
         self.recent_view.pin_requested.connect(self.recent.set_pinned)
-        self.empty_label = QLabel("Files you open will appear here.", column)
+        self.empty_label = QLabel(self.tr("Files you open will appear here."), column)
         self.empty_label.setProperty("role", "muted")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self.recent_view, 1)
@@ -459,20 +473,22 @@ class StartPage(QWidget):
         return label
 
     def set_quick_actions(self, actions: Sequence[tuple[str, str, QAction]]) -> None:
-        """(label, icon, action) buttons; each triggers its action."""
+        """(label, icon, action) buttons; each triggers its action. Labels are English (the
+        keys of ``quick_buttons``) and shown translated."""
         previous: QWidget = self.open_button  # the drop zone is for the mouse only
         for label, icon_name, action in actions:
+            text = QCoreApplication.translate("StartPage", label)
             button = QToolButton(self)
             button.setObjectName("QuickAction")
-            button.setText(label)
+            button.setText(text)
             button.setIcon(icon(icon_name))
             button.setIconSize(QSize(20, 20))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            button.setAccessibleName(label)
-            button.setToolTip(action.toolTip() or label)
+            button.setAccessibleName(text)
+            button.setToolTip(action.toolTip() or text)
             button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.clicked.connect(lambda _=False, a=action: a.trigger())
-            self.quick_row.insertWidget(self.quick_row.count() - 1, button)
+            self.quick_row.addWidget(button)
             self.quick_buttons[label] = button
             QWidget.setTabOrder(previous, button)
             previous = button
@@ -494,9 +510,12 @@ class StartPage(QWidget):
             item.setData(PATH_ROLE, p)
             item.setData(PINNED_ROLE, p in pinned)
             item.setData(MISSING_ROLE, mtime is None)
-            item.setToolTip(p if mtime is not None else f"{p}\n(file not found)")
-            notes = [path.parent.name] + (["pinned"] if p in pinned else [])
-            notes += ["file not found"] if mtime is None else []
+            tr = QCoreApplication.translate
+            item.setToolTip(
+                p if mtime is not None else f"{p}\n" + tr("StartPage", "(file not found)")
+            )
+            notes = [path.parent.name] + ([tr("StartPage", "pinned")] if p in pinned else [])
+            notes += [tr("StartPage", "file not found")] if mtime is None else []
             item.setData(Qt.ItemDataRole.AccessibleTextRole, ", ".join([path.name, *notes]))
             cached = self._thumbs.get(p)
             if cached is not None and cached[0] == mtime and cached[1] is not None:

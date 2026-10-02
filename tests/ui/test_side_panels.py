@@ -48,6 +48,11 @@ def settle(qtbot) -> None:
     qtbot.wait(10)
 
 
+def offered(empty) -> str:
+    """The empty state's action with its shortcut, wherever it's shown (label or tooltip)."""
+    return empty.button.toolTip() or empty.button.text()
+
+
 def bookmarks(window: MainWindow) -> BookmarksPanel:
     return next(p for p in window.panels if isinstance(p, BookmarksPanel))
 
@@ -137,7 +142,7 @@ def test_badges_follow_comments_hits_and_problems(qtbot, window: MainWindow, fix
 
     note = AnnotationModel(AnnotationType.TEXT, 0, Rect(100, 100, 120, 120), contents="Hi")
     view.session.execute(AddAnnotationCommand(note))
-    assert comments.count == 1 and comments.accessibleName() == "Comments (1)"
+    assert comments.count == 1 and comments.accessibleName() == "Comments, 1 item"
     window.act_undo.trigger()
     assert comments.count == 0 and comments.accessibleName() == "Comments"
 
@@ -147,6 +152,7 @@ def test_badges_follow_comments_hits_and_problems(qtbot, window: MainWindow, fix
     with qtbot.waitSignal(window.search_panel.search_finished, timeout=10000):
         window.search_panel.start_search()
     assert search.count == 5 and search.badge_text() == "5" and "5" in search.toolTip()
+    assert search.accessibleName() == "Search, 5 items"
 
     access = side.button(window.accessibility_panel)
     assert access.count == 0  # nothing to report before the check has run
@@ -207,12 +213,13 @@ def test_empty_panels_explain_and_offer_their_action(
     comments = window.comments_panel
     window.show_comments()
     assert comments.empty.isVisible() and not comments.tree.isVisible()
-    assert comments.empty.button.text() == "Add sticky note (Ctrl+6)"
+    # in a narrow panel the shortcut moves from the label to the tooltip
+    assert offered(comments.empty) == "Add sticky note (Ctrl+6)"
     qtbot.mouseClick(comments.empty.button, Qt.MouseButton.LeftButton)
     assert window.current_tool == "note"
     # a changed shortcut shows up in the label
     window.shortcuts.set("sticky-note", ("Ctrl+Alt+6",))
-    assert comments.empty.button.text() == "Add sticky note (Ctrl+Alt+6)"
+    assert offered(comments.empty) == "Add sticky note (Ctrl+Alt+6)"
     window.shortcuts.reset("sticky-note")
 
     window.show_panel(window.protect.panel)

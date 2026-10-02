@@ -68,19 +68,19 @@ class CommandSearch(QWidget):
         self.button = QToolButton(self)
         self.button.setIcon(icon("search"))
         self.button.setAutoRaise(True)
-        self.button.setAccessibleName("Search tools")
+        self.button.setAccessibleName(self.tr("Search tools"))
         self.button.clicked.connect(self.activate)
         self.button.hide()
         self.edit = _SearchEdit(self)
-        self.edit.setPlaceholderText("Search tools…")
-        self.edit.setAccessibleName("Search tools")
+        self.edit.setPlaceholderText(self.tr("Search tools…"))
+        self.edit.setAccessibleName(self.tr("Search tools"))
         self.edit.setClearButtonEnabled(True)
         self.edit.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
         self.edit.setFixedWidth(BOX_WIDTH)
         self.edit.textEdited.connect(self._on_text)
         self.popup = QListWidget(self)  # moves to the window when shown (see _show_popup)
         self.popup.setObjectName("CommandSearchPopup")
-        self.popup.setAccessibleName("Matching commands")
+        self.popup.setAccessibleName(self.tr("Matching commands"))
         self.popup.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # the box keeps the keyboard
         self.popup.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.popup.setUniformItemSizes(True)
@@ -109,7 +109,7 @@ class CommandSearch(QWidget):
 
     def _update_tooltip(self) -> None:
         keys = self.manager.current(PALETTE_ID) if PALETTE_ID in self.manager.actions else ()
-        tip = "Search tools and commands" + (f" ({keys[0]})" if keys else "")
+        tip = self.tr("Search tools and commands") + (f" ({keys[0]})" if keys else "")
         self.edit.setToolTip(tip)
         self.button.setToolTip(tip)
 
@@ -144,7 +144,7 @@ class CommandSearch(QWidget):
         x = max(4, min(x, window.width() - size.width() - 4))
         self.popup.setGeometry(x, below.y(), size.width(), size.height())
         if self.popup.count() == 0:
-            self.popup.addItem(QListWidgetItem("No matching commands"))
+            self.popup.addItem(QListWidgetItem(self.tr("No matching commands")))
             self.popup.item(0).setFlags(Qt.ItemFlag.NoItemFlags)
         self.popup.show()
         self.popup.raise_()

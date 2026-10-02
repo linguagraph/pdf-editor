@@ -32,6 +32,7 @@ class SearchPanel(ViewPanel):
         super().__init__(parent)
         self.query_edit = QLineEdit(self)
         self.query_edit.setPlaceholderText("Find in document")
+        self.query_edit.setAccessibleName("Find in document")
         self.query_edit.setClearButtonEnabled(True)
         self.query_edit.returnPressed.connect(self.start_search)
         self.case = QCheckBox("Match case", self)

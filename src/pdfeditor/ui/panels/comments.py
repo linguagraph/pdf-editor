@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -32,6 +34,7 @@ from pdfeditor.services.comments import (
     type_label,
 )
 from pdfeditor.services.xfdf import export_xfdf, import_command
+from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.printing import pdf_printer
 from pdfeditor.ui.tools import annotate
@@ -65,11 +68,15 @@ class CommentsPanel(ViewPanel):
         super().__init__(parent)
         self.search = QLineEdit(self)
         self.search.setPlaceholderText("Search comments")
+        self.search.setAccessibleName("Search comments")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._fill)
         self.type_filter = QComboBox(self)
         self.author_filter = QComboBox(self)
         self.status_filter = QComboBox(self)
+        self.type_filter.setAccessibleName("Filter by type")
+        self.author_filter.setAccessibleName("Filter by author")
+        self.status_filter.setAccessibleName("Filter by status")
         self.status_filter.addItems([ALL, *(s.value for s in ReviewState)])
         for combo in (self.type_filter, self.author_filter, self.status_filter):
             combo.currentIndexChanged.connect(self._fill)
@@ -79,22 +86,36 @@ class CommentsPanel(ViewPanel):
             )
             combo.setMinimumContentsLength(3)
         self.tree = QTreeWidget(self)
+        self.tree.setAccessibleName("Comments")
         self.tree.setHeaderHidden(True)
         self.tree.setWordWrap(True)
         self.tree.itemClicked.connect(self._on_clicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
 
-        self.reply_button = QPushButton("Reply…", self)
+        # Reply takes the row; Import and Export are icon buttons, so the three fit the
+        # panel's default width (~220 px) without crowding, also with longer translations.
+        self.reply_button = QPushButton(self.tr("Reply…"), self)
+        self.reply_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.reply_button.setMinimumWidth(0)
         self.reply_button.clicked.connect(self.reply_to_current)
-        export = QPushButton("Export", self)
+        export = QToolButton(self)
+        export.setIcon(icon("file-output"))
+        export.setToolTip(self.tr("Export comments"))
+        export.setAccessibleName(self.tr("Export comments"))
+        export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(export)
-        menu.addAction("Comments as XFDF…", self.export_xfdf)
-        menu.addAction("Summary as CSV…", self.export_csv)
-        menu.addAction("Summary as PDF…", self.export_summary_pdf)
+        menu.addAction(self.tr("Comments as XFDF…"), self.export_xfdf)
+        menu.addAction(self.tr("Summary as CSV…"), self.export_csv)
+        menu.addAction(self.tr("Summary as PDF…"), self.export_summary_pdf)
         export.setMenu(menu)
-        import_button = QPushButton("Import…", self)
+        import_button = QToolButton(self)
+        import_button.setIcon(icon("file-input"))
+        import_button.setText(self.tr("Import…"))
+        import_button.setToolTip(self.tr("Import comments from an XFDF file"))
+        import_button.setAccessibleName(self.tr("Import comments"))
         import_button.clicked.connect(self.import_xfdf)
+        self.import_button = import_button
 
         self.empty = EmptyState(
             "messages-square",
@@ -143,6 +164,12 @@ class CommentsPanel(ViewPanel):
         for w in (self.search, self.filters, self.tree, self.reply_button, self.export_button):
             w.setVisible(not empty)
         self.empty.setVisible(empty)
+        # alone in the row it says what it does; next to Reply it's an icon
+        self.import_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            if empty
+            else Qt.ToolButtonStyle.ToolButtonIconOnly
+        )
 
     def badge_count(self) -> int:
         return len(self.threads)

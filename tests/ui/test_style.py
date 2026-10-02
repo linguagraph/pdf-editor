@@ -97,7 +97,7 @@ def test_theme_sets_palette_and_style_sheet(app: QApplication, theme: Theme) -> 
     assert _color(QPalette.ColorRole.Text) == c.text
     assert _color(QPalette.ColorRole.Highlight) == c.accent
     assert contrast(c.accent, _color(QPalette.ColorRole.HighlightedText)) >= AA_TEXT
-    assert app.styleSheet() == stylesheet(c)
+    assert app.styleSheet() == stylesheet(c, base_pt=app.font().pointSizeF())
 
 
 @pytest.mark.gui

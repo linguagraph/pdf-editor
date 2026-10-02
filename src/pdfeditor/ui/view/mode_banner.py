@@ -15,11 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QByteArray, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtCore import (
+    QByteArray,
+    QCoreApplication,
+    QRect,
+    QRectF,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QWidget
 
+from pdfeditor.ui.i18n import QT_TRANSLATE_NOOP
 from pdfeditor.ui.icons import svg_data
 from pdfeditor.ui.style.tokens import METRICS
 from pdfeditor.ui.theme import current_colors, theme_manager
@@ -28,17 +36,18 @@ from pdfeditor.ui.view.document_view import DocumentView
 FRAME = 2  # px width of the frame around the page area
 ICON = 16
 ROW_PADDING = 5  # px above and below the chip in its row
+DEFAULT_HINT = QT_TRANSLATE_NOOP("ModeBanner", "Esc or Done to finish")
 
 
 @dataclass(frozen=True)
 class Mode:
     """What the banner says about the active tool."""
 
-    text: str  # "Editing text & images"
+    text: str  # "Editing text & images" (shown translated, context "ModeBanner")
     icon: str  # bundled icon name
     framed: bool = False  # also draw the frame around the page area
     danger: bool = False  # destructive mode (redaction): danger color instead of accent
-    hint: str = "Esc or Done to finish"
+    hint: str = DEFAULT_HINT
 
 
 class _Edge(QWidget):
@@ -71,8 +80,10 @@ class _Chip(QFrame):
         self.hint_label = QLabel(self)
         self.hint_label.setObjectName("modeHint")
         self.done_button = QToolButton(self)
-        self.done_button.setText("Done")
-        self.done_button.setToolTip("Back to the Select tool (Esc)")
+        self.done_button.setText(QCoreApplication.translate("ModeBanner", "Done"))
+        self.done_button.setToolTip(
+            QCoreApplication.translate("ModeBanner", "Back to the Select tool (Esc)")
+        )
         self.done_button.setCursor(Qt.CursorShape.ArrowCursor)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(METRICS.space(3), 4, 5, 4)
@@ -101,7 +112,7 @@ class ModeBanner(QWidget):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("modeBanner")
-        self.setAccessibleName("Active tool")
+        self.setAccessibleName(QCoreApplication.translate("ModeBanner", "Active tool"))
         self.view: DocumentView | None = None
         self.mode: Mode | None = None
         self._home = parent  # where the banner waits while no document is open
@@ -144,11 +155,18 @@ class ModeBanner(QWidget):
         if mode != self.mode:
             self.mode = mode
             if mode is not None:
-                self.text_label.setText(mode.text)
-                self.hint_label.setText(f"·  {mode.hint}" if mode.hint else "")
-                self.setAccessibleName(f"Mode: {mode.text}")
-                self.setAccessibleDescription(mode.hint)
-                self.done_button.setAccessibleName(f"Done {mode.text[0].lower()}{mode.text[1:]}")
+                text = QCoreApplication.translate("ModeBanner", mode.text)
+                hint = QCoreApplication.translate("ModeBanner", mode.hint) if mode.hint else ""
+                self.text_label.setText(text)
+                self.hint_label.setText(f"·  {hint}" if hint else "")
+                self.setAccessibleName(
+                    QCoreApplication.translate("ModeBanner", "Mode: {mode}").format(mode=text)
+                )
+                self.setAccessibleDescription(hint)
+                self.chip.setAccessibleName(text)
+                self.done_button.setAccessibleName(
+                    QCoreApplication.translate("ModeBanner", "Done: {mode}").format(mode=text)
+                )
                 self._restyle()
         if self.view is not None:
             self.reserve(self.view, mode is not None)
@@ -222,9 +240,16 @@ class ModeBanner(QWidget):
         return QColor(colors.danger if danger else colors.accent)
 
     def _restyle(self) -> None:
+        colors = current_colors()
+        # Text on the chip follows the fill through the palette as well as the style sheet,
+        # so it stays readable with High Contrast (no style sheet then).
+        palette = QPalette(self.chip.palette())
+        for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
+            palette.setColor(role, QColor(colors.on_accent))
+        self.chip.setPalette(palette)
         if self.mode is not None:
             self.chip.icon_label.setPixmap(
-                _tinted(self.mode.icon, current_colors().on_accent, self.devicePixelRatioF())
+                _tinted(self.mode.icon, colors.on_accent, self.devicePixelRatioF())
             )
         self.update()
         self.chip.update()

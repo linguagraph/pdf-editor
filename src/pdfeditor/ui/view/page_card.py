@@ -1,7 +1,10 @@
 """Page thumbnails drawn as cards: the page with a drop shadow and its number below.
 
-The current page gets an accent outline and other selected pages a lighter one, in place of
-the item view's selection fill (which washed out the page image).
+The current page gets a thick accent outline and its number on an accent chip; other selected
+pages get a thinner, softer ring (``Colors.ring_selected``). Both reach 3:1 against the surface
+and the canvas in either theme, and the two differ in width, color and label, so "current" and
+"selected" stay apart for people who can't tell the colors apart. This replaces the item view's
+selection fill (which washed out the page image).
 """
 
 from __future__ import annotations
@@ -16,13 +19,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pdfeditor.ui.style.tokens import METRICS, mix
+from pdfeditor.ui.style.tokens import METRICS
 from pdfeditor.ui.theme import current_colors
 from pdfeditor.ui.view.page_item import shadow_strips
 
 PAD = 8  # around the card: room for the outline and shadow
 TEXT_GAP = 4  # between the card and the page number
-RING = 3  # outline width (current/selected page), drawn just outside the page
+RING = 3  # outline width of the current page, drawn just outside the page
+RING_SELECTED = 2  # other selected pages
 SHADOW_LAYERS = ((1, 1, 34), (2, 2, 18), (3, 3, 8))  # (spread, drop, alpha) in px
 
 ModelIndex = QModelIndex | QPersistentModelIndex
@@ -90,15 +94,16 @@ class PageCardDelegate(QStyledItemDelegate):
         painter.drawRect(card.adjusted(-1, -1, 0, 0))
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
+        lead = selected and (current or not isinstance(view, QAbstractItemView))
         ring_color: QColor | None = None
-        if selected and (current or not isinstance(view, QAbstractItemView)):
-            ring_color = QColor(colors.accent)
+        width = 1
+        if lead:
+            ring_color, width = QColor(colors.accent_text), RING
         elif selected:
-            ring_color = QColor(mix(colors.accent, colors.surface, 0.55))
+            ring_color, width = QColor(colors.ring_selected), RING_SELECTED
         elif hovered:
             ring_color = QColor(colors.border_strong)
         if ring_color is not None:
-            width = RING if selected else 1
             pen = QPen(ring_color)
             pen.setWidth(width)
             pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
@@ -109,17 +114,25 @@ class PageCardDelegate(QStyledItemDelegate):
 
         label = option.text  # initStyleOption read the display role
         if label:
-            if selected and current:
-                font = QFont(option.font)
-                font.setBold(True)
-                painter.setFont(font)
-            else:
-                painter.setFont(option.font)
-            painter.setPen(QColor(colors.accent_text if selected else colors.text_muted))
             text_rect = QRect(rect.left(), card.bottom() + 1 + TEXT_GAP, rect.width(), text_h)
             elided = option.fontMetrics.elidedText(
                 str(label), Qt.TextElideMode.ElideMiddle, rect.width() - 4
             )
+            if lead:  # the number on an accent chip
+                font = QFont(option.font)
+                font.setBold(True)
+                painter.setFont(font)
+                chip_w = painter.fontMetrics().horizontalAdvance(elided) + 2 * METRICS.space(2)
+                chip = QRectF(
+                    text_rect.center().x() - chip_w / 2 + 0.5, text_rect.top(), chip_w, text_h
+                )
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(colors.accent))
+                painter.drawRoundedRect(chip, text_h / 2, text_h / 2)
+                painter.setPen(QColor(colors.on_accent))
+            else:
+                painter.setFont(option.font)
+                painter.setPen(QColor(colors.text if selected else colors.text_muted))
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter, elided)
         if option.state & QStyle.StateFlag.State_HasFocus and not selected:
             pen = QPen(QColor(colors.accent_text))

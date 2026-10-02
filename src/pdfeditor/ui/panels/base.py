@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QShowEvent
+from PySide6.QtGui import QAction, QIcon, QKeySequence, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from pdfeditor.core.commands import Change, ChangeKind
@@ -58,6 +58,10 @@ class ViewPanel(QWidget):
         return 0
 
 
+# Below this width (a panel still being laid out) wrapped text would ask for absurd heights.
+MIN_TEXT_WIDTH = 120
+
+
 class EmptyState(QWidget):
     """What an empty panel is for, and a button for its main action.
 
@@ -87,6 +91,7 @@ class EmptyState(QWidget):
         self._action: QAction | None = None
         self._slot: Callable[[], object] | None = None
         self._label = ""
+        self._keys = ""  # the action's shortcut shown in the button, if any
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 16, 12, 16)
         layout.setSpacing(8)
@@ -123,15 +128,18 @@ class EmptyState(QWidget):
             self.button.hide()
             return
         label = self._label
+        self._keys = ""
         if action is not None:
-            keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
-            if keys:
-                label = f"{label} ({keys})"
+            self._keys = action.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
+            if self._keys:
+                label = f"{label} ({self._keys})"
             self.button.setEnabled(action.isEnabled())
             self.button.setVisible(action.isVisible())
         else:
             self.button.show()
         self.button.setText(label)
+        self.button.setToolTip("")
+        self._fit_text()
 
     def _clicked(self) -> None:
         if self._action is not None:
@@ -148,6 +156,35 @@ class EmptyState(QWidget):
     def showEvent(self, event: QShowEvent) -> None:
         self.refresh()  # pick up shortcut changes made while hidden
         super().showEvent(event)
+        self._fit_text()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_text()
+
+    def _fit_text(self) -> None:
+        """Give the wrapped labels the height their text needs at this width: between the
+        layout's stretches they'd otherwise keep their one-width hint and cut lines off (long
+        translations, narrow panels)."""
+        layout = self.layout()
+        margins = layout.contentsMargins() if layout is not None else None
+        width = self.width() - (margins.left() + margins.right() if margins else 0)
+        if not self.isVisible():
+            return
+        for label in (self.title, self.text):
+            needed = label.heightForWidth(width) if width >= MIN_TEXT_WIDTH else -1
+            if needed > 0 and label.minimumHeight() != needed:
+                label.setMinimumHeight(needed)
+        # A button can't wrap: in a narrow panel its shortcut moves to the tooltip.
+        if width < MIN_TEXT_WIDTH or not self._keys:
+            return
+        full = f"{self._label} ({self._keys})"
+        self.button.ensurePolished()  # the style sheet's padding and font, not Fusion's
+        metrics = self.button.fontMetrics()
+        chrome = self.button.sizeHint().width() - metrics.horizontalAdvance(self.button.text())
+        fits = chrome + metrics.horizontalAdvance(full) <= width
+        self.button.setText(full if fits else self._label)
+        self.button.setToolTip("" if fits else full)
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):

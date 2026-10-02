@@ -54,3 +54,13 @@ def install_translators(app: QCoreApplication, language: str = "") -> list[QTran
             installed.append(translator)
             log.info("loaded %s translation for %s", name, locale.name())
     return installed
+
+
+# Markers for strings kept in tables and translated where they're shown. They have Qt's names
+# so pyside6-lupdate extracts them, and are typed (PySide6's own return ``object``).
+def QT_TRANSLATE_NOOP(context: str, text: str) -> str:
+    return text
+
+
+def QT_TR_NOOP(text: str) -> str:
+    return text

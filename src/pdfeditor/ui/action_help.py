@@ -3,6 +3,9 @@
 Menus and the command palette keep each action's full text; ribbon buttons, which already sit
 under a group caption ("Pages", "Redact", ...), show the short label. Tooltips combine the full
 name, the current shortcut and the help line, and are refreshed whenever shortcuts change.
+
+Both tables are English; labels and help lines are translated when shown (context
+"ActionHelp"), and the keys never are, since ``action_id`` must stay stable for saved shortcuts.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import html
 from collections.abc import Iterable
 
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QAction, QKeySequence
 
 from pdfeditor.ui.shortcuts import action_id
@@ -171,7 +175,7 @@ def apply_short_labels(actions: Iterable[QAction]) -> None:
     for action in actions:
         short = SHORT_LABELS.get(action_id(action))
         if short:
-            action.setIconText(short)
+            action.setIconText(QCoreApplication.translate("ActionHelp", short))
 
 
 def tooltip(action: QAction) -> str:
@@ -183,7 +187,7 @@ def tooltip(action: QAction) -> str:
         tip += f"&nbsp;&nbsp;<span>{html.escape(keys[0])}</span>"
     help_text = HELP.get(action_id(action))
     if help_text:
-        tip += f"<br>{html.escape(help_text)}"
+        tip += f"<br>{html.escape(QCoreApplication.translate('ActionHelp', help_text))}"
     return tip
 
 
