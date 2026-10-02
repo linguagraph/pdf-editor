@@ -232,67 +232,84 @@ class MuPage:
         return Matrix(m.a, m.b, m.c, m.d, m.e, m.f)
 
     def add_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        self._doc.unshare_page(self._index)
         return annots.add(self, model)
 
     def update_annotation(self, model: AnnotationModel) -> AnnotationModel:
+        self._doc.unshare_page(self._index)
         return annots.update(self, model)
 
     def delete_annotation(self, annot_id: int | None, name: str = "") -> None:
+        self._doc.unshare_page(self._index)
         annots.delete(self, annot_id, name)
 
     def annotation_order(self) -> list[int]:
         return annots.order(self)
 
     def set_annotation_order(self, ids: Sequence[int]) -> None:
+        self._doc.unshare_page(self._index)
         annots.set_order(self, ids)
 
     def flatten_annotations(self, ids: Sequence[int] | None = None) -> int:
+        self._doc.unshare_page(self._index)
         return annots.flatten(self, ids)
 
     def set_rotation(self, degrees: int) -> None:
+        self._doc.unshare_page(self._index)
         pages.set_rotation(self, degrees)
 
     def set_crop(self, rect: Rect) -> None:
+        self._doc.unshare_page(self._index)
         pages.set_crop(self, rect)
 
     def stamp_text(self, stamp: TextStamp) -> None:
+        self._doc.unshare_page(self._index)
         pages.stamp_text(self, stamp)
 
     def stamp_image(self, stamp: ImageStamp) -> None:
+        self._doc.unshare_page(self._index)
         pages.stamp_image(self, stamp)
 
     def fill_background(
         self, color: Color, opacity: float = 1.0, mark: MarkKind | None = None
     ) -> None:
+        self._doc.unshare_page(self._index)
         pages.fill_background(self, color.rgb(), opacity, mark)
 
     def page_marks(self) -> list[PageMark]:
         return marks.page_marks(self)
 
     def remove_marks(self, kinds: Collection[MarkKind]) -> int:
+        self._doc.unshare_page(self._index)
         return marks.remove_marks(self, kinds)
 
     def set_mark_settings(self, kind: MarkKind, settings: str) -> None:
+        self._doc.unshare_page(self._index)
         marks.set_settings(self, kind, settings)
 
     def content_objects(self) -> list[PageObject]:
         return content.list_objects(self)
 
     def delete_objects(self, keys: Sequence[str]) -> None:
+        self._doc.unshare_page(self._index)
         content.delete_objects(self, keys)
 
     def transform_objects(self, keys: Sequence[str], matrix: Matrix) -> None:
+        self._doc.unshare_page(self._index)
         content.transform_objects(self, keys, matrix)
 
     def replace_text(
         self, key: str, text: str, style: TextStyle | None = None
     ) -> FontChoice | None:
+        self._doc.unshare_page(self._index)
         return content.replace_text(self, key, text, style)
 
     def add_text(self, rect: Rect, text: str, style: TextStyle) -> FontChoice:
+        self._doc.unshare_page(self._index)
         return content.insert_text(self, rect, text, style)
 
     def add_shape(self, spec: ShapeSpec) -> None:
+        self._doc.unshare_page(self._index)
         content.add_shape(self, spec)
 
     def image_data(self, key: str) -> tuple[bytes, str]:
@@ -315,6 +332,7 @@ class MuPage:
         return ocr.text_layer(self, language, dpi, tessdata, preprocess, deskew)
 
     def add_text_layer(self, layer: bytes) -> None:
+        self._doc.unshare_page(self._index)
         ocr.add_text_layer(self, layer)
 
     def to_svg(self) -> str:
@@ -347,6 +365,7 @@ class MuPage:
         ]
 
     def apply_redactions(self, ids: Sequence[int] | None, options: RedactOptions) -> int:
+        self._doc.unshare_page(self._index)
         return annots.apply_redactions(self, ids, options)
 
     def annotations(self) -> list[AnnotationModel]:

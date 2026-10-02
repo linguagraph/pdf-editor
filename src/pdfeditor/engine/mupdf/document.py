@@ -30,6 +30,7 @@ from pdfeditor.engine.mupdf import optimize as opt
 from pdfeditor.engine.mupdf import sanitize as scrub
 from pdfeditor.engine.mupdf import structure as struct
 from pdfeditor.engine.mupdf.page import MuPage
+from pdfeditor.engine.mupdf.pagecopy import SharingIndex, ensure_page_unshared
 from pdfeditor.model.color import Color
 from pdfeditor.model.metadata import (
     DocumentInfo,
@@ -174,6 +175,7 @@ class MuDocument:
         self._backing_tmp: Path | None = None  # set when a failed save left us on a temp file
         self._force_dirty = False
         self._security: SecuritySettings | None = None  # applied on the next full save
+        self._sharing = SharingIndex()
 
     # -- internal ---------------------------------------------------------------------------
     @property
@@ -185,15 +187,26 @@ class MuDocument:
 
     def mark_page_changed(self, index: int) -> None:
         self._revisions[index] = self._revisions.get(index, 0) + 1
+        self._sharing.dirty(index)
         page = self._pages.get(index)
         if page is not None:
             page.invalidate()
+
+    def unshare_page(self, index: int) -> None:
+        """Copy-on-write: call before changing page ``index`` in place, so the change can't
+        show on another page that shares its content, resources or annotations."""
+        result = ensure_page_unshared(self._fz, index, self._sharing)
+        if result.structure:
+            self.structure_changed()
+        for changed in result.pages:
+            self.mark_page_changed(changed)
 
     def structure_changed(self) -> None:
         """Call after pages were inserted, deleted or moved: resync counts and drop caches."""
         self._reset_pages()
 
     def _reset_pages(self) -> None:
+        self._sharing.reset()
         self._generation += 1
         self._page_count = int(self._fz.page_count)
         for page in self._pages.values():
