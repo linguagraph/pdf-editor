@@ -53,6 +53,22 @@ def _title(label: str) -> str:
     return label.rstrip(".…").strip()
 
 
+def job_heading(job: Job) -> str:
+    """The job's name, with what it's doing now when it said so ("Recognizing text · page 1
+    of 3")."""
+    title = _title(job.label)
+    if not job.status_text:
+        return title
+    text = QCoreApplication.translate("JobCenter", "{task} · {status}")
+    return text.format(task=title, status=job.status_text)
+
+
+def is_indeterminate(job: Job) -> bool:
+    """Show a busy bar: the job has no steps to count, or none has finished yet (a bar
+    sitting at 0 of 1 for the whole of a one-page OCR looks stuck)."""
+    return job.total <= 0 or job.done_steps <= 0
+
+
 def elapsed_text(seconds: float) -> str:
     seconds = int(seconds)
     return f"{seconds // 60}:{seconds % 60:02d}"
@@ -112,6 +128,7 @@ class JobCenter(QObject):
             return self._notify(text.format(task=title), "info")
 
         job.progress_changed.connect(lambda done, t: self._on_progress(job, done, t))
+        job.status_changed.connect(lambda text: self._on_status(job, text))
         job.finished.connect(lambda result: self._settle(job, on_done, result))
         job.failed.connect(lambda message: self._settle(job, lambda m: failed(str(m)), message))
         job.cancelled.connect(lambda: self._settle(job, lambda _v: cancelled(), None))
@@ -161,6 +178,10 @@ class JobCenter(QObject):
         job.done_steps, job.total = done, total
         self.changed.emit()
 
+    def _on_status(self, job: Job, text: str) -> None:
+        job.status_text = text
+        self.changed.emit()
+
     def _settle(self, job: Job, handler: Callable[[object], object] | None, value: object) -> None:
         if job not in self._jobs:
             return
@@ -194,7 +215,7 @@ class _JobRow(QWidget):
         grid.setHorizontalSpacing(METRICS.space(2))
         grid.setVerticalSpacing(METRICS.space(1))
         title = _title(job.label)
-        self.name = QLabel(title, self)
+        self.name = QLabel(job_heading(job), self)
         self.name.setObjectName("JobName")
         grid.addWidget(self.name, 0, 0)
         self.cancel = QToolButton(self)
@@ -206,7 +227,6 @@ class _JobRow(QWidget):
         self.bar = QProgressBar(self)
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        self.bar.setAccessibleName(self.tr("{task} progress").format(task=title))
         grid.addWidget(self.bar, 1, 0)
         self.detail = QLabel(self)
         self.detail.setProperty("role", "muted")
@@ -220,11 +240,15 @@ class _JobRow(QWidget):
 
     def update_row(self) -> None:
         job = self.job
-        if job.total > 0:
+        if is_indeterminate(job):
+            self.bar.setRange(0, 0)  # busy indicator
+        else:
             self.bar.setRange(0, job.total)
             self.bar.setValue(min(job.done_steps, job.total))
-        else:
-            self.bar.setRange(0, 0)  # busy indicator
+        heading = job_heading(job)
+        if self.name.text() != heading:
+            self.name.setText(heading)
+        self.bar.setAccessibleName(self.tr("{task} progress").format(task=heading))
         elapsed = elapsed_text(time.monotonic() - job.created)
         parts = [progress_text(job), self.tr("{time} elapsed").format(time=elapsed)]
         if job.session is not None:
@@ -288,6 +312,8 @@ class JobDetails(QFrame):
             self.adjustSize()
         for row in self.rows:
             row.update_row()
+        if any(job.status_text for job in jobs):
+            self.repaint()  # before the announced step can block the GUI thread (see the chip)
 
 
 class ProgressChip(QFrame):
@@ -335,27 +361,44 @@ class ProgressChip(QFrame):
             return
         if len(jobs) == 1:
             job = jobs[0]
-            text = _title(job.label)
-            if job.total > 0:
+            text = job_heading(job)
+            if job.total > 0 and not job.status_text:
                 text += f"  {min(job.done_steps, job.total)}/{job.total}"
             cancel_name = self.tr("Cancel {task}").format(task=_title(job.label))
         else:
             text = self.tr("{count} tasks running").format(count=len(jobs))
             cancel_name = self.tr("Cancel all tasks")
-        totals = [j.total for j in jobs]
-        if all(t > 0 for t in totals):
-            self.bar.setRange(0, sum(totals))
-            self.bar.setValue(sum(min(j.done_steps, j.total) for j in jobs))
+        done = sum(min(j.done_steps, j.total) for j in jobs)
+        if any(j.total <= 0 for j in jobs) or done <= 0:
+            self.bar.setRange(0, 0)  # busy until there are finished steps to count
         else:
-            self.bar.setRange(0, 0)
+            self.bar.setRange(0, sum(j.total for j in jobs))
+            self.bar.setValue(done)
         self.button.setText(text)
         self.button.setToolTip(self.tr("Show running tasks"))
         self.button.setAccessibleName(self.tr("{status}. Show details").format(status=text))
         self.bar.setAccessibleName(self.tr("Progress of {status}").format(status=text))
         self.cancel_button.setToolTip(cancel_name)
         self.cancel_button.setAccessibleName(cancel_name)
-        if not self.isVisible() and not self._show_timer.isActive():
+        if any(j.status_text for j in jobs):
+            # A job that names its step is starting a slow one (an OCR page), which can keep
+            # the GUI thread from running anything until it ends (Tesseract holds the GIL).
+            # Show the chip and paint it now, not on a timer or a later paint event.
+            if not self.isVisible():
+                self._show_timer.stop()
+                self._reveal()
+            self._paint_now()
+        elif not self.isVisible() and not self._show_timer.isActive():
             self._show_timer.start(SHOW_DELAY_MS)
+
+    def _paint_now(self) -> None:
+        if not self.isVisible():
+            return
+        parent = self.parentWidget()
+        layout = parent.layout() if parent is not None else None
+        if layout is not None:
+            layout.activate()  # place a chip that was just shown before painting it
+        self.repaint()
 
     def _reveal(self) -> None:
         jobs = self.center.running()

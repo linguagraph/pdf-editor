@@ -16,6 +16,7 @@ from pdfeditor.services.ocr import (
     apply,
     installed_languages,
     ocr_files,
+    pick_languages,
     recognize,
     tessdata_for,
 )
@@ -56,6 +57,32 @@ def test_skip_pages_with_text_and_missing_language(fixture_pdf) -> None:
     doc.close()
 
 
+def test_status_names_each_page_before_its_work(fixture_pdf) -> None:
+    doc = ENGINE.open(fixture_pdf("text_multipage").read_bytes())
+    events: list[object] = []
+    recognize(
+        doc,
+        [0, 1],
+        OcrOptions(),
+        progress=lambda done, total: events.append((done, total)),
+        status=events.append,
+    )
+    assert events == ["page 1 of 2", (1, 2), "page 2 of 2", (2, 2)]
+    doc.close()
+
+
+def test_pick_languages_keeps_installed_saved_ones_in_order() -> None:
+    assert pick_languages(["bul", "eng"], {"eng", "bul", "deu"}) == ("bul", "eng")
+    assert pick_languages(["bul", "xyz", "bul"], {"eng", "bul"}) == ("bul",)
+
+
+def test_pick_languages_falls_back_when_none_is_installed() -> None:
+    assert pick_languages(["xyz"], {"deu", "eng"}) == ("eng",)
+    assert pick_languages([], {"eng"}) == ("eng",)
+    assert pick_languages(["xyz"], {"fra", "deu"}) == ("deu",)  # first installed
+    assert pick_languages(["eng"], set()) == ()
+
+
 def test_rotated_scan_is_upright_and_placed(fixture_pdf) -> None:
     # A /Rotate 90 page whose picture reads upright on screen.
     src = ENGINE.open(fixture_pdf("scanned").read_bytes())
@@ -93,13 +120,17 @@ def test_preprocessing_still_reads(fixture_pdf) -> None:
 
 
 def test_batch_ocr(fixture_pdf, tmp_path: Path) -> None:
+    statuses: list[str] = []
     written = ocr_files(
         ENGINE,
         [fixture_pdf("scanned"), fixture_pdf("images")],
         tmp_path / "out",
         OcrOptions(dpi=150),
+        status=statuses.append,
     )
     assert [p.name for p in written] == ["scanned.pdf", "images.pdf"]
+    assert statuses[:2] == ["file 1 of 2: scanned.pdf", "file 1 of 2: scanned.pdf, page 1 of 1"]
+    assert "file 2 of 2: images.pdf" in statuses
     with pikepdf.open(written[0]) as pdf:
         assert len(pdf.pages) == 1
     doc = ENGINE.open(written[0])
