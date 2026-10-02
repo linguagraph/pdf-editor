@@ -18,14 +18,21 @@ from fontTools.ttLib.ttCollection import TTCollection
 
 from pdfeditor.core.jobs import CancelToken, ProgressFn, no_progress
 from pdfeditor.core.paths import data_dir
-from pdfeditor.model.fonts import FontFace, FontRef, FontRefKind
+from pdfeditor.model.fonts import BITMAP_ONLY, RESTRICTED, FontFace, FontRef, FontRefKind
 
 logger = logging.getLogger(__name__)
 
-# fsType bits (OS/2 table): the license forbids embedding, or allows only as bitmaps.
-# Shared with services/export/fonts.py, which embeds fonts into generated .docx files.
-RESTRICTED = 0x0002
-BITMAP_ONLY = 0x0200
+# fontTools warns about some installed fonts' implausible 'created' timestamp; it's noise here.
+logging.getLogger("fontTools.ttLib.tables._h_e_a_d").setLevel(logging.ERROR)
+
+__all__ = [
+    "BITMAP_ONLY",
+    "RESTRICTED",
+    "FontCatalog",
+    "cached_catalog",
+    "read_faces",
+    "system_font_dirs",
+]
 
 _SKIP_SUFFIXES = {".fon", ".fnt", ".pfb", ".pfm"}
 _FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc"}

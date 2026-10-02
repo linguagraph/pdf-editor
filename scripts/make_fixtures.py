@@ -686,6 +686,13 @@ def generate_fonts() -> None:
     )
 
     (FONTS_OUT / "Garbage.ttf").write_bytes(b"not a font, just garbage bytes" * 10)
+
+    # ~2,000 glyphs, for the subsetting test (engine/mupdf/test_fonts.py): a full copy of this
+    # embedded in a PDF must be far bigger than the subset a one-word edit actually needs.
+    large_chars = "".join(chr(c) for c in range(0x0100, 0x0100 + 2000))
+    _build_face("Test Large", "Regular", 400, False, large_chars).save(
+        FONTS_OUT / "TestLarge-Regular.ttf"
+    )
     print("generated fonts/")
 
 

@@ -126,6 +126,9 @@ class SaveOptions:
     object_streams: bool = False
     clean_content: bool = False
     decrypt: bool = False  # write without encryption (export pipelines; never for snapshots)
+    # Subset fonts this app embedded while editing (never on an incremental save, which must
+    # keep a signature's byte range intact). Doesn't affect fonts already in the document.
+    subset_fonts: bool = True
 
 
 @dataclass(frozen=True, slots=True)

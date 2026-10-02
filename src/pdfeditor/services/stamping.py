@@ -18,6 +18,7 @@ from typing import Any
 
 from pdfeditor.engine.base import ColorMode, Document, Engine, RenderRequest
 from pdfeditor.model.color import BLACK, Color
+from pdfeditor.model.fonts import FontRef
 from pdfeditor.model.geometry import Matrix, Point, Rect
 from pdfeditor.model.pages import ImageStamp, MarkKind, TextStamp
 
@@ -50,6 +51,7 @@ class HeaderFooter:
     bates_digits: int = 6
     bates_suffix: str = ""
     date_format: str = "%Y-%m-%d"
+    font_ref: FontRef | None = None  # which font to typeset with, if not the base-14 ``font``
 
 
 def bates_number(spec: HeaderFooter, index: int) -> str:
@@ -121,6 +123,7 @@ def apply_header_footer(
                     spec.font,
                     spec.color,
                     mark=kind if marking else None,
+                    font_ref=spec.font_ref,
                 )
             )
             drawn += 1
@@ -141,6 +144,7 @@ class Watermark:
     angle: float = 45.0  # text only
     scale: float = 0.5  # image width as a fraction of the page width
     on_top: bool = True
+    font_ref: FontRef | None = None  # which font to typeset with, if not the base-14 ``font``
 
 
 def apply_watermark(engine: Engine, doc: Document, spec: Watermark, pages: Sequence[int]) -> None:
@@ -173,6 +177,7 @@ def apply_watermark(engine: Engine, doc: Document, spec: Watermark, pages: Seque
                 spec.angle,
                 spec.on_top,
                 mark,
+                spec.font_ref,
             )
         )
 
@@ -281,6 +286,10 @@ def _color(value: Any, default: Color) -> Color:
     return Color(r, g, b)
 
 
+def _font_ref(value: Any) -> FontRef | None:
+    return FontRef.from_dict(value) if isinstance(value, dict) else None
+
+
 def header_footer_settings(spec: HeaderFooter) -> str:
     return _dump(
         "header_footer",
@@ -297,6 +306,7 @@ def header_footer_settings(spec: HeaderFooter) -> str:
             "bates_digits": spec.bates_digits,
             "bates_suffix": spec.bates_suffix,
             "date_format": spec.date_format,
+            "font_ref": spec.font_ref.to_dict() if spec.font_ref else None,
         },
     )
 
@@ -320,6 +330,7 @@ def header_footer_from_settings(text: str) -> HeaderFooter | None:
             bates_digits=int(data.get("bates_digits", 6)),
             bates_suffix=str(data.get("bates_suffix", "")),
             date_format=str(data.get("date_format", "%Y-%m-%d")),
+            font_ref=_font_ref(data.get("font_ref")),
         )
     except (AttributeError, TypeError, ValueError):
         log.warning("ignoring unreadable header/footer settings")
@@ -340,6 +351,7 @@ def watermark_settings(spec: Watermark) -> str:
             "angle": spec.angle,
             "scale": spec.scale,
             "on_top": spec.on_top,
+            "font_ref": spec.font_ref.to_dict() if spec.font_ref else None,
         },
     )
 
@@ -362,6 +374,7 @@ def watermark_from_settings(text: str) -> Watermark | None:
             angle=float(data.get("angle", default.angle)),
             scale=float(data.get("scale", default.scale)),
             on_top=bool(data.get("on_top", True)),
+            font_ref=_font_ref(data.get("font_ref")),
         )
     except (TypeError, ValueError):
         log.warning("ignoring unreadable watermark settings")

@@ -176,6 +176,9 @@ class MuDocument:
         self._force_dirty = False
         self._security: SecuritySettings | None = None  # applied on the next full save
         self._sharing = SharingIndex()
+        # Set when content editing embedded a font file (content.py, pages.py); a full save
+        # then subsets it so an installed font's whole program isn't kept in the PDF.
+        self._gained_file_fonts = False
 
     # -- internal ---------------------------------------------------------------------------
     @property
@@ -184,6 +187,10 @@ class MuDocument:
 
     def page_revision(self, index: int) -> int:
         return self._generation * 1_000_000 + self._revisions.get(index, 0)
+
+    def note_file_font_embedded(self) -> None:
+        """Record that a FILE font ref was just embedded, so the next full save subsets it."""
+        self._gained_file_fonts = True
 
     def mark_page_changed(self, index: int) -> None:
         self._revisions[index] = self._revisions.get(index, 0) + 1
@@ -566,6 +573,8 @@ class MuDocument:
                 if security.method is EncryptionMethod.NONE
                 else security.owner_password or security.user_password
             )
+        if self._gained_file_fonts and options.subset_fonts:
+            self._fz.subset_fonts()
         try:
             self._fz.save(tmp, **self._save_kwargs(options))
             self._verify(tmp, pages)
@@ -590,6 +599,7 @@ class MuDocument:
         self._reopen(target)
         self._backing_tmp = None
         self._security = None  # now part of the file
+        self._gained_file_fonts = False
         if old_backing is not None:
             with contextlib.suppress(OSError):
                 old_backing.unlink()

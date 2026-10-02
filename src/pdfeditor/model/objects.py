@@ -63,6 +63,7 @@ class FontChoice:
     name: str
     embedded_reused: bool = False
     substituted: bool = False  # the original font couldn't render the new text
+    missing: str = ""  # characters the requested font (font_ref) couldn't show, if substituted
 
 
 class ShapeKind(Enum):
