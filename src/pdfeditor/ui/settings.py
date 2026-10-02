@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import getpass
+import json
 
 from PySide6.QtCore import QSettings
 
+from pdfeditor.model.fonts import FontRef
 from pdfeditor.model.scan import ScanCleanup
 from pdfeditor.services.ocr import OcrOptions, installed_languages, pick_languages
 from pdfeditor.ui.style.tokens import is_color
 
 DEFAULT_ZOOMS = ("fit_width", "fit_page", "100")
+MAX_RECENT_FONTS = 8
 
 
 def _default_author() -> str:
@@ -205,6 +208,28 @@ class AppSettings:
     @custom_stamps.setter
     def custom_stamps(self, value: list[str]) -> None:
         self.qs.setValue("stamps/custom", list(value))
+
+    # fonts
+    @property
+    def recent_fonts(self) -> list[FontRef]:
+        """Most recently used fonts (font picker), most recent first; capped at 8."""
+        raw = self._str("fonts/recent", "")
+        if not raw:
+            return []
+        try:
+            items = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if not isinstance(items, list):
+            return []
+        refs = [FontRef.from_dict(item) for item in items if isinstance(item, dict)]
+        return [ref for ref in refs if ref is not None][:MAX_RECENT_FONTS]
+
+    def add_recent_font(self, ref: FontRef) -> None:
+        """Move ``ref`` to the front of :attr:`recent_fonts`, capped at 8 entries."""
+        existing = [r for r in self.recent_fonts if r != ref]
+        updated = [ref, *existing][:MAX_RECENT_FONTS]
+        self.qs.setValue("fonts/recent", json.dumps([r.to_dict() for r in updated]))
 
     # OCR: the options of the last run, preselected next time (and used by automatic OCR)
     @property

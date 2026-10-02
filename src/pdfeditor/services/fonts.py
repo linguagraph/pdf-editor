@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import platform
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -30,8 +31,11 @@ __all__ = [
     "RESTRICTED",
     "FontCatalog",
     "cached_catalog",
+    "installed_ref_for_font_name",
+    "normalize_font_name",
     "read_faces",
     "system_font_dirs",
+    "text_scripts",
 ]
 
 _SKIP_SUFFIXES = {".fon", ".fnt", ".pfb", ".pfm"}
@@ -47,6 +51,80 @@ _SCRIPT_PROBES: tuple[tuple[str, int], ...] = (
     ("arabic", 0x0627),  # alef
     ("hebrew", 0x05D0),  # alef
 )
+
+# same coarse buckets as _SCRIPT_PROBES, but as Unicode ranges, for classifying a piece of text
+# rather than a font's cmap.
+_SCRIPT_RANGES: tuple[tuple[str, int, int], ...] = (
+    ("cyrillic", 0x0400, 0x04FF),
+    ("greek", 0x0370, 0x03FF),
+    ("cjk", 0x3040, 0x30FF),  # hiragana/katakana
+    ("cjk", 0x3400, 0x9FFF),  # CJK unified ideographs (+ extension A)
+    ("cjk", 0xAC00, 0xD7A3),  # hangul syllables
+    ("arabic", 0x0600, 0x06FF),
+    ("hebrew", 0x0590, 0x05FF),
+)
+
+_SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
+_STYLE_SUFFIX = re.compile(r"[-, ]?(Bold\s*Italic|BoldItalic|Bold|Italic|Oblique)$", re.IGNORECASE)
+
+
+def text_scripts(text: str) -> frozenset[str]:
+    """Coarse scripts used in ``text`` (the same buckets as :data:`_SCRIPT_PROBES`).
+
+    Used to flag an installed font that doesn't cover what's being typeset (e.g. no Cyrillic).
+    """
+    found: set[str] = set()
+    for ch in text:
+        cp = ord(ch)
+        if ch.isalpha() and cp < 0x0250:
+            found.add("latin")
+            continue
+        for label, lo, hi in _SCRIPT_RANGES:
+            if lo <= cp <= hi:
+                found.add(label)
+                break
+    return frozenset(found)
+
+
+def normalize_font_name(name: str) -> tuple[str, bool, bool]:
+    """Split a PDF/engine font name into ``(family, bold, italic)``.
+
+    Strips a subset prefix (``ABCDEF+Calibri``) and a style suffix (``-Bold``, ``,BoldItalic``,
+    ``-Italic``, ``-Oblique``), so a name MuPDF wrote on save, like ``"ABCDEF+Calibri-Bold"``,
+    matches the catalog family ``"Calibri"`` with ``bold=True``.
+    """
+    base = _SUBSET_PREFIX.sub("", name)
+    bold = False
+    italic = False
+    while True:
+        match = _STYLE_SUFFIX.search(base)
+        if not match:
+            break
+        token = match.group(1).lower().replace(" ", "")
+        if "bold" in token:
+            bold = True
+        if "italic" in token or "oblique" in token:
+            italic = True
+        base = base[: match.start()].rstrip("-, ")
+    return base, bold, italic
+
+
+def installed_ref_for_font_name(
+    catalog: FontCatalog, font_name: str, bold: bool = False, italic: bool = False
+) -> FontRef | None:
+    """The catalog's best face for ``font_name`` (after normalizing it), or ``None``.
+
+    For reusing an installed font after reopening a document: the embedded font program MuPDF
+    wrote loses its original name/cmap tables, so a later edit needs to recognize the family
+    from the (possibly subsetted, styled) name alone.
+    """
+    family, name_bold, name_italic = normalize_font_name(font_name)
+    if not family:
+        return None
+    face = catalog.find(family, bold or name_bold, italic or name_italic)
+    if face is None or not face.embeddable:
+        return None
+    return FontRef.file(face.path, face.index, face.family)
 
 
 def system_font_dirs() -> list[Path]:

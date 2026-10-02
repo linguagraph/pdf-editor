@@ -12,8 +12,11 @@ from pdfeditor.model.fonts import FontRef
 from pdfeditor.services import fonts as fonts_service
 from pdfeditor.services.fonts import (
     FontCatalog,
+    installed_ref_for_font_name,
+    normalize_font_name,
     read_faces,
     system_font_dirs,
+    text_scripts,
 )
 
 
@@ -305,3 +308,84 @@ def test_export_fonts_reuses_shared_fstype_constants() -> None:
 
     assert export_fonts._RESTRICTED is fonts_service.RESTRICTED
     assert export_fonts._BITMAP_ONLY is fonts_service.BITMAP_ONLY
+
+
+# -- text_scripts -----------------------------------------------------------------------------
+
+
+def test_text_scripts_latin_only() -> None:
+    assert text_scripts("Hello world 123") == {"latin"}
+
+
+def test_text_scripts_detects_cyrillic() -> None:
+    assert "cyrillic" in text_scripts("Привет")
+
+
+def test_text_scripts_detects_cjk() -> None:
+    assert "cjk" in text_scripts("中文")
+
+
+def test_text_scripts_mixed() -> None:
+    scripts = text_scripts("Hello Привет")
+    assert {"latin", "cyrillic"} <= scripts
+
+
+def test_text_scripts_empty_string() -> None:
+    assert text_scripts("") == frozenset()
+
+
+# -- normalize_font_name ------------------------------------------------------------------------
+
+
+def test_normalize_font_name_plain() -> None:
+    assert normalize_font_name("Calibri") == ("Calibri", False, False)
+
+
+def test_normalize_font_name_strips_subset_prefix() -> None:
+    assert normalize_font_name("ABCDEF+Calibri") == ("Calibri", False, False)
+
+
+def test_normalize_font_name_bold_suffix() -> None:
+    assert normalize_font_name("ABCDEF+Calibri-Bold") == ("Calibri", True, False)
+
+
+def test_normalize_font_name_italic_suffix() -> None:
+    assert normalize_font_name("Calibri-Italic") == ("Calibri", False, True)
+
+
+def test_normalize_font_name_bold_italic_suffix() -> None:
+    assert normalize_font_name("Calibri-BoldItalic") == ("Calibri", True, True)
+    assert normalize_font_name("Calibri,BoldItalic") == ("Calibri", True, True)
+
+
+def test_normalize_font_name_oblique_suffix() -> None:
+    family, bold, italic = normalize_font_name("Arial-Oblique")
+    assert family == "Arial"
+    assert italic is True
+    assert bold is False
+
+
+# -- installed_ref_for_font_name ----------------------------------------------------------------
+
+
+def test_installed_ref_for_font_name_matches_normalized_family(fonts_dir: Path) -> None:
+    catalog = FontCatalog()
+    catalog.scan(dirs=[fonts_dir])
+    ref = installed_ref_for_font_name(catalog, "ABCDEF+Test Sans-Bold")
+    assert ref is not None
+    assert ref.name == "Test Sans"
+    face = catalog.face_for(ref)
+    assert face is not None
+    assert face.weight >= 600
+
+
+def test_installed_ref_for_font_name_unknown_family_returns_none(fonts_dir: Path) -> None:
+    catalog = FontCatalog()
+    catalog.scan(dirs=[fonts_dir])
+    assert installed_ref_for_font_name(catalog, "Nonexistent Family XYZ") is None
+
+
+def test_installed_ref_for_font_name_restricted_returns_none(fonts_dir: Path) -> None:
+    catalog = FontCatalog()
+    catalog.scan(dirs=[fonts_dir])
+    assert installed_ref_for_font_name(catalog, "Test Restricted") is None

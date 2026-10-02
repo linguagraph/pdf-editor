@@ -31,9 +31,12 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.model.color import Color
+from pdfeditor.model.fonts import FontRef, FontRefKind
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.objects import Align, TextStyle, family_of
+from pdfeditor.services.fonts import cached_catalog, installed_ref_for_font_name
 from pdfeditor.ui.color_picker import pick_color
+from pdfeditor.ui.font_picker import STANDARD_FONTS, FontPicker, remember_font
 from pdfeditor.ui.icons import icon
 
 if TYPE_CHECKING:
@@ -41,12 +44,7 @@ if TYPE_CHECKING:
 
 # Screen fonts that look like the PDF standard families (the PDF result uses the real font).
 _SCREEN_FAMILIES = {"serif": "Times New Roman", "mono": "Courier New", "sans": "Arial"}
-# Standard families offered in the style bar: (label, PDF font name)
-STANDARD_FONTS = (
-    ("Sans (Helvetica)", "Helvetica"),
-    ("Serif (Times)", "Times-Roman"),
-    ("Mono (Courier)", "Courier"),
-)
+_STANDARD_NAMES = {name for _label, name in STANDARD_FONTS}
 _loaded_fonts: dict[str, str] = {}  # sha1 of font program -> Qt family name
 
 
@@ -60,6 +58,24 @@ def preview_family(font_data: bytes | None) -> str | None:
         families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
         _loaded_fonts[digest] = families[0] if families else ""
     return _loaded_fonts[digest] or None
+
+
+def _initial_font_ref(style: TextStyle) -> tuple[FontRef, str]:
+    """What the font picker should preselect for ``style``.
+
+    Prefers an explicit ``font_ref``. Otherwise, a standard name goes straight to its
+    ``FontRef.standard``; anything else tries to recognize an installed family from the name
+    (stripping a subset prefix/style suffix MuPDF may have written on a previous save), falling
+    back to a plain document-font entry.
+    """
+    if style.font_ref is not None:
+        return style.font_ref, style.font
+    if style.font in _STANDARD_NAMES:
+        return FontRef.standard(style.font), style.font
+    installed = installed_ref_for_font_name(cached_catalog(), style.font, style.bold, style.italic)
+    if installed is not None:
+        return installed, installed.name
+    return FontRef.document(style.font), style.font
 
 
 def screen_font(style: TextStyle, zoom_px_per_pt: float, family: str | None = None) -> QFont:
@@ -80,14 +96,11 @@ class TextStyleBar(QFrame):
         self.setAutoFillBackground(True)
         self._on_change = on_change
         self._color = style.color
-        self.font_combo = QComboBox(self)
-        self.font_combo.setToolTip("Font")
-        standard = {name for _label, name in STANDARD_FONTS}
-        if style.font not in standard:
-            self.font_combo.addItem(f"{style.font} (document font)", style.font)
-        for label, name in STANDARD_FONTS:
-            self.font_combo.addItem(label, name)
-        self.font_combo.setCurrentIndex(max(0, self.font_combo.findData(style.font)))
+        document_fonts = [] if style.font in _STANDARD_NAMES else [style.font]
+        self.font_picker = FontPicker(self, document_fonts=document_fonts)
+        self.font_picker.setToolTip("Font")
+        self.font_picker.set_selection(*_initial_font_ref(style))
+        self.font_picker.font_chosen.connect(self._on_font_chosen)
         self.size_box = QDoubleSpinBox(self)
         self.size_box.setToolTip("Font size (pt)")
         self.size_box.setRange(4, 144)
@@ -96,6 +109,8 @@ class TextStyleBar(QFrame):
         self.size_box.setValue(style.size)
         self.bold = self._toggle("bold", "Bold", style.bold)
         self.italic = self._toggle("italic", "Italic", style.italic)
+        self.bold.toggled.connect(self._switch_variant)
+        self.italic.toggled.connect(self._switch_variant)
         self.color_button = QToolButton(self)
         self.color_button.setToolTip("Text colour")
         self.color_button.clicked.connect(self._pick_color)
@@ -117,14 +132,14 @@ class TextStyleBar(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(3, 3, 3, 3)
         row.setSpacing(3)
-        for w in (self.font_combo, self.size_box, self.bold, self.italic, self.color_button,
+        for w in (self.font_picker, self.size_box, self.bold, self.italic, self.color_button,
                   self.align_combo, self.line_spacing):  # fmt: skip
             row.addWidget(w)
-        self.font_combo.currentIndexChanged.connect(lambda _i: on_change())
         self.size_box.valueChanged.connect(lambda _v: on_change())
         self.align_combo.currentIndexChanged.connect(lambda _i: on_change())
         self.line_spacing.valueChanged.connect(lambda _v: on_change())
         self.picking = False
+        self._refresh_bold_italic_enabled()
         self.adjustSize()
 
     def _toggle(self, icon_name: str, tip: str, checked: bool) -> QToolButton:
@@ -157,11 +172,45 @@ class TextStyleBar(QFrame):
         if chosen is not None:
             self.set_color(chosen)
 
+    def _family_faces(self) -> list[object]:
+        ref = self.font_picker.current_ref()
+        if ref.kind is not FontRefKind.FILE:
+            return []
+        return list(cached_catalog().faces_of(ref.name))
+
+    def _refresh_bold_italic_enabled(self) -> None:
+        faces = self._family_faces()
+        if not faces:
+            self.bold.setEnabled(True)
+            self.italic.setEnabled(True)
+            return
+        self.bold.setEnabled(any(f.weight >= 600 for f in faces))  # type: ignore[attr-defined]
+        self.italic.setEnabled(any(f.italic for f in faces))  # type: ignore[attr-defined]
+
+    def _switch_variant(self, _checked: bool) -> None:
+        ref = self.font_picker.current_ref()
+        if ref.kind is FontRefKind.FILE:
+            face = cached_catalog().find(ref.name, self.bold.isChecked(), self.italic.isChecked())
+            if face is not None:
+                self.font_picker.set_variant(FontRef.file(face.path, face.index, ref.name))
+        self._on_change()
+
+    def _on_font_chosen(self, ref: FontRef, _display: str) -> None:
+        if ref.kind is FontRefKind.FILE:
+            face = cached_catalog().find(ref.name, self.bold.isChecked(), self.italic.isChecked())
+            if face is not None:
+                self.font_picker.set_variant(FontRef.file(face.path, face.index, ref.name))
+        self._refresh_bold_italic_enabled()
+        self._on_change()
+
     def text_style(self) -> TextStyle:
         align = self.align_combo.currentData()
+        ref = self.font_picker.current_ref()
+        font_ref = ref if ref.kind in (FontRefKind.FILE, FontRefKind.STANDARD) else None
         return replace(
             self._base,
-            font=str(self.font_combo.currentData()),
+            font=ref.name,
+            font_ref=font_ref,
             size=round(self.size_box.value(), 1),
             bold=self.bold.isChecked(),
             italic=self.italic.isChecked(),
@@ -225,7 +274,11 @@ class InlineTextEditor(QPlainTextEdit):
 
     def _restyle(self) -> None:
         style = self.text_style()
-        family = self._doc_family if style.font == self._doc_font else None
+        family: str | None
+        if style.font_ref is not None and style.font_ref.kind is FontRefKind.FILE:
+            family = style.font_ref.name  # a system family Qt can resolve by name
+        else:
+            family = self._doc_family if style.font == self._doc_font else None
         self.setFont(screen_font(style, self._zoom, family))
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Text, QColor.fromRgbF(*style.color.rgb()))
@@ -277,6 +330,8 @@ class InlineTextEditor(QPlainTextEdit):
         text, style, changed = self.toPlainText(), self.text_style(), self.changed
         self._close()
         if changed:
+            if style.font_ref is not None:
+                remember_font(style.font_ref)
             self._on_commit(text, style)
         else:
             self._on_cancel()

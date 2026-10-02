@@ -31,13 +31,46 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.model.color import Color
-from pdfeditor.model.pages import FONTS, LabelStyle, PageLabelRule
+from pdfeditor.model.fonts import FontRef, FontRefKind
+from pdfeditor.model.objects import family_of
+from pdfeditor.model.pages import LabelStyle, PageLabelRule
 from pdfeditor.services.assembly import IMAGE_SUFFIXES, MergeSource, SplitMode
 from pdfeditor.services.pages import format_page_ranges, parse_page_ranges
 from pdfeditor.services.stamping import TOKENS_HELP, HeaderFooter, Slot, Watermark
 from pdfeditor.ui.color_picker import ColorButton
 from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption
+from pdfeditor.ui.font_picker import FontPicker, remember_font
 from pdfeditor.ui.style.tokens import METRICS
+
+# base-14 codes used by the engine (MuPDF's short names) <-> the font picker's standard refs
+_BASE14_BY_STANDARD = {"Helvetica": "helv", "Times-Roman": "tiro", "Courier": "cour"}
+_BASE14_BY_FAMILY = {"sans": "helv", "serif": "tiro", "mono": "cour"}
+_STANDARD_BY_BASE14 = {
+    "helv": "Helvetica",
+    "hebo": "Helvetica",
+    "tiro": "Times-Roman",
+    "tibo": "Times-Roman",
+    "cour": "Courier",
+    "cobo": "Courier",
+}
+
+
+def _base14_for_ref(ref: FontRef) -> str:
+    """The base-14 code (``spec.font``) that goes with a font picker choice."""
+    if ref.kind is FontRefKind.STANDARD:
+        return _BASE14_BY_STANDARD.get(ref.name, "helv")
+    if ref.kind is FontRefKind.FILE:
+        return _BASE14_BY_FAMILY[family_of(ref.name)]
+    return "helv"
+
+
+def _ref_for_base14(font_ref: FontRef | None, base14: str) -> tuple[FontRef, str]:
+    """What the font picker should preselect for a saved ``HeaderFooter``/``Watermark``."""
+    if font_ref is not None:
+        return font_ref, font_ref.name
+    name = _STANDARD_BY_BASE14.get(base14, "Helvetica")
+    return FontRef.standard(name), name
+
 
 PDF_OR_IMAGES = (
     "PDF and images (*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.webp);;All files (*)"
@@ -481,8 +514,7 @@ class HeaderFooterDialog(FormDialog):
         if bates:
             self.slots[Slot.FOOTER_RIGHT].setText("<<bates>>")
         help_label = caption(f"Fields: {TOKENS_HELP}")
-        self.font_box = QComboBox()
-        self.font_box.addItems(FONTS)
+        self.font_picker = FontPicker(self)
         self.size_box = QDoubleSpinBox()
         self.size_box.setRange(4, 72)
         self.size_box.setValue(9)
@@ -505,7 +537,7 @@ class HeaderFooterDialog(FormDialog):
         self.add_widget(help_label)
         self.style_section = self.add_section("Text style", expanded=False)
         style = self.style_section.form()
-        add_row(style, "Font:", self.font_box)
+        add_row(style, "Font:", self.font_picker)
         add_row(style, "Size:", self.size_box)
         add_row(style, "Color:", self.color_button)
         add_row(style, "Side margin:", self.margin_x)
@@ -520,9 +552,14 @@ class HeaderFooterDialog(FormDialog):
         self.add_widget(self.range)
 
     def spec(self) -> HeaderFooter:
+        ref = self.font_picker.current_ref()
+        font_ref = ref if ref.kind is FontRefKind.FILE else None
+        if font_ref is not None:
+            remember_font(font_ref)
         return HeaderFooter(
             texts={slot: edit.text() for slot, edit in self.slots.items() if edit.text()},
-            font=self.font_box.currentText(),
+            font=_base14_for_ref(ref),
+            font_ref=font_ref,
             font_size=self.size_box.value(),
             color=self.color_button.color,
             margin_x=self.margin_x.value(),
@@ -538,7 +575,7 @@ class HeaderFooterDialog(FormDialog):
         """Fill the fields from existing settings (Update Header & Footer)."""
         for slot, edit in self.slots.items():
             edit.setText(spec.texts.get(slot, ""))
-        self.font_box.setCurrentText(spec.font)
+        self.font_picker.set_selection(*_ref_for_base14(spec.font_ref, spec.font))
         self.size_box.setValue(spec.font_size)
         self.color_button.set(spec.color)
         self.margin_x.setValue(spec.margin_x)
@@ -567,9 +604,8 @@ class WatermarkDialog(FormDialog):
         self.image_path.setAccessibleName("Watermark image file")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
-        self.font_box = QComboBox()
-        self.font_box.addItems(FONTS)
-        self.font_box.setCurrentText("hebo")
+        self.font_picker = FontPicker(self)
+        self.font_picker.set_selection(FontRef.standard("Helvetica"), "Helvetica")
         self.size_box = QDoubleSpinBox()
         self.size_box.setRange(6, 400)
         self.size_box.setValue(60)
@@ -596,7 +632,7 @@ class WatermarkDialog(FormDialog):
         form.addRow(self.use_image, img_row)
         self.appearance_section = self.add_section("Appearance")
         look = self.appearance_section.form()
-        add_row(look, "Font:", self.font_box)
+        add_row(look, "Font:", self.font_picker)
         add_row(look, "Size:", self.size_box)
         add_row(look, "Color:", self.color_button)
         add_row(look, "Opacity:", self.opacity)
@@ -614,11 +650,16 @@ class WatermarkDialog(FormDialog):
     def spec(self) -> Watermark:
         """Raises OSError if the image can't be read."""
         image = Path(self.image_path.text()).read_bytes() if self.use_image.isChecked() else None
+        ref = self.font_picker.current_ref()
+        font_ref = ref if ref.kind is FontRefKind.FILE else None
+        if font_ref is not None:
+            remember_font(font_ref)
         return Watermark(
             text=self.text.text(),
             image=image,
             image_path=self.image_path.text() if image is not None else "",
-            font=self.font_box.currentText(),
+            font=_base14_for_ref(ref),
+            font_ref=font_ref,
             font_size=self.size_box.value(),
             color=self.color_button.color,
             opacity=self.opacity.value() / 100,
@@ -632,7 +673,7 @@ class WatermarkDialog(FormDialog):
         self.text.setText(spec.text)
         self.image_path.setText(spec.image_path)
         (self.use_image if spec.image_path else self.use_text).setChecked(True)
-        self.font_box.setCurrentText(spec.font)
+        self.font_picker.set_selection(*_ref_for_base14(spec.font_ref, spec.font))
         self.size_box.setValue(spec.font_size)
         self.color_button.set(spec.color)
         self.opacity.setValue(round(spec.opacity * 100))
