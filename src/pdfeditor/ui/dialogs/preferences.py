@@ -123,6 +123,15 @@ class PreferencesDialog(FormDialog):
             "Small floating toolbars next to selected text, comments and pages. Their "
             "commands are also in the ribbon and the menus.",
         )
+        self.ocr_when_editing = QCheckBox("Recognize text when editing scanned pages")
+        self.ocr_when_editing.setChecked(settings.ocr_when_editing)
+        add_row(
+            form,
+            "",
+            self.ocr_when_editing,
+            "Edit Text & Images runs OCR on scanned pages and replaces the scanned text with "
+            "real text, so you can double-click a paragraph to edit it.",
+        )
 
         # -- Performance
         form = self.page_forms["Performance"]
@@ -229,6 +238,7 @@ class PreferencesDialog(FormDialog):
         s.default_tool = str(self.tool.currentData())
         s.keep_tools = self.keep_tools.isChecked()
         s.show_mini_toolbars = self.mini_toolbars.isChecked()
+        s.ocr_when_editing = self.ocr_when_editing.isChecked()
         s.language = str(self.language.currentData())
         s.theme = str(self.theme.currentData())
         s.show_menu_bar = self.menu_bar.isChecked()

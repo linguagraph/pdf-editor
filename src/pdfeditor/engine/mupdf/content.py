@@ -77,6 +77,10 @@ _STANDARD = {
 }
 _BASE14 = re.compile(r"^(Helvetica|Arial|Times|Courier)", re.IGNORECASE)
 _SUBSET = re.compile(r"^[A-Z]{6}\+")
+# operators that leave marks on the page (text shows count unless the render mode is 3)
+_PAINT = frozenset({"f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "sh", "BI", "EI", "d0", "d1"})
+_SHOW = frozenset({"Tj", "TJ", "'", '"'})
+_XOBJECT_ENTRY = re.compile(r"/([^\s/<>\[\]()]+)\s+(\d+)\s+0\s+R")
 _KIND_TYPES = {
     ObjectKind.IMAGE: ObjectType.IMAGE,
     ObjectKind.INLINE_IMAGE: ObjectType.IMAGE,
@@ -185,6 +189,48 @@ def _text_blocks(page: MuPage) -> list[Block]:
     return editable_blocks(page.text_page(with_chars=True).blocks)
 
 
+def _form_xobjects(doc: pymupdf.Document, form: int) -> dict[str, int]:
+    kind, value = doc.xref_get_key(form, "Resources/XObject")
+    if kind == "xref":
+        value = doc.xref_object(int(value.split()[0]), compressed=True)
+    elif kind != "dict":
+        return {}
+    return {m.group(1): int(m.group(2)) for m in _XOBJECT_ENTRY.finditer(value)}
+
+
+def _invisible_form(doc: pymupdf.Document, xref: int, depth: int = 0) -> bool:
+    """A form XObject that draws nothing visible: only invisible text (render mode 3), such as
+    an OCR layer added by an older version as a page-sized form. Listing it would let the Edit
+    tool select and drag it, moving the text boxes and nothing the user can see."""
+    if depth > 4:
+        return False
+    try:
+        ops = parse(doc.xref_stream(xref) or b"")
+    except ContentSyntaxError:
+        return False
+    names: dict[str, int] | None = None
+    render_mode = 0.0
+    shows = False
+    for op in ops:
+        if op.operator == "Tr" and op.operands and isinstance(op.operands[0], int | float):
+            render_mode = float(op.operands[0])
+        elif op.operator in _SHOW:
+            if render_mode != 3:
+                return False
+            shows = True
+        elif op.operator in _PAINT:
+            return False
+        elif op.operator == "Do":
+            names = _form_xobjects(doc, xref) if names is None else names
+            target = names.get(str(op.operands[0])) if op.operands else None
+            if target is None or doc.xref_get_key(target, "Subtype")[1] != "/Form":
+                return False
+            if not _invisible_form(doc, target, depth + 1):
+                return False
+            shows = True
+    return shows
+
+
 def list_objects(page: MuPage) -> list[PageObject]:
     out: list[PageObject] = []
     type3 = _type3_fonts(page)
@@ -202,7 +248,13 @@ def list_objects(page: MuPage) -> list[PageObject]:
     to_visible = _pdf_to_visible(page)
     sizes = {str(e[7]): (int(e[2]), int(e[3])) for e in page.fz.get_images(full=True)}
     _ops_list, objects = _content_objects(page)
+    forms = {
+        str(name): int(xref) for xref, name, invoker, _bbox in page.fz.get_xobjects() if not invoker
+    }
     for obj in objects:
+        form = forms.get(obj.name) if obj.kind is ObjectKind.FORM else None
+        if form is not None and _invisible_form(page._doc.fz, form):
+            continue
         out.append(
             PageObject(
                 _KIND_TYPES[obj.kind],

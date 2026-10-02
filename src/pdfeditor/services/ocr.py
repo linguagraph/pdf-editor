@@ -7,13 +7,14 @@ import tempfile
 import urllib.request
 from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pdfeditor.bundle import data_path
 from pdfeditor.core.jobs import CancelToken, ProgressFn, no_progress
 from pdfeditor.core.paths import data_dir
 from pdfeditor.engine.base import Document, Engine, SaveOptions
+from pdfeditor.model.scan import ScanCleanup, ScanTextPlan
 
 DOWNLOAD_URL = "https://github.com/tesseract-ocr/tessdata_fast/raw/main/{lang}.traineddata"
 # Common languages offered for download (Tesseract codes).
@@ -151,12 +152,20 @@ class OcrOptions:
     skip_pages_with_text: bool = True
     preprocess: bool = False
     deskew: bool = False
+    # KEEP: searchable (invisible text over the scan); ERASE/REMOVE: editable, visible text
+    cleanup: ScanCleanup = ScanCleanup.KEEP
 
 
 @dataclass
 class OcrResult:
     layers: dict[int, bytes] = field(default_factory=dict)  # page -> invisible text layer
     skipped: list[int] = field(default_factory=list)
+    # page -> how to make its recognized text editable (editable output only)
+    plans: dict[int, ScanTextPlan] = field(default_factory=dict)
+
+    @property
+    def changed_pages(self) -> list[int]:
+        return sorted(set(self.layers) | set(self.plans))
 
 
 def recognize(
@@ -172,7 +181,10 @@ def recognize(
     (rendering) can interleave with a long OCR run.
 
     ``status`` hears which page is being read *before* the work on it starts: one page can
-    take Tesseract several seconds, and ``progress`` only moves once it is done."""
+    take Tesseract several seconds, and ``progress`` only moves once it is done.
+
+    With editable output, a skipped page whose only text is an earlier, invisible OCR layer
+    gets a plan too, so it becomes editable without being recognized again."""
     tessdata = tessdata_for(options.languages)
     language = "+".join(options.languages)
     result = OcrResult()
@@ -182,19 +194,72 @@ def recognize(
         if status is not None:
             status(f"page {n + 1} of {len(pages)}")
         with lock if lock is not None else nullcontext():
+            page = doc.page(index)
+            layer: bytes | None = None
             if options.skip_pages_with_text and page_has_text(doc, index):
                 result.skipped.append(index)
+                editable = options.cleanup is not ScanCleanup.KEEP
+                if not (editable and page.scan_info().has_hidden_ocr):
+                    progress(n + 1, len(pages))
+                    continue
             else:
-                result.layers[index] = doc.page(index).ocr_text_layer(
+                layer = page.ocr_text_layer(
                     language, options.dpi, tessdata, options.preprocess, options.deskew
                 )
+                result.layers[index] = layer
+            if options.cleanup is not ScanCleanup.KEEP:
+                plan = page.scan_text_plan(layer, options.cleanup)
+                if plan is not None:
+                    result.plans[index] = plan
         progress(n + 1, len(pages))
     return result
 
 
 def apply(doc: Document, result: OcrResult) -> None:
-    for index, layer in result.layers.items():
-        doc.page(index).add_text_layer(layer)
+    for index in result.changed_pages:
+        page = doc.page(index)
+        layer = result.layers.get(index)
+        if layer is not None:
+            page.add_text_layer(layer)
+        plan = result.plans.get(index)
+        if plan is not None:
+            page.apply_scan_text_plan(plan)
+
+
+def scan_pages_to_edit(
+    doc: Document,
+    token: CancelToken | None = None,
+    lock: AbstractContextManager[object] | None = None,
+) -> list[int]:
+    """Scanned pages whose text can't be edited yet: never recognized, or recognized only
+    as an invisible (searchable) layer."""
+    out = []
+    for index in range(doc.page_count):
+        if token is not None:
+            token.check()
+        with lock if lock is not None else nullcontext():
+            info = doc.page(index).scan_info()
+        if info.needs_ocr or info.has_hidden_ocr:
+            out.append(index)
+    return out
+
+
+def make_scans_editable(
+    doc: Document,
+    options: OcrOptions,
+    token: CancelToken | None = None,
+    progress: ProgressFn = no_progress,
+    lock: AbstractContextManager[object] | None = None,
+    status: StatusFn | None = None,
+) -> OcrResult:
+    """Recognize every scanned page that isn't editable yet and plan visible text for it
+    (read-only; :func:`apply` makes the change). Used when the Edit tool opens a scan."""
+    pages = scan_pages_to_edit(doc, token, lock)
+    if not pages:
+        return OcrResult()
+    cleanup = ScanCleanup.ERASE if options.cleanup is ScanCleanup.KEEP else options.cleanup
+    editable = replace(options, skip_pages_with_text=True, cleanup=cleanup)
+    return recognize(doc, pages, editable, token, progress, lock, status)
 
 
 def _prefixed(status: StatusFn, prefix: str) -> StatusFn:

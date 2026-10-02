@@ -1539,6 +1539,8 @@ class MainWindow(QMainWindow):
         if view is not self.current_view():
             self.mode_banner.reserve(view, self._tool_mode(name) is not None)
         self._sync_tool_ui()
+        if name == "edit":
+            self.tools.prepare_scans_for_editing(view)
 
     def _sync_tool_ui(self) -> None:
         """Ribbon check state, status-bar indicator and mode banner follow the current

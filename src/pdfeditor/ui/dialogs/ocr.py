@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.model.scan import ScanCleanup
 from pdfeditor.services.ocr import (
     COMMON_LANGUAGES,
     OcrOptions,
@@ -34,6 +35,12 @@ from pdfeditor.ui.dialogs.pages import PageRangeBox
 from pdfeditor.ui.jobs import Job
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.style.tokens import METRICS
+
+OUTPUTS = (
+    (ScanCleanup.KEEP, "Searchable: keep the scan, add invisible text"),
+    (ScanCleanup.ERASE, "Editable: replace the scanned text with real text"),
+    (ScanCleanup.REMOVE, "Text only: real text, remove the scanned image"),
+)
 
 
 def format_bytes(n: int) -> str:
@@ -115,6 +122,11 @@ class OcrOptionsBox(QWidget):
         self.dpi.setSuffix(" dpi")
         self.skip_text = QCheckBox("Skip pages that already have text", self)
         self.skip_text.setChecked(remembered.ocr_skip_pages_with_text)
+        self.output = QComboBox(self)
+        self.output.setAccessibleName("OCR output")
+        for cleanup, text in OUTPUTS:
+            self.output.addItem(text, cleanup)
+        self.output.setCurrentIndex(max(0, self.output.findData(remembered.ocr_cleanup)))
         self.preprocess = QCheckBox("Clean up the image first (grayscale, denoise, binarize)", self)
         self.preprocess.setChecked(remembered.ocr_preprocess)
         self.deskew = QCheckBox("Straighten skewed scans (deskew)", self)
@@ -133,6 +145,13 @@ class OcrOptionsBox(QWidget):
         get_more.addLayout(download)
         get_more.addWidget(self.download_panel)
         add_row(form, "Get more:", get_more, "Downloaded languages are kept for next time.")
+        add_row(
+            form,
+            "Output:",
+            self.output,
+            "Editable output erases the recognized text from the scan, so edits look clean; "
+            "pictures and figures stay.",
+        )
         form.addRow("", self.skip_text)
         # the defaults suit most scans; these are for poor ones
         self.advanced = Section("Scan quality", self, expanded=False)
@@ -250,6 +269,7 @@ class OcrOptionsBox(QWidget):
             self.skip_text.isChecked(),
             self.preprocess.isChecked(),
             self.deskew.isChecked(),
+            cleanup=self.output.currentData(),
         )
 
 

@@ -30,6 +30,7 @@ from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Link, OutlineItem
 from pdfeditor.model.pages import ImageStamp, MarkKind, PageLabelRule, PageMark, TextStamp
 from pdfeditor.model.redaction import RedactOptions, SanitizeOptions
+from pdfeditor.model.scan import ScanCleanup, ScanInfo, ScanTextPlan
 from pdfeditor.model.structure import AccessibilitySettings, StructNode
 from pdfeditor.model.text import TableData, TextPage
 
@@ -303,6 +304,23 @@ class Page(Protocol):
 
     def add_text_layer(self, layer: bytes) -> None:
         """Overlay a layer from :meth:`ocr_text_layer` so the page becomes searchable."""
+        ...
+
+    def scan_info(self) -> ScanInfo:
+        """How much of the page is one image, and how much visible and invisible text it has
+        (to find scans that still need OCR, or whose OCR text is only searchable)."""
+        ...
+
+    def scan_text_plan(self, layer: bytes | None, cleanup: ScanCleanup) -> ScanTextPlan | None:
+        """Work out how to make recognized text on a scanned page visible and editable
+        (read-only; slow). ``layer`` is a fresh :meth:`ocr_text_layer` result, to be added with
+        :meth:`add_text_layer` before the plan is applied; None uses the page's own invisible
+        text. None when the page isn't a scan or has no recognized text to place."""
+        ...
+
+    def apply_scan_text_plan(self, plan: ScanTextPlan) -> None:
+        """Replace the invisible text under the plan's lines with real text, and clean up
+        the scan images it lists."""
         ...
 
     # Optional (``capabilities.export``).

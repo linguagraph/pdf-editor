@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pymupdf
 
 from pdfeditor.engine.base import ColorMode, PageBoxes, RenderRequest, RenderResult
-from pdfeditor.engine.mupdf import annots, content, marks, ocr, pages
+from pdfeditor.engine.mupdf import annots, content, marks, ocr, pages, scan
 from pdfeditor.engine.mupdf import convert as cv
 from pdfeditor.model.annotations import (
     STANDARD_STAMPS,
@@ -25,6 +25,7 @@ from pdfeditor.model.objects import FontChoice, PageObject, ShapeSpec, TextStyle
 from pdfeditor.model.outline import Destination, Link, LinkKind
 from pdfeditor.model.pages import ImageStamp, MarkKind, PageMark, TextStamp
 from pdfeditor.model.redaction import RedactOptions
+from pdfeditor.model.scan import ScanCleanup, ScanInfo, ScanTextPlan
 from pdfeditor.model.text import Block, Char, FontFlags, Line, Span, TableData, TextPage
 
 if TYPE_CHECKING:
@@ -334,6 +335,16 @@ class MuPage:
     def add_text_layer(self, layer: bytes) -> None:
         self._doc.unshare_page(self._index)
         ocr.add_text_layer(self, layer)
+
+    def scan_info(self) -> ScanInfo:
+        return scan.info(self)
+
+    def scan_text_plan(self, layer: bytes | None, cleanup: ScanCleanup) -> ScanTextPlan | None:
+        return scan.text_plan(self, layer, cleanup)
+
+    def apply_scan_text_plan(self, plan: ScanTextPlan) -> None:
+        self._doc.unshare_page(self._index)
+        scan.apply_plan(self, plan)
 
     def to_svg(self) -> str:
         return str(self.fz.get_svg_image(text_as_path=True))

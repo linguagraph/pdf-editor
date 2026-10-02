@@ -22,6 +22,8 @@ import pymupdf
 from pdfeditor.engine.base import EngineError
 from pdfeditor.engine.contentstream.parser import Name, parse, write
 from pdfeditor.engine.deskew import estimate_skew, rotate_about_center
+from pdfeditor.engine.mupdf import ocr_worker
+from pdfeditor.engine.mupdf.flatten import flatten_inserted_forms
 
 if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.page import MuPage
@@ -40,9 +42,9 @@ def text_layer(
     angle = 0.0
     if preprocess or deskew:
         pix, angle = _prepare(pix, preprocess, deskew)
-    pix.set_dpi(dpi, dpi)
     try:
-        data = pix.pdfocr_tobytes(language=language, tessdata=str(tessdata))
+        # in a helper process: MuPDF's OCR holds the GIL, which would freeze the window
+        data = ocr_worker.recognize(pix, dpi, language, str(tessdata))
     except Exception as exc:
         raise EngineError(f"OCR failed ({language}): {exc}") from exc
     ocr = pymupdf.open("pdf", data)
@@ -110,7 +112,11 @@ def add_text_layer(page: MuPage, layer: bytes) -> None:
         fz = page.fz
         # The layer is in visible orientation; counter-rotate it onto the unrotated page.
         target = (fz.rect * fz.derotation_matrix).normalize()
+        before = set(fz.get_contents())
         fz.show_pdf_page(target, src, 0, rotate=fz.rotation, overlay=True, keep_proportion=False)
+        # Inline the page-sized form show_pdf_page draws through: left as an object, the Edit
+        # tool would let it be selected and dragged (moving the invisible text, nothing else).
+        flatten_inserted_forms(fz, before)
     finally:
         src.close()
     page._doc.mark_page_changed(page.index)
