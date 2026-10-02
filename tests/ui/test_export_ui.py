@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtCore import Qt
 
 from pdfeditor.ui.dialogs.export import ExportDialog, ExportFormat, TablePickerDialog
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -61,7 +62,9 @@ def test_dialog_adapts_to_format(window: MainWindow, view) -> None:
 
 
 def test_export_word_and_images(window: MainWindow, view, tmp_path: Path) -> None:
-    written = window.export.export(dialog_for(window, view, ExportFormat.WORD, tmp_path / "out"))
+    written = wait_for(
+        window.export.export(dialog_for(window, view, ExportFormat.WORD, tmp_path / "out"))
+    )
     assert written == [tmp_path / "out.docx"]
     with zipfile.ZipFile(written[0]) as z:
         body = z.read("word/document.xml")
@@ -70,7 +73,7 @@ def test_export_word_and_images(window: MainWindow, view, tmp_path: Path) -> Non
     assert "Exported 2 page(s)" in window.export.last_message
     d = dialog_for(window, view, ExportFormat.PNG, tmp_path / "pg")
     d.dpi.setValue(40)
-    written = window.export.export(d)
+    written = wait_for(window.export.export(d))
     assert [p.name for p in written] == ["pg-1.png", "pg-2.png"]
     assert not view.session.is_dirty
 
@@ -89,7 +92,9 @@ def test_export_tables_with_picker(window: MainWindow, view, tmp_path: Path) -> 
     original = ec.TablePickerDialog
     ec.TablePickerDialog = Picker  # type: ignore[misc]
     try:
-        written = window.export.export(dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "t"))
+        written = wait_for(
+            window.export.export(dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "t"))
+        )
     finally:
         ec.TablePickerDialog = original  # type: ignore[misc]
     assert written == [tmp_path / "t.xlsx"] and picked[0].tree.topLevelItemCount() == 1
@@ -100,8 +105,10 @@ def test_export_tables_with_picker(window: MainWindow, view, tmp_path: Path) -> 
     picker.accept()
     assert picker.chosen() == []
     assert (
-        window.export.export(
-            dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "u"), picker=picker
+        wait_for(
+            window.export.export(
+                dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "u"), picker=picker
+            )
         )
         == []
     )
@@ -116,14 +123,15 @@ def test_no_tables_is_reported(
         "pdfeditor.ui.export_controller.QMessageBox.information",
         lambda _p, _t, msg: shown.append(msg),
     )
-    assert window.export.export(dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "x")) == []
+    job = window.export.export(dialog_for(window, view, ExportFormat.EXCEL, tmp_path / "x"))
+    assert wait_for(job) == []
     assert shown and "No tables" in shown[0]
 
 
 def test_extract_images_and_fonts(window: MainWindow, view, tmp_path: Path) -> None:
-    images = window.export.extract_images(tmp_path / "img")
+    images = wait_for(window.export.extract_images(tmp_path / "img"))
     assert len(images) == 1 and "Extracted 1 image" in window.export.last_message
-    assert window.export.extract_fonts(tmp_path / "fonts") == []
+    assert wait_for(window.export.extract_fonts(tmp_path / "fonts")) == []
     assert "not embedded" in window.export.last_message
 
 
@@ -142,7 +150,7 @@ def test_office_conversion_opens_new_tab(window: MainWindow, fixture_pdf, monkey
     data = fixture_pdf("report").read_bytes()
     monkeypatch.setattr("pdfeditor.ui.export_controller.find_soffice", lambda: Path("soffice"))
     monkeypatch.setattr("pdfeditor.ui.export_controller.convert_to_pdf", lambda _p: data)
-    view = window.export.from_office(Path("letter.docx"))
+    view = wait_for(window.export.from_office(Path("letter.docx")))
     assert view is not None and view.page_count == 2
     assert view.session.name_hint == "letter.pdf"
 

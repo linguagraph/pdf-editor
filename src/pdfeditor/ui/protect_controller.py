@@ -40,6 +40,7 @@ from pdfeditor.ui.dialogs.redaction import (
 from pdfeditor.ui.dialogs.security import SecurityDialog
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.redactions import RedactionsPanel
+from pdfeditor.ui.toasts import undo_action
 from pdfeditor.ui.tools.base import Tool
 
 if TYPE_CHECKING:
@@ -263,7 +264,13 @@ class ProtectController:
                 self.w, "Apply Redactions", "There are no redaction marks to apply."
             )
             return None
-        dialog = dialog or ApplyRedactionsDialog(len(all_marks), len(marks or []), self.w)
+        dialog = dialog or ApplyRedactionsDialog(
+            len(all_marks),
+            len(marks or []),
+            self.w,
+            total_pages=len({m.page_index for m in all_marks}),
+            selected_pages=len({m.page_index for m in marks or []}),
+        )
         if not dialog.result() and not dialog.exec():
             return None
         chosen = marks if (marks and dialog.selected.isChecked()) else all_marks
@@ -308,7 +315,7 @@ class ProtectController:
             message = f"{details}: no text or image content is left under the redactions."
             if report.unverified:
                 message += "\n\nNot verified:\n" + "\n".join(report.unverified)
-            self.w.statusBar().showMessage(message.splitlines()[0], 8000)
+            self.w.notify(message.splitlines()[0], "success")
             self.last_message = message
         else:
             self.last_message = "Some content may still be readable:\n\n" + "\n".join(report.leaks)
@@ -332,7 +339,7 @@ class ProtectController:
         session.require_full_save = True
         summary = ("Removed: " + "; ".join(removed)) if removed else "Nothing needed removing."
         self.last_message = summary + "\n\nSave the document to write the cleaned file."
-        self.w.statusBar().showMessage(summary, 8000)
+        self.w.notify(summary, "success", undo_action(session) if removed else None)
         return removed
 
     last_message = ""
@@ -361,7 +368,7 @@ class ProtectController:
 
     def _notify(self, message: str) -> None:
         self.last_message = message
-        self.w.statusBar().showMessage(message, 8000)
+        self.w.notify(message)
 
     def encrypt(
         self, dialog: SecurityDialog | None = None, owner_password: str | None = None
@@ -395,6 +402,13 @@ class ProtectController:
             QMessageBox.information(self.w, "Remove Security", "This document has no security.")
             return False
         if encrypted and not self.owner_access(session, owner_password):
+            return False
+        if encrypted and not self.w.confirm(
+            "Remove Security",
+            f"Remove the passwords and permission restrictions from “{session.display_name}”. "
+            "Once saved, anyone can open, print, copy and change it.",
+            "Remove Security",
+        ):
             return False
         if not encrypted:  # only a pending change: just drop it
             session.execute(SetSecurityCommand(SecuritySettings(EncryptionMethod.NONE)))

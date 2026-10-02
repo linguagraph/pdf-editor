@@ -119,6 +119,11 @@ class UndoStack:
         return bool(self._redo)
 
     @property
+    def top(self) -> Command | None:
+        """The command the next undo would revert (an "Undo" offer checks it's still this)."""
+        return self._undo[-1] if self._undo else None
+
+    @property
     def undo_label(self) -> str:
         return self._undo[-1].label if self._undo else ""
 

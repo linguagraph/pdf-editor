@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pdfeditor.services.accessibility import Status
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -111,7 +112,7 @@ def test_untagged_document(window: MainWindow, fixture_pdf) -> None:
     assert window.tags_panel.empty.isVisibleTo(window.tags_panel)
 
 
-def test_auto_tag(window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) -> None:
+def test_auto_tag(qtbot, window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "report.pdf"
     shutil.copy2(fixture_pdf("report"), path)
     view = window.open_path(path)
@@ -124,7 +125,11 @@ def test_auto_tag(window: MainWindow, fixture_pdf, tmp_path: Path, monkeypatch) 
     window.show_panel(tags)
     assert not tags.nodes
     action.trigger()
+    (job,) = window.jobs.running()  # tagging runs in the background
+    assert view.session.busy  # and the document is read-only meanwhile
+    wait_for(job)
     assert "Tagged the document" in window.pdfa.last_message and view.session.is_dirty
+    assert window.toasts.last_text() == window.pdfa.last_message
     types = {n.type for n in tags.nodes.values()}
     assert {"Document", "H1", "H2", "P", "Figure"} <= types
     window.accessibility_check()

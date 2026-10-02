@@ -7,6 +7,7 @@ import pytest
 
 from pdfeditor.services.ocr import installed_languages
 from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = [
@@ -40,7 +41,7 @@ def test_recognize_text_is_undoable(window: MainWindow, fixture_pdf, tmp_path: P
     dialog = OcrDialog(view.page_count, 0, [], window)
     dialog.box.dpi.setValue(200)
     dialog.accept()
-    result = window.tools.recognize(dialog)
+    result = wait_for(window.tools.recognize(dialog))
     assert result is not None and list(result.layers) == [0]
     assert "Scanned" in page_text(view)
     assert "Recognized text on 1 page" in window.tools.last_message
@@ -73,7 +74,7 @@ def test_batch_ocr(window: MainWindow, fixture_pdf, tmp_path: Path) -> None:
     dialog.out_dir.setText(str(tmp_path / "out"))
     dialog.box.dpi.setValue(150)
     dialog.accept()
-    written = window.tools.batch_ocr(dialog)
+    written = wait_for(window.tools.batch_ocr(dialog))
     assert [p.name for p in written] == ["scanned.pdf"]
     assert written[0].exists()
 

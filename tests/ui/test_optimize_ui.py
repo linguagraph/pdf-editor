@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pdfeditor.ui.dialogs.optimize import ReduceSizeDialog, SpaceAuditDialog, human_size
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -56,7 +57,7 @@ def test_reduce_saves_a_copy(window: MainWindow, view, tmp_path: Path) -> None:
     d = ReduceSizeDialog(view.session.path, original, window)
     d.target.setText(str(tmp_path / "small.pdf"))
     d.accept()
-    target = window.optimize.reduce(d)
+    target = wait_for(window.optimize.reduce(d))
     assert target == tmp_path / "small.pdf"
     assert target.stat().st_size < original / 20
     assert "→" in window.optimize.last_message
@@ -74,8 +75,10 @@ def test_estimate_is_reused(window: MainWindow, view, tmp_path: Path, monkeypatc
     assert "smaller" in d.estimate_label.text()
     calls: list[int] = []
     monkeypatch.setattr(window.optimize, "_reduce", lambda *a: calls.append(1))
+    monkeypatch.setattr(window.optimize, "_reduce_work", lambda *a: calls.append(2))
     d.accept()
-    assert window.optimize.reduce(d) == tmp_path / "x.pdf" and calls == []
+    assert wait_for(window.optimize.reduce(d)) == tmp_path / "x.pdf" and calls == []
+    assert window.jobs.running() == []  # written at once, no job
     d.grayscale.setChecked(True)  # changing settings drops the estimate
     assert d.estimate is None
 
@@ -93,7 +96,7 @@ def test_refuses_to_overwrite_open_file(window: MainWindow, view, monkeypatch) -
 
 
 def test_audit(window: MainWindow, view) -> None:
-    usage = window.optimize.audit(show=False)
+    usage = wait_for(window.optimize.audit(show=False))
     assert usage is not None and usage.share("Images") > 0.5
     dialog = SpaceAuditDialog(usage, window)
     assert dialog.table.item(0, 0).text() == "Images"

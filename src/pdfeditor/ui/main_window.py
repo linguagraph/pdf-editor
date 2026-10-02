@@ -64,6 +64,7 @@ from pdfeditor.ui.action_help import apply_short_labels, refresh_tooltips
 from pdfeditor.ui.command_search import CommandSearch
 from pdfeditor.ui.compare_controller import CompareController
 from pdfeditor.ui.contextual import ContextualToolbars
+from pdfeditor.ui.dialogs import confirm
 from pdfeditor.ui.dialogs.about import AboutDialog
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
@@ -75,6 +76,7 @@ from pdfeditor.ui.document_tabs import DocumentTabWidget
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.export_controller import ExportController
 from pdfeditor.ui.icons import icon
+from pdfeditor.ui.job_center import JobCenter, ProgressChip
 from pdfeditor.ui.optimize_controller import OptimizeController
 from pdfeditor.ui.organize import OrganizeController
 from pdfeditor.ui.panels.accessibility import AccessibilityPanel, TagsPanel
@@ -96,6 +98,7 @@ from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
 from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.start_page import StartPage
 from pdfeditor.ui.theme import Theme, apply_theme
+from pdfeditor.ui.toasts import Kind, Toast, ToastAction, ToastHost, folder_action
 from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
 from pdfeditor.ui.tools.hand import HandTool
@@ -149,6 +152,21 @@ MARKUP_TOOLS = {
     "strikeout": AnnotationType.STRIKEOUT,
     "squiggly": AnnotationType.SQUIGGLY,
 }
+
+
+def count(n: int, noun: str) -> str:
+    """'1 page', '3 pages'."""
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
+def unsaved_text(session: DocumentSession) -> str:
+    changes = len(session.undo_stack)
+    if changes:
+        return (
+            f"The last {count(changes, 'change')} you made will be lost if you close it "
+            "without saving."
+        )
+    return "Your changes will be lost if you close it without saving."
 
 
 def annotate_transform(model: AnnotationModel, m: Matrix) -> AnnotationModel:
@@ -276,6 +294,14 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.tool_exit)
         self.tool_label.hide()
         self.tool_exit.hide()
+        # Feedback (U8): toasts over the bottom right of the page area, and running jobs as a
+        # chip at the right of the status bar instead of modal progress dialogs.
+        self.toasts = ToastHost(self, avoid=lambda: self.pill if self.pill.isVisible() else None)
+        self.jobs = JobCenter(self.notify, self)
+        self.progress_chip = ProgressChip(self.jobs, self)
+        self.statusBar().addPermanentWidget(self.progress_chip)
+        self.jobs.running_changed.connect(self._update_ui)
+        self._busy_disabled: list[QAction] = []
         self.mode_banner = ModeBanner(self)
         self.mode_banner.done.connect(lambda: self.set_tool("select"))
 
@@ -796,12 +822,23 @@ class MainWindow(QMainWindow):
         with session.lock:
             repaired = session.document.info().is_repaired
         if repaired:
-            self.statusBar().showMessage(
+            self.notify(
                 f"“{path.name}” was damaged and has been repaired. "
                 "Save it to keep the repaired version.",
-                15000,
+                timeout_ms=15000,
             )
         return view
+
+    # -- feedback -------------------------------------------------------------------------
+    def notify(
+        self,
+        text: str,
+        kind: Kind = "info",
+        action: ToastAction | None = None,
+        timeout_ms: int | None = None,
+    ) -> Toast:
+        """Show a toast: a short non-blocking message, optionally with one action button."""
+        return self.toasts.show(text, kind, action, timeout_ms)
 
     def _add_session(self, session: DocumentSession) -> DocumentView:
         session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
@@ -844,6 +881,12 @@ class MainWindow(QMainWindow):
                 self._update_ui()
         if event.kind is EventKind.SAVED:
             self.autosaver.forget(view.session)
+        if event.kind is EventKind.BLOCKED:
+            self.notify(
+                f"“{view.session.display_name}” can't be changed while “{view.session.busy}” "
+                "is running. Wait for it to finish, or cancel it.",
+                "error",
+            )
 
     def _update_tab_title(self, view: DocumentView) -> None:
         index = self._tab_index(view)
@@ -862,6 +905,7 @@ class MainWindow(QMainWindow):
             editor.commit()
         if ask and not self._confirm_discard(view):
             return False
+        self.jobs.cancel_for(view.session)  # and wait: its job must be done with the document
         view.set_tool(SelectTool())  # end the document's tool (outlines, editors, previews)
         self.tabs.removeTab(index)
         tab.close_tab()
@@ -877,16 +921,24 @@ class MainWindow(QMainWindow):
             self.close_tab(self.tabs.currentIndex())
 
     def ask_save_changes(self, session: DocumentSession) -> QMessageBox.StandardButton:
-        """Save / Discard / Cancel prompt (separate so tests can answer it)."""
-        return QMessageBox.question(
+        """Save / Don't Save / Cancel prompt (separate so tests can answer it)."""
+        dialog = confirm.ConfirmDialog(
+            f"Save changes to “{session.display_name}”?",
+            unsaved_text(session),
+            "Don't Save",
             self,
-            "Unsaved Changes",
-            f"Save changes to “{session.display_name}” before closing?",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save,
+            window_title="Unsaved Changes",
+            extra="Save",
         )
+        try:
+            code = dialog.exec()
+        finally:
+            dialog.deleteLater()
+        if code == confirm.ConfirmDialog.EXTRA:
+            return QMessageBox.StandardButton.Save
+        if code == confirm.ConfirmDialog.DialogCode.Accepted:
+            return QMessageBox.StandardButton.Discard
+        return QMessageBox.StandardButton.Cancel
 
     def _confirm_discard(self, view: DocumentView) -> bool:
         if not view.session.is_dirty:
@@ -938,7 +990,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabToolTip(index, str(saved))
         self._update_tab_title(view)
         self._update_ui()
-        self.statusBar().showMessage(f"Saved {saved.name}", 3000)
+        self.notify(f"Saved {saved.name}", "success", folder_action(saved))
         return True
 
     def undo(self) -> None:
@@ -1066,6 +1118,26 @@ class MainWindow(QMainWindow):
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         else:
             self.setWindowTitle("pdfeditor")
+        self._sync_read_only(view)
+        self.toasts.refresh()
+
+    def _sync_read_only(self, view: DocumentView | None) -> None:
+        """While a job works on the current document it is read-only (see ui/job_center.py):
+        undo, redo and the editing tools are disabled, and enabled again once it ends."""
+        busy = view is not None and bool(view.session.busy)
+        if busy:
+            self.act_undo.setEnabled(False)
+            self.act_redo.setEnabled(False)
+            for name, action in self.tool_actions.items():
+                if name not in ("select", "hand") and action.isEnabled():
+                    action.setEnabled(False)
+                    self._busy_disabled.append(action)
+        else:
+            for action in self._busy_disabled:
+                action.setEnabled(True)
+            self._busy_disabled.clear()
+            if view is not None:
+                self.edit.update_state(view)  # edit tools follow the engine's capabilities
 
     # -- navigation slots -----------------------------------------------------------------
     def first_page(self) -> None:
@@ -1111,7 +1183,7 @@ class MainWindow(QMainWindow):
                 if new_view is not None and link.dest is not None:
                     new_view.go_to_page(link.dest.page_index, link.dest.point)
         else:
-            self.statusBar().showMessage("This kind of link isn't supported.", 4000)
+            self.notify("This kind of link isn't supported.")
 
     # -- text & tools ---------------------------------------------------------------------
     def copy_selection(self) -> None:
@@ -1120,12 +1192,10 @@ class MainWindow(QMainWindow):
             return
         if view.selected_annotations:
             self._annotation_clipboard = [copy.deepcopy(m) for m in view.selected_models()]
-            self.statusBar().showMessage(
-                f"Copied {len(self._annotation_clipboard)} comment(s).", 2000
-            )
+            self.notify(f"Copied {count(len(self._annotation_clipboard), 'comment')}.")
             self._update_ui()
         elif view.copy_selection():
-            self.statusBar().showMessage("Copied to clipboard.", 2000)
+            self.notify("Copied to clipboard.")
 
     def paste_annotations(self) -> None:
         """Paste copied comments onto the current page, slightly offset."""
@@ -1204,7 +1274,7 @@ class MainWindow(QMainWindow):
                 Path(chosen).write_bytes(model.file_data)
             return
         if model.locked:
-            self.statusBar().showMessage("This comment is locked.", 3000)
+            self.notify("This comment is locked.")
             return
         text = annotate.ask_text(view, "Edit Comment", model.contents)
         if text is not None and text != model.contents:
@@ -1276,13 +1346,17 @@ class MainWindow(QMainWindow):
         if view is None or not view.session.engine.capabilities.annotations_flatten:
             return 0
         if confirm:
-            answer = QMessageBox.question(
-                self,
+            comments, pages = self._flattenable(view)
+            if not comments:
+                self.notify("There are no comments to flatten.")
+                return 0
+            if not self.confirm(
                 "Flatten Comments",
-                "Make all comments part of the page content? They can't be edited as comments "
-                "afterwards (you can still undo).",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+                f"Burn {count(comments, 'comment')} on {count(pages, 'page')} into the page "
+                "content. They can no longer be edited, replied to or deleted as comments. "
+                "This can't be undone after saving.",
+                f"Flatten {count(comments, 'Comment')}",
+            ):
                 return 0
         counted: list[int] = []
 
@@ -1292,6 +1366,21 @@ class MainWindow(QMainWindow):
         session = view.session
         session.execute(SnapshotCommand("Flatten Comments", operation, session.snapshots))
         return counted[0] if counted else 0
+
+    @staticmethod
+    def _flattenable(view: DocumentView) -> tuple[int, int]:
+        """Comments Flatten All would burn in, and on how many pages (as the engine counts:
+        links, form fields, popups and hidden ones stay)."""
+        skip = {AnnotationType.POPUP, AnnotationType.LINK, AnnotationType.WIDGET}
+        per_page = [
+            sum(1 for a in view.page_annotations(p) if a.type not in skip and not a.flags & 2)
+            for p in range(view.page_count)
+        ]
+        return sum(per_page), sum(1 for n in per_page if n)
+
+    def confirm(self, title: str, text: str, action_label: str) -> bool:
+        """Ask before a destructive command (red button naming it; Cancel is the default)."""
+        return confirm.confirm_destructive(self, title, text, action_label)
 
     def show_find(self) -> None:
         view = self.current_view()
@@ -1567,6 +1656,8 @@ class MainWindow(QMainWindow):
             if not self._confirm_discard(view):
                 event.ignore()
                 return
+        self.jobs.cancel_all()  # and wait, before the documents they read are closed
+        self.toasts.clear()
         for side in (self.nav_panels, self.inspector_panels):
             side.remember_width()
             side.save()

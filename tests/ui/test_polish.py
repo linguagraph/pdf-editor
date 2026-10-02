@@ -105,7 +105,8 @@ def test_repaired_file_is_announced(window: MainWindow, fixture_pdf, tmp_path: P
     path = tmp_path / "damaged.pdf"
     path.write_bytes(data[: len(data) // 2])
     assert window.open_path(path) is not None
-    assert "repaired" in window.statusBar().currentMessage()
+    assert "repaired" in window.toasts.last_text()
+    assert window.toasts.toasts()[-1].text == window.toasts.last_text()
 
 
 def test_select_all_is_instant_on_huge_documents(window: MainWindow, fixture_pdf) -> None:

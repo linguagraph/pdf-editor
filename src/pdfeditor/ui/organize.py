@@ -51,6 +51,7 @@ from pdfeditor.ui.dialogs.pages import (
 )
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.icons import icon
+from pdfeditor.ui.toasts import folder_action, undo_action
 
 if TYPE_CHECKING:
     from pdfeditor.ui.document_tab import DocumentTab
@@ -210,8 +211,14 @@ class OrganizeController:
         if got is None:
             return
         tab, pages = got
-        page_ops.delete_pages(tab.view.session, pages)
+        session = tab.view.session
+        before = session.page_count
+        page_ops.delete_pages(session, pages)
         self._after(tab, [min(pages)])
+        deleted = before - session.page_count
+        if deleted:  # undoable, so no confirmation: the toast offers Undo instead
+            noun = "page" if deleted == 1 else "pages"
+            self.w.notify(f"{deleted} {noun} deleted", action=undo_action(session))
 
     def rotate(self, delta: int) -> None:
         got = self._pages()
@@ -353,8 +360,10 @@ class OrganizeController:
             written = write_split(
                 engine, doc, plan, Path(dialog.folder.text()), dialog.stem.text() or "part"
             )
-        self.w.statusBar().showMessage(
-            f"Split into {len(written)} files in {dialog.folder.text()}", 5000
+        self.w.notify(
+            f"Split into {len(written)} files in {dialog.folder.text()}",
+            "success",
+            folder_action(written[0]) if written else None,
         )
         return written
 
@@ -414,7 +423,10 @@ class OrganizeController:
             return
         if dialog.trim.isChecked():
             changed = page_ops.trim_white_margins(view.session, pages)
-            self.w.statusBar().showMessage(f"Removed white margins on {changed} page(s).", 4000)
+            self.w.notify(
+                f"Removed white margins on {changed} page(s).",
+                action=undo_action(view.session) if changed else None,
+            )
         else:
             page_ops.crop_pages(view.session, pages, dialog.margins())
         self._after(tab, pages)
@@ -632,8 +644,9 @@ class OrganizeController:
             f"Remove {MARK_NAMES[kind]}",
             lambda doc: removed.append(stamping.remove_marks(engine, doc, [kind])),
         )
-        self.w.statusBar().showMessage(
-            f"Removed {_bare(kind)} from {len(info.pages)} page(s).", 4000
+        self.w.notify(
+            f"Removed {_bare(kind)} from {len(info.pages)} page(s).",
+            action=undo_action(session),
         )
         return sum(removed)
 

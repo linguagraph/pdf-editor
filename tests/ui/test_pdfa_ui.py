@@ -7,6 +7,7 @@ from pathlib import Path
 import pikepdf
 import pytest
 
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -33,13 +34,13 @@ def test_preflight_and_save_as_pdfa(
     path = tmp_path / "report.pdf"
     shutil.copy2(fixture_pdf("report"), path)
     view = window.open_path(path)
-    issues = window.pdfa.preflight()
+    issues = wait_for(window.pdfa.preflight())
     assert issues and {i.code for i in issues} == {"output-intent", "identification", "fonts"}
     dialog = window.pdfa.dialog
     assert dialog is not None and dialog.convert_button is not None
     assert dialog.issues.count() == 3
     dialog.close()
-    result = window.pdfa.save_as_pdfa(tmp_path / "out.pdf")
+    result = wait_for(window.pdfa.save_as_pdfa(tmp_path / "out.pdf"))
     assert result is not None and result.conforming
     assert "PDF/A-2b copy" in window.pdfa.last_message
     with pikepdf.open(tmp_path / "out.pdf") as pdf:
@@ -55,7 +56,7 @@ def test_preflight_and_save_as_pdfa(
 
 def test_unfixable_problems_are_shown(window: MainWindow, fixture_pdf, tmp_path: Path) -> None:
     window.open_path(fixture_pdf("cjk_text"))
-    result = window.pdfa.save_as_pdfa(tmp_path / "cjk.pdf")
+    result = wait_for(window.pdfa.save_as_pdfa(tmp_path / "cjk.pdf"))
     assert result is not None and not result.conforming
     assert "isn't PDF/A yet" in window.pdfa.last_message
     assert window.pdfa.dialog is not None and window.pdfa.dialog.issues.count() == 1
@@ -71,7 +72,7 @@ def test_encrypted_needs_owner_password(
     monkeypatch.setattr(
         "pdfeditor.ui.protect_controller.QInputDialog.getText", lambda *_a, **_k: ("owner", True)
     )
-    result = window.pdfa.save_as_pdfa(tmp_path / "plain.pdf")
+    result = wait_for(window.pdfa.save_as_pdfa(tmp_path / "plain.pdf"))
     assert result is not None
     with pikepdf.open(io.BytesIO((tmp_path / "plain.pdf").read_bytes())) as pdf:
         assert not pdf.is_encrypted

@@ -258,6 +258,45 @@ QListWidget#CommandSearchPopup::item {{
 }}
 QListWidget#CommandSearchPopup::item:selected {{ background: {c.accent_subtle}; color: {c.text}; }}
 QListWidget#CommandSearchPopup::item:disabled {{ color: {c.text_muted}; }}
+/* feedback (U8): toasts, the progress chip and its details, confirmations */
+QFrame#ToastFrame {{
+    background: {c.surface}; border: 1px solid {c.border_strong};
+    border-left: 4px solid {c.accent_text}; border-radius: {m.radius_large}px;
+}}
+QFrame#ToastFrame[kind="success"] {{ border-left-color: {c.success}; }}
+QFrame#ToastFrame[kind="error"] {{ border-left-color: {c.danger}; }}
+QFrame#ToastFrame QLabel {{ background: transparent; color: {c.text}; }}
+QPushButton#ToastAction {{
+    background: transparent; color: {c.accent_text}; font-weight: 600;
+    border: 1px solid transparent; padding: {m.space(1)}px {m.space(2)}px; min-width: 0;
+}}
+QPushButton#ToastAction:hover {{ background: {c.hover}; }}
+QPushButton#ToastAction:pressed {{ background: {c.pressed}; }}
+QPushButton#ToastAction:focus {{ border-color: {c.accent_text}; }}
+QPushButton#ToastAction:disabled {{ color: {c.text_disabled}; }}
+QFrame#ProgressChip {{
+    background: {c.surface}; border: 1px solid {c.border}; border-radius: 11px;
+    margin: 2px {m.space(1)}px;
+}}
+QToolButton#ProgressChipButton {{ border-radius: 9px; padding: 0 {m.space(1)}px; }}
+QToolButton#ProgressChipCancel {{ border-radius: 9px; padding: 1px; }}
+QFrame#ProgressChip QProgressBar, QFrame#JobDetails QProgressBar {{
+    background: {c.hover}; border: none; border-radius: 3px; max-height: 6px;
+}}
+QFrame#ProgressChip QProgressBar::chunk, QFrame#JobDetails QProgressBar::chunk {{
+    background: {c.accent}; border-radius: 3px;
+}}
+QFrame#JobDetails {{
+    background: {c.surface}; border: 1px solid {c.border_strong};
+    border-radius: {m.radius_large}px;
+}}
+QLabel#JobDetailsTitle, QLabel#JobName {{ font-weight: 600; }}
+QToolButton#JobCancel {{ border: 1px solid {c.border_strong}; padding: 2px {m.space(2)}px; }}
+QToolButton#JobCancel:hover {{ border-color: {c.text_muted}; }}
+QPushButton[role="secondary"]:default {{
+    background: {c.surface}; color: {c.text}; border-color: {c.border_strong};
+}}
+QPushButton[role="secondary"]:default:focus {{ border: 2px solid {c.accent_text}; }}
 """
 
 
