@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 def _launch_explorer(path: Path) -> bool:
     """Windows: open Explorer with ``path`` selected. Explorer ships with Windows, so this
     needs nothing installed; its odd ``/select,"path"`` syntax must reach it unquoted."""
+    if sys.platform != "win32":  # setNativeArguments exists only in Windows builds of Qt
+        return False
     process = QProcess()
     process.setProgram("explorer.exe")
     process.setNativeArguments(f'/select,"{path}"')
