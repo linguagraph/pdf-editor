@@ -225,6 +225,74 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         scheme = theme_manager().scheme
         return f"Qt {qVersion()}, main window OK, {len(actions)} toolbar icons, {scheme} theme"
 
+    def modern_ui() -> str:
+        """Phase U pieces that only break frozen: bundled icons, fonts, tokens, a11y events."""
+        from PySide6.QtCore import QCoreApplication, QSettings, Qt
+        from PySide6.QtGui import QAccessible, QFontInfo, QFontMetrics, QImage
+        from PySide6.QtWidgets import QApplication
+
+        from pdfeditor.ui import toasts
+        from pdfeditor.ui.icons import icon
+        from pdfeditor.ui.main_window import MainWindow
+        from pdfeditor.ui.theme import Theme, apply_theme, theme_manager
+
+        app = QApplication.instance() or QApplication(sys.argv[:1])
+        assert isinstance(app, QApplication)
+        QCoreApplication.setOrganizationName("pdfeditor-selftest")
+        QCoreApplication.setApplicationName("pdfeditor-selftest")
+        # every bundled icon (data/icons) renders through QtSvg with ink
+        svgs = sorted(data_path("icons").glob("*.svg"))
+        if len(svgs) < 50:
+            raise AssertionError(f"only {len(svgs)} icons bundled")
+        for svg in svgs:
+            image = icon(svg.stem).pixmap(16, 16).toImage()
+            if not any(image.pixelColor(x, y).alpha() for x in range(16) for y in range(16)):
+                raise AssertionError(f"icon {svg.stem} rendered blank")
+        window = MainWindow()  # picks the UI font (Segoe UI Variable, else the default)
+        try:
+            window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+            window.resize(1100, 720)
+            window.show()
+            app.processEvents()
+            start = window.start_page
+            if window.welcome is not start or not start.isVisible():
+                raise AssertionError("the start page isn't shown without a document")
+            buttons = [*start.quick_buttons.values(), *window.nav_panels.rail.buttons()]
+            blank = [b.accessibleName() for b in buttons if b.icon().isNull()]
+            if not start.quick_buttons or blank:
+                raise AssertionError(f"start page or rail buttons without icons: {blank}")
+            family = QFontInfo(app.font()).family() or "(no system fonts)"
+            QFontMetrics(app.font()).horizontalAdvance("Welcome to pdfeditor")
+            # light and dark tokens build different style sheets, and the window draws in both
+            manager = theme_manager()
+            sheets = []
+            for theme in (Theme.LIGHT, Theme.DARK):
+                apply_theme(app, theme, "#0067c0")
+                sheets.append(app.styleSheet())
+                image = QImage(window.size(), QImage.Format.Format_RGB32)
+                window.render(image)
+                colors = {image.pixel(x, y) for x in range(0, image.width(), 7) for y in (40, 300)}
+                if len(colors) < 3:
+                    raise AssertionError(f"the window rendered blank in the {theme.value} theme")
+            if not manager.high_contrast() and (not all(sheets) or sheets[0] == sheets[1]):
+                raise AssertionError("the light and dark style sheets didn't load")
+            # toasts announce themselves to screen readers (Qt >= 6.8 announcement events)
+            from PySide6.QtGui import QAccessibleAnnouncementEvent  # noqa: F401 - must import
+
+            toast = window.notify("Self-test announcement", "info")
+            was_active = QAccessible.isActive()
+            QAccessible.setActive(True)
+            try:
+                toasts.announce(toast, "Self-test announcement", assertive=True)
+            finally:
+                QAccessible.setActive(was_active)
+            panels = len(window.nav_panels.panels())
+        finally:
+            window.close()
+            apply_theme(app, Theme.SYSTEM)
+            QSettings().clear()
+        return f"{len(svgs)} icons, start page, {panels} side panels, font {family}, announcements"
+
     def printing() -> str:
         from pdfeditor.core.session import DocumentSession as Session
         from pdfeditor.ui.printing import PrintOptions, pdf_printer, print_pages
@@ -361,6 +429,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("fonts", fonts),
         ("save + verify", save_copy),
         ("Qt main window", qt_gui),
+        ("modern UI", modern_ui),
         ("print to PDF", printing),
         ("OCR", ocr),
         ("export", export),

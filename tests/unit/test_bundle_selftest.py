@@ -29,4 +29,4 @@ def test_self_test_passes_from_source(tmp_path) -> None:
     )
     text = report.read_text(encoding="utf-8")
     assert proc.returncode == 0, text
-    assert "RESULT: OK" in text and text.count("[PASS]") == 19
+    assert "RESULT: OK" in text and text.count("[PASS]") == 20

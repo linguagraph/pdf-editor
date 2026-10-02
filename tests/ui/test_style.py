@@ -137,6 +137,15 @@ def test_high_contrast_uses_system_colors(app: QApplication, monkeypatch) -> Non
 
 
 @pytest.mark.gui
+def test_high_contrast_query_works_on_its_own(app: QApplication) -> None:
+    # Called outside _reapply no QStyleHints wrapper is alive; a chained
+    # styleHints().accessibility() then raised "already deleted" (found by --self-test).
+    manager = theme_manager(app)
+    for _ in range(3):
+        assert manager.high_contrast() in (True, False)
+
+
+@pytest.mark.gui
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows title bar")
 def test_dark_theme_darkens_title_bar(app: QApplication, qtbot) -> None:
     if QGuiApplication.platformName() != "windows":
