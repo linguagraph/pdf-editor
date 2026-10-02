@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStyle,
     QStyledItemDelegate,
@@ -365,10 +366,23 @@ class StartPage(QWidget):
         self.quick_buttons: dict[str, QToolButton] = {}
 
         # A centered column up to MAX_WIDTH wide; the side stretches only take what's left.
-        outer = QHBoxLayout(self)
+        # It sits in a scroll area so the page never sets a minimum size for the window: a
+        # small window scrolls the start page instead of growing (or squeezing the docks).
         m = METRICS
+        scroll = QScrollArea(self)
+        scroll.setObjectName("StartScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.viewport().setObjectName("StartScrollViewport")
+        inner = QWidget(scroll)
+        inner.setObjectName("StartInner")
+        scroll.setWidget(inner)
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(scroll)
+        outer = QHBoxLayout(inner)
         outer.setContentsMargins(m.space(8), m.space(8), m.space(8), m.space(4))
-        column = QWidget(self)
+        column = QWidget(inner)
         column.setMaximumWidth(MAX_WIDTH)
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(column)

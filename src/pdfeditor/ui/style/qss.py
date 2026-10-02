@@ -221,6 +221,9 @@ QToolButton#DocumentTabsMenu::menu-indicator {{ image: none; width: 0; }}
 
 /* start page (U6) */
 StartPage {{ background: {c.window}; }}
+QScrollArea#StartScroll, QWidget#StartScrollViewport, QWidget#StartInner {{
+    background: transparent; border: none;
+}}
 QLabel#StartTitle {{ font-size: 20pt; font-weight: 600; color: {c.text}; }}
 QLabel#StartSection {{ font-size: 11pt; font-weight: 600; color: {c.text}; }}
 QPushButton#StartOpenButton {{
