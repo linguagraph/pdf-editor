@@ -16,7 +16,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--update-goldens",
         action="store_true",
-        help="rewrite reference images in tests/golden/data instead of comparing",
+        help="rewrite reference images (tests/golden/data, tests/golden/ui) instead of comparing",
     )
 
 

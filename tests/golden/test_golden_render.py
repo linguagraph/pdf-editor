@@ -10,11 +10,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
 
 from pdfeditor.engine.base import ColorMode, RenderRequest
 from pdfeditor.engine.registry import get_engine
 from pdfeditor.model.geometry import Matrix
+from tests.golden.compare import Tolerance, compare, save_png
 
 DATA = Path(__file__).parent / "data"
 ACTUAL = Path(__file__).parent / "_actual"
@@ -31,8 +31,7 @@ CASES = [
 ]
 
 # Tolerances absorb anti-aliasing differences between MuPDF builds/platforms.
-MAX_MEAN_DIFF = 1.5
-MAX_BAD_PIXEL_FRACTION = 0.004  # pixels differing by more than 64 levels
+TOLERANCE = Tolerance(max_mean=1.5, max_bad_fraction=0.004)
 
 
 def render(name: str, page: int, fixture_pdf) -> np.ndarray:
@@ -50,16 +49,8 @@ def test_render_matches_golden(name: str, page: int, fixture_pdf, request) -> No
     actual = render(name, page, fixture_pdf)
     ref_path = DATA / f"{name}-p{page}.png"
     if request.config.getoption("--update-goldens") or not ref_path.exists():
-        DATA.mkdir(parents=True, exist_ok=True)
-        Image.fromarray(actual).save(ref_path, optimize=True)
+        save_png(actual, ref_path)
         pytest.skip(f"wrote reference {ref_path.name}")
-    expected = np.asarray(Image.open(ref_path).convert("RGB"))
-    if expected.shape != actual.shape:
-        pytest.fail(f"size changed: {expected.shape} -> {actual.shape}")
-    diff = np.abs(expected.astype(np.int16) - actual.astype(np.int16))
-    mean = float(diff.mean())
-    bad = float((diff.max(axis=2) > 64).mean())
-    if mean > MAX_MEAN_DIFF or bad > MAX_BAD_PIXEL_FRACTION:
-        ACTUAL.mkdir(exist_ok=True)
-        Image.fromarray(actual).save(ACTUAL / ref_path.name)
-        pytest.fail(f"render differs: mean diff {mean:.2f}, bad pixels {bad:.3%}")
+    problem = compare(actual, ref_path, TOLERANCE, ACTUAL)
+    if problem:
+        pytest.fail(problem)
