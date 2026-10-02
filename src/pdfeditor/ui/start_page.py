@@ -371,6 +371,7 @@ class StartPage(QWidget):
         m = METRICS
         scroll = QScrollArea(self)
         scroll.setObjectName("StartScroll")
+        scroll.setAccessibleName("Start page content")
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
         scroll.viewport().setObjectName("StartScrollViewport")
