@@ -20,3 +20,5 @@ htmlcov/
 dist/
 src/pdfeditor/data/tessdata/
 .claude/
+# local-only real-world sample (third-party manual page; not redistributable)
+tests/fixtures/real/scanned_dryer_manual.pdf

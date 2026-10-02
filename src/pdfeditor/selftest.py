@@ -312,7 +312,13 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
 
         from pdfeditor.engine.base import ColorMode
         from pdfeditor.model.pages import ImageStamp
-        from pdfeditor.services.ocr import OcrOptions, apply, installed_languages, recognize
+        from pdfeditor.services.ocr import (
+            OcrOptions,
+            apply,
+            installed_languages,
+            make_scans_editable,
+            recognize,
+        )
 
         if "eng" not in installed_languages():
             raise AssertionError("bundled English OCR data is missing")
@@ -331,10 +337,16 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         start = time.perf_counter()
         apply(doc, recognize(doc, [0], OcrOptions(dpi=150)))
         text = doc.page(0).text_page(with_chars=False).text
-        doc.close()
         if "lazy dog" not in text:
+            doc.close()
             raise AssertionError(f"OCR did not read the sample: {text[:80]!r}")
-        return f"read the scanned sample in {time.perf_counter() - start:.2f}s"
+        # editable output: the searchable layer becomes real text, erased from the scan
+        apply(doc, make_scans_editable(doc, OcrOptions(dpi=150)))
+        info = doc.page(0).scan_info()
+        doc.close()
+        if info.visible_chars == 0 or info.invisible_chars > info.visible_chars:
+            raise AssertionError(f"OCR text was not made editable: {info}")
+        return f"read the scanned sample and made it editable in {time.perf_counter() - start:.2f}s"
 
     def export() -> str:
         import zipfile

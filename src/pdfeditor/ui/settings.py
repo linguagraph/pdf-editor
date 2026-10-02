@@ -6,6 +6,7 @@ import getpass
 
 from PySide6.QtCore import QSettings
 
+from pdfeditor.model.scan import ScanCleanup
 from pdfeditor.services.ocr import OcrOptions, installed_languages, pick_languages
 from pdfeditor.ui.style.tokens import is_color
 
@@ -104,6 +105,15 @@ class AppSettings:
     @show_mini_toolbars.setter
     def show_mini_toolbars(self, value: bool) -> None:
         self.qs.setValue("prefs/mini_toolbars", "true" if value else "false")
+
+    @property
+    def ocr_when_editing(self) -> bool:
+        """Recognize scanned pages when the Edit tool opens, so their text can be edited."""
+        return self._bool("prefs/ocr_when_editing", True)
+
+    @ocr_when_editing.setter
+    def ocr_when_editing(self, value: bool) -> None:
+        self.qs.setValue("prefs/ocr_when_editing", "true" if value else "false")
 
     @property
     def language(self) -> str:
@@ -238,12 +248,25 @@ class AppSettings:
     def ocr_deskew(self, value: bool) -> None:
         self.qs.setValue("ocr/deskew", "true" if value else "false")
 
+    @property
+    def ocr_cleanup(self) -> ScanCleanup:
+        """OCR output: searchable, editable or text only."""
+        try:
+            return ScanCleanup(self._str("ocr/output", ScanCleanup.KEEP.value))
+        except ValueError:
+            return ScanCleanup.KEEP
+
+    @ocr_cleanup.setter
+    def ocr_cleanup(self, value: ScanCleanup) -> None:
+        self.qs.setValue("ocr/output", value.value)
+
     def remember_ocr_options(self, options: OcrOptions) -> None:
         self.ocr_languages = list(options.languages)
         self.ocr_dpi = options.dpi
         self.ocr_skip_pages_with_text = options.skip_pages_with_text
         self.ocr_preprocess = options.preprocess
         self.ocr_deskew = options.deskew
+        self.ocr_cleanup = options.cleanup
 
     def ocr_options(self) -> OcrOptions:
         """The remembered OCR options, limited to the languages installed now (English, or
@@ -255,4 +278,5 @@ class AppSettings:
             self.ocr_skip_pages_with_text,
             self.ocr_preprocess,
             self.ocr_deskew,
+            cleanup=self.ocr_cleanup,
         )
