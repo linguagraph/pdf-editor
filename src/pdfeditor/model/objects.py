@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from pdfeditor.model.color import BLACK, Color
+from pdfeditor.model.fonts import FontRef
 from pdfeditor.model.geometry import Point, Rect
 
 
@@ -35,6 +36,8 @@ class TextStyle:
     # extra space after every glyph / after every word space, in points (PDF Tc / Tw)
     char_spacing: float = 0.0
     word_spacing: float = 0.0
+    # which font to typeset with, if not the one named in ``font`` (set by the font picker)
+    font_ref: FontRef | None = None
 
 
 @dataclass(frozen=True, slots=True)
