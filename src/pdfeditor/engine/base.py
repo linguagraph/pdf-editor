@@ -146,6 +146,9 @@ class Page(Protocol):
     """One page. Every coordinate a Page returns (text, search hits, links, annotations) is in
     the *visible* page space: the rotated, CropBox-relative space that ``rect`` describes and
     ``render`` draws, with the origin at the top-left.
+
+    Changing a page never changes another page, even when the file has the two share content
+    streams, resources or annotations (backends copy what is shared before writing).
     """
 
     @property
@@ -438,8 +441,9 @@ class Document(Protocol):
         """Downsample/recompress images, subset fonts, drop thumbnails/metadata (in place)."""
         ...
 
-    # Optional (``capabilities.page_ops``). Bookmarks and links follow moved pages; bookmarks to
-    # removed pages are dropped; page-label rules are kept by page index.
+    # Optional (``capabilities.page_ops``). Bookmarks and links follow moved pages; bookmarks,
+    # links, named destinations, the open action and form fields pointing at removed pages are
+    # dropped; page-label rules are kept by page index.
     def select_pages(self, order: Sequence[int]) -> None:
         """Keep exactly ``order`` (reorder, delete, or duplicate by repeating an index).
 

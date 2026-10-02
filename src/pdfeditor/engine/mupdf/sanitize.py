@@ -336,6 +336,7 @@ def remove_off_page_text(doc: MuDocument) -> int:
         boxes, count = _off_page_boxes(page.fz)
         if not boxes:
             continue
+        doc.unshare_page(index)  # what lies off one page may be on another sharing its content
         stashed = annots.stash_redactions(page)
         try:
             for box in boxes:
