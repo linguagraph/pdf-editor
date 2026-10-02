@@ -106,6 +106,35 @@ def test_delete_rotate_duplicate_with_undo(window: MainWindow, copy_pdf, monkeyp
     assert shown and "at least one page" in shown[0] and view.page_count == 6
 
 
+def test_duplicate_is_independent_and_undoable(window: MainWindow, copy_pdf) -> None:
+    """Issue #49: stamping a duplicate leaves the original alone, through undo and redo."""
+    from pdfeditor.model.geometry import Point
+    from pdfeditor.model.pages import TextStamp
+    from pdfeditor.ui import page_ops
+
+    view = window.open_path(copy_pdf("text_multipage"))
+    session = view.session
+
+    def texts() -> list[str]:
+        with session.lock:
+            doc = session.document
+            return [doc.page(i).text_page(with_chars=False).text for i in range(doc.page_count)]
+
+    original = texts()
+    page_ops.duplicate_pages(session, [0])
+    page_ops.run(
+        session, "Stamp", lambda doc: doc.page(1).stamp_text(TextStamp("COPY", Point(72, 800)))
+    )
+    after = texts()
+    assert len(after) == 6 and "COPY" in after[1] and after[0] == original[0]
+    window.act_undo.trigger()  # the stamp
+    window.act_undo.trigger()  # the duplicate
+    assert texts() == original
+    window.act_redo.trigger()
+    window.act_redo.trigger()
+    assert texts() == after
+
+
 def test_drag_reorder_and_file_drop(qtbot, window: MainWindow, copy_pdf, tmp_path: Path) -> None:
     view = window.open_path(copy_pdf("text_multipage"))
     mime = QMimeData()

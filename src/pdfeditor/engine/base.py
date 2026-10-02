@@ -441,7 +441,10 @@ class Document(Protocol):
     # Optional (``capabilities.page_ops``). Bookmarks and links follow moved pages; bookmarks to
     # removed pages are dropped; page-label rules are kept by page index.
     def select_pages(self, order: Sequence[int]) -> None:
-        """Keep exactly ``order`` (reorder, delete, or duplicate by repeating an index)."""
+        """Keep exactly ``order`` (reorder, delete, or duplicate by repeating an index).
+
+        A repeated index yields an independent copy: editing one never changes the other.
+        """
         ...
 
     def insert_blank_page(self, at: int, width: float, height: float) -> None: ...
