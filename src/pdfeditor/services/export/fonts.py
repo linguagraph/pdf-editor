@@ -17,6 +17,8 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 
 from pdfeditor.engine.base import Document
+from pdfeditor.services.fonts import BITMAP_ONLY as _BITMAP_ONLY
+from pdfeditor.services.fonts import RESTRICTED as _RESTRICTED
 
 # Free fonts made to the metrics of Helvetica, Times and Courier: where the PDF can't give Word
 # the font itself, the metric twin every Word installation has keeps the lines the same length
@@ -51,8 +53,6 @@ def metric_twin(family: str) -> str | None:
 
 # tables Windows needs before it will load a font
 _REQUIRED = {"cmap", "glyf", "head", "hhea", "hmtx", "loca", "maxp", "name", "OS/2", "post"}
-_RESTRICTED = 0x0002  # fsType: the license forbids embedding
-_BITMAP_ONLY = 0x0200
 STYLES = ("Regular", "Bold", "Italic", "BoldItalic")
 
 

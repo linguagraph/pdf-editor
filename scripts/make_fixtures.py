@@ -617,6 +617,78 @@ GENERATORS: dict[str, Callable[[], None]] = {
 }
 
 
+FONTS_OUT = OUT / "fonts"
+LATIN = "ABCabc"
+CYRILLIC = "АБВабв"
+
+
+def _square_glyph() -> object:
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    pen = TTGlyphPen(None)
+    pen.moveTo((0, 0))
+    pen.lineTo((0, 500))
+    pen.lineTo((500, 500))
+    pen.lineTo((500, 0))
+    pen.closePath()
+    return pen.glyph()
+
+
+def _build_face(family: str, style: str, weight: int, italic: bool, chars: str, fs_type: int = 0):
+    """A minimal (but real, loadable) TrueType face with square glyphs for ``chars``."""
+    from fontTools.fontBuilder import FontBuilder
+
+    glyph_order = [".notdef"] + [f"g{ord(c):04x}" for c in chars]
+    fb = FontBuilder(1000, isTTF=True)
+    fb.setupGlyphOrder(glyph_order)
+    fb.setupCharacterMap({ord(c): f"g{ord(c):04x}" for c in chars})
+    glyph = _square_glyph()
+    fb.setupGlyf({name: glyph for name in glyph_order})
+    fb.setupHorizontalMetrics({name: (600, 0) for name in glyph_order})
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    selection = 0x01 if italic else 0x40
+    fb.setupOS2(usWeightClass=weight, fsSelection=selection, fsType=fs_type)
+    fb.setupNameTable({"familyName": family, "styleName": style})
+    fb.setupPost()
+    return fb.font
+
+
+def generate_fonts() -> None:
+    """Synthetic font files for ``tests/services/test_fonts.py``: no real font is committed,
+    and none of this depends on what's installed on the machine running the tests."""
+    FONTS_OUT.mkdir(parents=True, exist_ok=True)
+
+    _build_face("Test Sans", "Regular", 400, False, LATIN).save(FONTS_OUT / "TestSans-Regular.ttf")
+    _build_face("Test Sans", "Bold", 700, False, LATIN).save(FONTS_OUT / "TestSans-Bold.ttf")
+    _build_face("Test Sans", "Italic", 400, True, LATIN).save(FONTS_OUT / "TestSans-Italic.ttf")
+    _build_face("Test Sans", "Bold Italic", 700, True, LATIN).save(
+        FONTS_OUT / "TestSans-BoldItalic.ttf"
+    )
+
+    from fontTools.ttLib import TTFont
+    from fontTools.ttLib.ttCollection import TTCollection
+
+    path_a, path_b = FONTS_OUT / "_tcc_a.ttf", FONTS_OUT / "_tcc_b.ttf"
+    _build_face("Test Collection One", "Regular", 400, False, LATIN).save(path_a)
+    _build_face("Test Collection Two", "Regular", 400, False, LATIN).save(path_b)
+    collection = TTCollection()
+    collection.fonts = [TTFont(path_a), TTFont(path_b)]
+    collection.save(FONTS_OUT / "TestCollection.ttc")
+    path_a.unlink()
+    path_b.unlink()
+
+    _build_face("Test Restricted", "Regular", 400, False, LATIN, fs_type=0x0002).save(
+        FONTS_OUT / "TestRestricted-Regular.ttf"
+    )
+
+    _build_face("Test Cyrillic", "Regular", 400, False, LATIN + CYRILLIC).save(
+        FONTS_OUT / "TestCyrillic-Regular.ttf"
+    )
+
+    (FONTS_OUT / "Garbage.ttf").write_bytes(b"not a font, just garbage bytes" * 10)
+    print("generated fonts/")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-large", action="store_true", help="skip the 1000-page fixture")
@@ -627,6 +699,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         gen()
         print(f"generated {name}.pdf")
+    generate_fonts()
     return 0
 
 

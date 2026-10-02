@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from pdfeditor.model.color import BLACK, Color
+from pdfeditor.model.fonts import FontRef
 from pdfeditor.model.geometry import Point, Rect
 
 
@@ -66,6 +67,7 @@ class TextStamp:
     angle: float = 0.0  # visible, counter-clockwise degrees
     on_top: bool = True
     mark: MarkKind | None = None  # tag it as this kind of mark (``capabilities.page_marks``)
+    font_ref: FontRef | None = None  # which font to typeset with, if not the base-14 ``font``
 
 
 @dataclass(frozen=True, slots=True)
