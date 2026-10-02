@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
-    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -70,6 +69,7 @@ from pdfeditor.ui.dialogs.print_dialog import PrintDialog
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.dialogs.recovery import RecoveryDialog
 from pdfeditor.ui.document_tab import DocumentTab
+from pdfeditor.ui.document_tabs import DocumentTabWidget
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.export_controller import ExportController
 from pdfeditor.ui.icons import icon
@@ -86,11 +86,13 @@ from pdfeditor.ui.panels.search import SearchPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
 from pdfeditor.ui.pdfa_controller import PdfaController
 from pdfeditor.ui.protect_controller import ProtectController, RedactTool
+from pdfeditor.ui.recent_files import RecentFiles
 from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
 from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
 from pdfeditor.ui.stamp_menu import StampMenu
+from pdfeditor.ui.start_page import StartPage
 from pdfeditor.ui.theme import Theme, apply_theme
 from pdfeditor.ui.tools import annotate
 from pdfeditor.ui.tools.base import Tool
@@ -165,8 +167,6 @@ PANEL_ICONS: dict[type[ViewPanel], tuple[str, str]] = {
     TagsPanel: ("tags", "tags"),
 }
 
-MAX_RECENT = 10
-SETTINGS_RECENT = "recent_files"
 SETTINGS_GEOMETRY = "window/geometry"
 SETTINGS_STATE = "window/state"
 # Bump when the frame changes so old dock layouts aren't restored into it (U2: ribbon moved,
@@ -194,17 +194,15 @@ class MainWindow(QMainWindow):
         self.gc_timer.timeout.connect(engine_lock.collect)
         self.gc_timer.start(4000)
 
-        self.tabs = QTabWidget(self)
-        self.tabs.setAccessibleName("Open documents")
-        self.tabs.tabBar().setAccessibleName("Document tabs")
-        self.tabs.setDocumentMode(True)
-        self.tabs.setTabsClosable(True)
-        self.tabs.setMovable(True)
-        self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs = DocumentTabWidget(self)
+        self.tabs.close_requested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.welcome = QLabel(
-            "Open a PDF with Ctrl+O, or drop files here.", alignment=Qt.AlignmentFlag.AlignCenter
-        )
+        self.tabs.open_requested.connect(self.open_dialog)
+        self.recent = RecentFiles(self.settings, self)
+        self.start_page = StartPage(self.recent, get_engine(), self)
+        self.start_page.open_path_requested.connect(self.open_path)
+        self.start_page.open_dialog_requested.connect(self.open_dialog)
+        self.welcome = self.start_page  # shown while no document is open
 
         # Menu bar and ribbon sit above the docks, across the whole window.
         self.menu_bar = QMenuBar(self)
@@ -294,6 +292,7 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_ribbon()
         self._connect_panel_actions()
+        self._create_start_actions()
         # after every controller has made its actions: defaults + the user's own shortcuts
         self.shortcuts = ShortcutManager(self)
         apply_short_labels(self.ribbon.button_actions())
@@ -695,6 +694,26 @@ class MainWindow(QMainWindow):
         self.compare.ribbon()
         self.pdfa.ribbon()
 
+    def _create_start_actions(self) -> None:
+        # Not a palette command (no needs_doc property): it only makes sense on the start page.
+        self.act_ocr_scan = QAction(icon("scan-text"), "OCR a Scanned PDF…", self)
+        self.act_ocr_scan.triggered.connect(self.ocr_scan)
+        self.start_page.set_quick_actions(
+            [
+                ("Combine files", "combine", self.organize.act_combine),
+                ("Create from Office", "file-input", self.export.act_from_office),
+                ("Compare files", "git-compare", self.compare.act_compare),
+                ("OCR a scan", "scan-text", self.act_ocr_scan),
+            ]
+        )
+
+    def ocr_scan(self) -> None:
+        """Start page: pick a scanned PDF, open it and run OCR on it."""
+        start = str(Path(self._recent_files()[0]).parent) if self._recent_files() else ""
+        chosen, _ = QFileDialog.getOpenFileName(self, "OCR a Scanned PDF", start, PDF_FILTER)
+        if chosen and self.open_path(Path(chosen)) is not None:
+            self.tools.act_ocr.trigger()
+
     # -- documents ------------------------------------------------------------------------
     def document_tabs(self) -> list[DocumentTab]:
         return [
@@ -824,8 +843,8 @@ class MainWindow(QMainWindow):
     def _update_tab_title(self, view: DocumentView) -> None:
         index = self._tab_index(view)
         if index >= 0:
-            mark = "*" if view.session.is_dirty else ""
-            self.tabs.setTabText(index, view.session.display_name + mark)
+            self.tabs.setTabText(index, view.session.display_name)
+            self.tabs.set_dirty(index, view.session.is_dirty)
 
     def close_tab(self, index: int, ask: bool = True) -> bool:
         """Close a tab; with unsaved changes, ask first. Returns False if the user cancelled."""
@@ -1465,22 +1484,13 @@ class MainWindow(QMainWindow):
 
     # -- recent files ---------------------------------------------------------------------
     def _recent_files(self) -> list[str]:
-        value = self.settings.value(SETTINGS_RECENT, [])
-        if isinstance(value, str):
-            return [value]
-        if isinstance(value, list):
-            return [str(v) for v in value]
-        return []
+        return self.recent.files()
 
     def _add_recent(self, path: Path) -> None:
-        items = [p for p in self._recent_files() if Path(p) != path]
-        items.insert(0, str(path))
-        self.settings.setValue(SETTINGS_RECENT, items[:MAX_RECENT])
+        self.recent.add(path)
 
     def _forget_recent(self, path: Path) -> None:
-        self.settings.setValue(
-            SETTINGS_RECENT, [p for p in self._recent_files() if Path(p) != path]
-        )
+        self.recent.forget(path)
 
     def _fill_recent_menu(self) -> None:
         self.recent_menu.clear()
@@ -1493,9 +1503,7 @@ class MainWindow(QMainWindow):
             self.recent_menu.addAction("(empty)").setEnabled(False)
         else:
             self.recent_menu.addSeparator()
-            self.recent_menu.addAction(
-                "Clear List", lambda: self.settings.setValue(SETTINGS_RECENT, [])
-            )
+            self.recent_menu.addAction("Clear List", self.recent.clear)
 
     # -- settings & window events ---------------------------------------------------------
     def _restore_settings(self) -> None:
@@ -1547,6 +1555,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
         self.settings.setValue(SETTINGS_STATE, self.saveState(STATE_VERSION))
         self.autosave_timer.stop()
+        self.start_page.shutdown()
         while self.tabs.count():
             self.close_tab(0, ask=False)
         self.renderer.wait_idle(2000)
