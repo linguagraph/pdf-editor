@@ -113,6 +113,32 @@ def test_mark_apply_verify(redactor: Engine, fixture_pdf, tmp_path: Path) -> Non
     assert b"jane.example" not in raw and b"jane.example" not in streams
 
 
+def test_multi_line_text_mark(redactor: Engine, fixture_pdf, tmp_path: Path) -> None:
+    """A mark over text on two lines keeps one quad per line (adding one used to fail)."""
+    from pdfeditor.model.geometry import Quad
+
+    doc, path = _open(redactor, fixture_pdf, tmp_path)
+    index = _Cache(doc).get(0)
+    first_line_end = index.line_range(0)[1]
+    rects = index.rects(0, first_line_end + 7)  # "Customer: Jane Example" and "Email: "
+    assert len(rects) >= 2
+    box = rects[0]
+    for r in rects[1:]:
+        box = box.union(r)
+    mark = mark_for_area(0, box)
+    mark.quads = tuple(Quad.from_rect(r) for r in rects)
+    added = doc.page(0).add_annotation(mark)
+    assert added.type is AnnotationType.REDACT
+    assert doc.page(0).apply_redactions(None, RedactOptions()) == 1
+    text = _text(doc)
+    assert "Customer" not in text and "Jane Example" not in text  # leak check
+    assert "Phone: +1 (555) 010-7788" in text  # the next line is untouched
+    doc.save(options=SaveOptions(garbage=4))
+    doc.close()
+    with pikepdf.open(path) as pdf:
+        assert len(pdf.pages) == 1
+
+
 def test_selective_apply_keeps_other_marks(redactor: Engine, fixture_pdf, tmp_path: Path) -> None:
     doc, _ = _open(redactor, fixture_pdf, tmp_path)
     page = doc.page(0)

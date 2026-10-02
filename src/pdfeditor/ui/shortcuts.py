@@ -238,6 +238,42 @@ class ShortcutsDialog(QDialog):
             self.select(key)
 
 
+def matching_commands(manager: ShortcutManager, text: str) -> list[tuple[str, str]]:
+    """(label, command id) of the enabled commands whose name holds every word of ``text``,
+    names starting with ``text`` first, then alphabetically."""
+    words = text.lower().split()
+    entries = []
+    for key, action in manager.actions.items():
+        if not action.isEnabled() or not action.isVisible():
+            continue
+        label = manager.label(key)
+        if all(w in label.lower() for w in words):
+            entries.append((label, key))
+    start = text.strip().lower()
+    return sorted(entries, key=lambda e: (not e[0].lower().startswith(start), e[0].lower()))
+
+
+def fill_command_list(target: QListWidget, manager: ShortcutManager, text: str) -> None:
+    """Fill ``target`` with the commands matching ``text`` (with their shortcuts); the first
+    is current, so Enter runs it."""
+    target.clear()
+    for label, key in matching_commands(manager, text):
+        shortcut = ", ".join(manager.current(key))
+        item = QListWidgetItem(f"{label}    {shortcut}" if shortcut else label)
+        item.setData(Qt.ItemDataRole.UserRole, key)
+        item.setToolTip(label)
+        target.addItem(item)
+    if target.count():
+        target.setCurrentRow(0)
+
+
+def current_command(target: QListWidget, manager: ShortcutManager) -> QAction | None:
+    item = target.currentItem()
+    if item is None:
+        return None
+    return manager.actions.get(str(item.data(Qt.ItemDataRole.UserRole)))
+
+
 class CommandPalette(QDialog):
     """Type to find any command and run it (Ctrl+Shift+P)."""
 
@@ -262,23 +298,7 @@ class CommandPalette(QDialog):
         self.query.setFocus()
 
     def _fill(self) -> None:
-        words = self.query.text().lower().split()
-        self.list.clear()
-        entries = []
-        for key, action in self.manager.actions.items():
-            if not action.isEnabled() or not action.isVisible():
-                continue
-            label = self.manager.label(key)
-            if all(w in label.lower() for w in words):
-                entries.append((label, key))
-        for label, key in sorted(entries, key=lambda e: (not e[0].lower().startswith(
-                self.query.text().lower()), e[0].lower())):  # fmt: skip
-            shortcut = ", ".join(self.manager.current(key))
-            item = QListWidgetItem(f"{label}    {shortcut}" if shortcut else label)
-            item.setData(Qt.ItemDataRole.UserRole, key)
-            self.list.addItem(item)
-        if self.list.count():
-            self.list.setCurrentRow(0)
+        fill_command_list(self.list, self.manager, self.query.text())
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up) and self.list.count():
@@ -288,10 +308,9 @@ class CommandPalette(QDialog):
         super().keyPressEvent(event)
 
     def run_current(self) -> bool:
-        item = self.list.currentItem()
-        if item is None:
+        action = current_command(self.list, self.manager)
+        if action is None:
             return False
-        action = self.manager.actions[str(item.data(Qt.ItemDataRole.UserRole))]
         self.accept()
         action.trigger()
         return True

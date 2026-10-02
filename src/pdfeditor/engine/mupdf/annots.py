@@ -416,7 +416,9 @@ def _apply_properties(
     info["modDate"] = _pdf_date(model.modified or datetime.now().astimezone())
     annot.set_info(info)
     if t is AnnotationType.REDACT:
-        annot.update()
+        # PyMuPDF can only cross out a one-box appearance; a multi-line text mark (one quad
+        # per line) would make update() fail, so those get plain boxes.
+        annot.update(cross_out=len(model.quads) <= 1)
         return
     if t is not AnnotationType.FREE_TEXT:
         fill = model.fill.rgb() if model.fill is not None and t in _FILL_TYPES else None
