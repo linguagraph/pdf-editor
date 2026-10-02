@@ -7,14 +7,18 @@ the rail stays. The dock is then pinned to the rail's width, and its old width c
 a panel opens again. Which panel is open and how wide it is are kept in the settings.
 
 Rail icons can carry a badge with a count the panel already knows (comments, search hits,
-accessibility problems), see ``ViewPanel.badge_count``.
+accessibility problems), see ``ViewPanel.badge_count``; screen readers hear it in the button's
+name ("Comments, 6 items").
+
+Keyboard: Up/Down move between rail icons, Space opens one, Escape anywhere in the side panels
+returns to the page (``escape_pressed``), and F6 reaches them (see ``ui/focus_regions.py``).
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.ui.focus_regions import first_focusable, focusable
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.base import EmptyState, ViewPanel
 from pdfeditor.ui.settings import AppSettings
@@ -63,10 +68,18 @@ class RailButton(QToolButton):
             self.update()
 
     def _update_label(self) -> None:
-        title = self.panel.title
-        name = f"{title} ({self.count})" if self.count else title
+        title = QCoreApplication.translate("ViewPanel", self.panel.title)
+        tr = QCoreApplication.translate
+        if self.count <= 0:
+            name = tip = title
+        elif self.count == 1:
+            name = tr("RailButton", "{panel}, 1 item").format(panel=title)
+            tip = tr("RailButton", "{panel} (1)").format(panel=title)
+        else:
+            name = tr("RailButton", "{panel}, {count} items").format(panel=title, count=self.count)
+            tip = tr("RailButton", "{panel} ({count})").format(panel=title, count=self.count)
         self.setAccessibleName(name)
-        self.setToolTip(name)
+        self.setToolTip(tip)
 
     def badge_text(self) -> str:
         return "" if self.count <= 0 else "99+" if self.count > 99 else str(self.count)
@@ -116,7 +129,9 @@ class PanelRail(QWidget):
         self.setObjectName("PanelRail")
         self.setProperty("side", side)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        self.setAccessibleName("Left panels" if side == "left" else "Right panels")
+        self.setAccessibleName(
+            self.tr("Left panels") if side == "left" else self.tr("Right panels")
+        )
         self._layout = QVBoxLayout(self)
         m = RAIL_MARGIN
         self._layout.setContentsMargins(m, m, m, m)
@@ -138,6 +153,7 @@ class SidePanels(QWidget):
     """A rail plus the open panel (with a title header) for one side of the window."""
 
     current_changed = Signal(object)  # the open ViewPanel, or None when collapsed
+    escape_pressed = Signal()  # Escape in the rail or a panel: back to the page
 
     def __init__(
         self,
@@ -165,19 +181,19 @@ class SidePanels(QWidget):
         self.close_button = QToolButton(self.content)
         self.close_button.setIcon(icon("x"))
         self.close_button.setAutoRaise(True)
-        self.close_button.setToolTip("Close panel")
-        self.close_button.setAccessibleName("Close panel")
+        self.close_button.setToolTip(self.tr("Close panel"))
+        self.close_button.setAccessibleName(self.tr("Close panel"))
         self.close_button.clicked.connect(self.collapse)
         header = QHBoxLayout()
         header.setContentsMargins(8, 4, 4, 0)
         header.addWidget(self.title, 1)
         header.addWidget(self.close_button)
         self.stack = QStackedWidget(self.content)
-        self.stack.setAccessibleName("Panel")
+        self.stack.setAccessibleName(self.tr("Panel"))
         self.no_document = EmptyState(
             "folder-open",
-            "No document open",
-            "Open a PDF to see its pages, bookmarks, comments and more here.",
+            self.tr("No document open"),
+            self.tr("Open a PDF to see its pages, bookmarks, comments and more here."),
             self.content,
         )
         self.no_document.hide()
@@ -231,7 +247,8 @@ class SidePanels(QWidget):
             return
         self._current = panel
         self.stack.setCurrentWidget(panel)
-        self.title.setText(panel.title)
+        self.title.setText(QCoreApplication.translate("ViewPanel", panel.title))
+        self.stack.setAccessibleName(self.title.text())
         self._sync()
 
     def collapse(self) -> None:
@@ -250,6 +267,25 @@ class SidePanels(QWidget):
             self.collapse()
         else:
             self.open(panel)
+
+    def focus_target(self) -> QWidget | None:
+        """Where F6 puts the keyboard: into the open panel, else on the rail."""
+        if self._current is not None and self.content.isVisible():
+            root = self._current if self.stack.isVisible() else self.no_document
+            target = first_focusable(root)
+            if target is not None:
+                return target
+            if focusable(self.close_button):
+                return self.close_button
+        buttons = [b for b in self.rail.buttons() if focusable(b)]
+        checked = [b for b in buttons if b.isChecked()]
+        return next(iter(checked or buttons), None)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and not event.modifiers():
+            self.escape_pressed.emit()
+            return
+        super().keyPressEvent(event)
 
     def set_has_document(self, has_document: bool) -> None:
         self.stack.setVisible(has_document)

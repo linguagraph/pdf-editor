@@ -8,7 +8,15 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QPoint,
+    QSettings,
+    Qt,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -75,6 +83,8 @@ from pdfeditor.ui.document_tab import DocumentTab
 from pdfeditor.ui.document_tabs import DocumentTabWidget
 from pdfeditor.ui.edit_controller import EDIT_TOOLS, EditController, make_edit_tool
 from pdfeditor.ui.export_controller import ExportController
+from pdfeditor.ui.focus_regions import FocusRegions, Region, focusable
+from pdfeditor.ui.i18n import QT_TRANSLATE_NOOP
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.job_center import JobCenter, ProgressChip
 from pdfeditor.ui.optimize_controller import OptimizeController
@@ -138,13 +148,15 @@ STAY_ACTIVE = {"select", "hand", "edit"}
 # What the mode banner over the page says for tools that change how clicks on the page work
 # (other tools show their own name). Framed modes also get an accent frame around the pages.
 TOOL_MODES = {
-    "edit": Mode("Editing text & images", "file-pen-line", framed=True),
-    "add_text": Mode("Adding text", "type", framed=True),
-    "add_image": Mode("Adding an image", "image-plus", framed=True),
-    "add_rectangle": Mode("Adding a rectangle", "square", framed=True),
-    "add_ellipse": Mode("Adding an ellipse", "circle", framed=True),
-    "add_line": Mode("Adding a line", "slash", framed=True),
-    "redact": Mode("Marking for redaction", "eraser", framed=True, danger=True),
+    "edit": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Editing text & images"), "file-pen-line", True),
+    "add_text": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding text"), "type", True),
+    "add_image": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding an image"), "image-plus", True),
+    "add_rectangle": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding a rectangle"), "square", True),
+    "add_ellipse": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding an ellipse"), "circle", True),
+    "add_line": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding a line"), "slash", True),
+    "redact": Mode(
+        QT_TRANSLATE_NOOP("ModeBanner", "Marking for redaction"), "eraser", True, danger=True
+    ),
 }
 MARKUP_TOOLS = {
     "highlight": AnnotationType.HIGHLIGHT,
@@ -329,6 +341,9 @@ class MainWindow(QMainWindow):
         apply_short_labels(self.ribbon.button_actions())
         self._refresh_tooltips()
         self.shortcuts.changed.append(self._refresh_tooltips)
+        self.focus_regions = self._create_focus_regions()
+        self.nav_panels.escape_pressed.connect(self.focus_page)
+        self.inspector_panels.escape_pressed.connect(self.focus_page)
         # Panels first: the saved window state must meet the docks' open/collapsed limits.
         self.nav_panels.restore()
         self.inspector_panels.restore()
@@ -519,6 +534,13 @@ class MainWindow(QMainWindow):
         )
         self.act_next_tab = a("Next Document", lambda: self._cycle_tab(1), "Ctrl+Tab")
         self.act_prev_tab = a("Previous Document", lambda: self._cycle_tab(-1), "Ctrl+Shift+Tab")
+        # F6 / Shift+F6: ribbon, side panels, page, status bar and notifications in turn.
+        self.act_next_pane = a("Next Pane", lambda: self.cycle_focus(1), "F6", None, False)
+        self.act_next_pane.setObjectName("next-pane")
+        self.act_prev_pane = a(
+            "Previous Pane", lambda: self.cycle_focus(-1), "Shift+F6", None, False
+        )
+        self.act_prev_pane.setObjectName("previous-pane")
         self.act_about = a("&About pdfeditor", self.show_about, None, None, False)
         # Home/End belong to the view (it handles them itself); keep them out of window shortcuts.
         self.act_first.setShortcut(QKeySequence())
@@ -633,6 +655,9 @@ class MainWindow(QMainWindow):
         go_menu.addSeparator()
         go_menu.addAction(self.act_next_tab)
         go_menu.addAction(self.act_prev_tab)
+        go_menu.addSeparator()
+        go_menu.addAction(self.act_next_pane)
+        go_menu.addAction(self.act_prev_pane)
 
         tools_menu = mb.addMenu("&Tools")
         tools_menu.addAction(self.tools.act_ocr)
@@ -729,12 +754,22 @@ class MainWindow(QMainWindow):
         # Not a palette command (no needs_doc property): it only makes sense on the start page.
         self.act_ocr_scan = QAction(icon("scan-text"), "OCR a Scanned PDF…", self)
         self.act_ocr_scan.triggered.connect(self.ocr_scan)
+        o = self.organize
         self.start_page.set_quick_actions(
             [
-                ("Combine files", "combine", self.organize.act_combine),
-                ("Create from Office", "file-input", self.export.act_from_office),
-                ("Compare files", "git-compare", self.compare.act_compare),
-                ("OCR a scan", "scan-text", self.act_ocr_scan),
+                # labels are translated by the start page (context "StartPage")
+                (QT_TRANSLATE_NOOP("StartPage", "Combine files"), "combine", o.act_combine),
+                (
+                    QT_TRANSLATE_NOOP("StartPage", "Create from Office"),
+                    "file-input",
+                    self.export.act_from_office,
+                ),
+                (
+                    QT_TRANSLATE_NOOP("StartPage", "Compare files"),
+                    "git-compare",
+                    self.compare.act_compare,
+                ),
+                (QT_TRANSLATE_NOOP("StartPage", "OCR a scan"), "scan-text", self.act_ocr_scan),
             ]
         )
 
@@ -1035,6 +1070,56 @@ class MainWindow(QMainWindow):
         if tab is not None:
             target = tab.organizer.grid if tab.organizing and tab.organizer else tab.view
             target.setFocus()
+
+    def _page_target(self) -> QWidget | None:
+        """The page area's keyboard stop: the page view (or organizer), or the start page."""
+        tab = self.current_tab()
+        if tab is not None:
+            return tab.organizer.grid if tab.organizing and tab.organizer else tab.view
+        return self.start_page.open_button if self.start_page.isVisible() else None
+
+    def focus_page(self) -> None:
+        """Give the keyboard to the page (Escape in a side panel)."""
+        target = self._page_target()
+        if target is not None:
+            target.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _create_focus_regions(self) -> FocusRegions:
+        def chip() -> QWidget | None:
+            candidates = [self.progress_chip.button, self.tool_exit]
+            return next((w for w in candidates if focusable(w)), None)
+
+        def toast() -> QWidget | None:
+            toasts = self.toasts.toasts()
+            if not toasts:
+                return None
+            newest = toasts[-1]
+            button = newest.action_button
+            return button if focusable(button) else newest.close_button
+
+        def side(dock: PanelDock) -> QWidget | None:
+            return dock.panels.focus_target() if dock.isVisible() else None
+
+        def top() -> list[QWidget]:
+            return [w for w in (self.menuWidget(), self.command_search.popup) if w is not None]
+
+        return FocusRegions(
+            [
+                Region("ribbon", top, lambda: self.ribbon.bar if self.ribbon.isVisible() else None),
+                Region("left panels", lambda: [self.nav_dock], lambda: side(self.nav_dock)),
+                Region("page", lambda: [self.tabs, self.start_page], self._page_target),
+                Region(
+                    "right panels", lambda: [self.inspector_dock], lambda: side(self.inspector_dock)
+                ),
+                Region("status bar", lambda: [self.statusBar()], chip),
+                Region("notifications", lambda: list(self.toasts.toasts()), toast),
+            ]
+        )
+
+    def cycle_focus(self, step: int = 1) -> str:
+        """F6 (``step`` 1) / Shift+F6 (-1): the next region's name, "" if none took focus."""
+        region = self.focus_regions.cycle(step)
+        return region.name if region is not None else ""
 
     def show_shortcuts(self) -> None:
         ShortcutsDialog(self.shortcuts, self).exec()

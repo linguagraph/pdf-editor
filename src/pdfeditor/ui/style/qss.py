@@ -10,8 +10,23 @@ from __future__ import annotations
 
 from pdfeditor.ui.style.tokens import METRICS, Colors, Metrics
 
+DEFAULT_FONT_PT = 9.0  # Segoe UI's size on Windows; other sizes scale from the app's font
+MIN_CAPTION_PT = 8.0
 
-def stylesheet(c: Colors, m: Metrics = METRICS) -> str:
+
+def font_pt(base_pt: float, factor: float, minimum: float = MIN_CAPTION_PT) -> str:
+    """A style-sheet font size ``factor`` times the app font (half-point steps), so captions
+    and headings follow a larger system font instead of staying at a fixed size."""
+    base = base_pt if base_pt > 0 else DEFAULT_FONT_PT
+    return f"{max(minimum, round(base * factor * 2) / 2):g}pt"
+
+
+def stylesheet(c: Colors, m: Metrics = METRICS, base_pt: float = DEFAULT_FONT_PT) -> str:
+    def pt(factor: float) -> str:
+        return font_pt(base_pt, factor)
+
+    # Focus rings are 2 px of ``accent_text`` (>= 3:1 on every surface); widgets drop 1 px of
+    # padding while focused, so the thicker border doesn't shift their content.
     return f"""
 QToolTip {{
     background: {c.tooltip_bg}; color: {c.tooltip_text};
@@ -53,8 +68,9 @@ QToolButton:pressed {{ background: {c.pressed}; }}
 QToolButton:checked {{ background: {c.accent_subtle}; border-color: {c.accent_subtle}; }}
 QToolButton:checked:hover {{ border-color: {c.accent_text}; }}
 QToolButton:disabled {{ color: {c.text_disabled}; }}
-QToolButton:focus {{ border-color: {c.accent_text}; }}
+QToolButton:focus {{ border: 2px solid {c.accent_text}; padding: 2px; }}
 QToolButton[popupMode="1"] {{ padding-right: 14px; }}
+QToolButton[popupMode="1"]:focus {{ padding-right: 13px; }}
 QToolButton::menu-button {{
     border: none; border-left: 1px solid {c.border}; width: 12px;
     border-top-right-radius: {m.radius}px; border-bottom-right-radius: {m.radius}px;
@@ -67,13 +83,17 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: {c.surface_alt}; border-color: {c.text_muted}; }}
 QPushButton:pressed {{ background: {c.hover}; }}
-QPushButton:focus {{ border-color: {c.accent_text}; }}
+QPushButton:focus {{
+    border: 2px solid {c.accent_text}; padding: {m.space(1)}px {m.space(4) - 1}px;
+}}
 QPushButton:disabled {{ color: {c.text_disabled}; border-color: {c.border}; }}
 QPushButton:default {{
     background: {c.accent}; color: {c.on_accent}; border-color: {c.accent};
 }}
 QPushButton:default:hover {{ border-color: {c.accent_text}; }}
-QPushButton:default:focus {{ border: 2px solid {c.accent_text}; }}
+QPushButton:default:focus {{
+    border: 2px solid {c.accent_text}; padding: {m.space(1)}px {m.space(4) - 1}px;
+}}
 QPushButton:default:disabled {{
     background: {c.hover}; color: {c.text_disabled}; border-color: {c.border};
 }}
@@ -81,15 +101,21 @@ QPushButton[role="danger"], QPushButton[role="danger"]:default {{
     background: {c.danger if c.scheme == "light" else c.surface};
     color: {"#ffffff" if c.scheme == "light" else c.danger}; border-color: {c.danger};
 }}
+QPushButton[role="danger"]:focus {{ border: 2px solid {c.text}; }}
 
 QLineEdit, QPlainTextEdit, QTextEdit {{
     border: 1px solid {c.border_strong}; border-radius: {m.radius_small}px;
     padding: 2px {m.space(1)}px;
     selection-background-color: {c.accent}; selection-color: {c.on_accent};
 }}
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {c.accent_text}; }}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{
+    border: 2px solid {c.accent_text}; padding: 1px {m.space(1) - 1}px;
+}}
 QLineEdit:disabled {{ color: {c.text_disabled}; border-color: {c.border}; }}
-InlineTextEditor {{ border: 1px dashed {c.accent_text}; border-radius: 0; padding: 0; }}
+/* the inline editor sits exactly over the page text: its frame never changes size */
+InlineTextEditor, InlineTextEditor:focus {{
+    border: 1px dashed {c.accent_text}; border-radius: 0; padding: 0;
+}}
 
 QGroupBox {{
     border: 1px solid {c.border}; border-radius: {m.radius_large}px;
@@ -108,6 +134,10 @@ QTabBar::tab {{
 QTabBar::tab:hover {{ color: {c.text}; background: {c.hover};
     border-top-left-radius: {m.radius_small}px; border-top-right-radius: {m.radius_small}px; }}
 QTabBar::tab:selected {{ color: {c.text}; border-bottom-color: {c.accent_text}; }}
+/* the tab bar itself has the keyboard: outline the current tab */
+QTabBar::tab:selected:focus {{
+    border: 2px solid {c.accent_text}; border-radius: {m.radius_small}px;
+}}
 QTabBar::tab:disabled {{ color: {c.text_disabled}; }}
 QTabWidget::pane {{ border: 1px solid {c.border}; border-radius: {m.radius_small}px; }}
 QTabWidget[documentMode="true"]::pane {{ border: none; }}
@@ -153,7 +183,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
 QWidget#Ribbon {{ background: {c.window}; border-bottom: 1px solid {c.border}; }}
 QWidget#Ribbon QTabBar::tab {{ padding: {m.space(1)}px {m.space(3)}px; }}
-QLabel[role="caption"] {{ color: {c.text_muted}; font-size: 8pt; padding-top: 1px; }}
+QLabel[role="caption"] {{ color: {c.text_muted}; font-size: {pt(0.89)}; padding-top: 1px; }}
 RibbonTab::separator {{ margin: {m.space(1)}px {m.space(1)}px {m.space(2)}px {m.space(1)}px; }}
 
 /* dialogs (ui/dialogs/base.py). Section headers, group box titles, form labels and help
@@ -181,7 +211,7 @@ QWidget#PanelRail {{ background: {c.window}; }}
 QWidget#PanelRail[side="left"] {{ border-right: 1px solid {c.border}; }}
 QWidget#PanelRail[side="right"] {{ border-left: 1px solid {c.border}; }}
 QLabel[role="panel-title"] {{ font-weight: 600; padding: {m.space(1)}px 0; }}
-QLabel[role="empty-title"] {{ font-weight: 600; font-size: 11pt; }}
+QLabel[role="empty-title"] {{ font-weight: 600; font-size: {pt(1.22)}; }}
 
 QLabel[role="error"] {{ color: {c.danger}; }}
 QLabel[role="success"] {{ color: {c.success}; }}
@@ -224,11 +254,11 @@ StartPage {{ background: {c.window}; }}
 QScrollArea#StartScroll, QWidget#StartScrollViewport, QWidget#StartInner {{
     background: transparent; border: none;
 }}
-QLabel#StartTitle {{ font-size: 20pt; font-weight: 600; color: {c.text}; }}
-QLabel#StartSection {{ font-size: 11pt; font-weight: 600; color: {c.text}; }}
+QLabel#StartTitle {{ font-size: {pt(2.22)}; font-weight: 600; color: {c.text}; }}
+QLabel#StartSection {{ font-size: {pt(1.22)}; font-weight: 600; color: {c.text}; }}
 QPushButton#StartOpenButton {{
     background: {c.accent}; color: {c.on_accent}; border: 1px solid {c.accent};
-    border-radius: {m.radius_large}px; font-size: 12pt; font-weight: 600;
+    border-radius: {m.radius_large}px; font-size: {pt(1.33)}; font-weight: 600;
     padding: {m.space(3)}px {m.space(6)}px;
 }}
 QPushButton#StartOpenButton:hover {{ border: 2px solid {c.accent_text}; }}
@@ -245,7 +275,9 @@ QToolButton#QuickAction {{
     border-radius: {m.radius_large}px; padding: {m.space(2)}px {m.space(3)}px;
 }}
 QToolButton#QuickAction:hover {{ background: {c.hover}; border-color: {c.border_strong}; }}
-QToolButton#QuickAction:focus {{ border: 2px solid {c.accent_text}; }}
+QToolButton#QuickAction:focus {{
+    border: 2px solid {c.accent_text}; padding: {m.space(2) - 1}px {m.space(3) - 1}px;
+}}
 QListWidget#RecentFiles {{ background: transparent; border: none; }}
 
 /* contextual actions (U7): the "Search tools" list under the ribbon box */
@@ -272,13 +304,16 @@ QPushButton#ToastAction {{
 }}
 QPushButton#ToastAction:hover {{ background: {c.hover}; }}
 QPushButton#ToastAction:pressed {{ background: {c.pressed}; }}
-QPushButton#ToastAction:focus {{ border-color: {c.accent_text}; }}
+QPushButton#ToastAction:focus {{
+    border: 2px solid {c.accent_text}; padding: {m.space(1) - 1}px {m.space(2) - 1}px;
+}}
 QPushButton#ToastAction:disabled {{ color: {c.text_disabled}; }}
 QFrame#ProgressChip {{
     background: {c.surface}; border: 1px solid {c.border}; border-radius: 11px;
     margin: 2px {m.space(1)}px;
 }}
 QToolButton#ProgressChipButton {{ border-radius: 9px; padding: 0 {m.space(1)}px; }}
+QToolButton#ProgressChipButton:focus {{ padding: 0 {m.space(1) - 1}px; }}
 QToolButton#ProgressChipCancel {{ border-radius: 9px; padding: 1px; }}
 QFrame#ProgressChip QProgressBar, QFrame#JobDetails QProgressBar {{
     background: {c.hover}; border: none; border-radius: 3px; max-height: 6px;
@@ -286,17 +321,20 @@ QFrame#ProgressChip QProgressBar, QFrame#JobDetails QProgressBar {{
 QFrame#ProgressChip QProgressBar::chunk, QFrame#JobDetails QProgressBar::chunk {{
     background: {c.accent}; border-radius: 3px;
 }}
-QFrame#JobDetails {{
-    background: {c.surface}; border: 1px solid {c.border_strong};
-    border-radius: {m.radius_large}px;
-}}
+/* the job details popup paints its own rounded body (job_center.JobDetails) */
+QFrame#JobDetails {{ background: transparent; border: none; }}
 QLabel#JobDetailsTitle, QLabel#JobName {{ font-weight: 600; }}
 QToolButton#JobCancel {{ border: 1px solid {c.border_strong}; padding: 2px {m.space(2)}px; }}
+QToolButton#JobCancel:focus {{
+    border: 2px solid {c.accent_text}; padding: 1px {m.space(2) - 1}px;
+}}
 QToolButton#JobCancel:hover {{ border-color: {c.text_muted}; }}
 QPushButton[role="secondary"]:default {{
     background: {c.surface}; color: {c.text}; border-color: {c.border_strong};
 }}
-QPushButton[role="secondary"]:default:focus {{ border: 2px solid {c.accent_text}; }}
+QPushButton[role="secondary"]:default:focus {{
+    border: 2px solid {c.accent_text}; padding: {m.space(1)}px {m.space(4) - 1}px;
+}}
 """
 
 

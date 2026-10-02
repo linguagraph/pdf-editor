@@ -116,6 +116,9 @@ class Colors:
     canvas: str  # behind the pages in the document view
     page_outline: str  # hairline around each page, so pages read even where shadows don't
     shadow: str  # page and card drop shadows (painted translucent)
+    # Page cards: ``accent_text`` rings the current page; other selected pages get this
+    # softer ring, still >= 3:1 against the surfaces and the canvas it can sit on.
+    ring_selected: str
 
 
 @dataclass(frozen=True)
@@ -201,6 +204,12 @@ def build_colors(scheme: Scheme, accent: str | None = None) -> Colors:
         scrollbar, scrollbar_hover = "#5a5a5a", "#8a8a8a"
     # A very light/dark accent can leave the subtle tint too close to ``text``; back it off.
     subtle = ensure_contrast(subtle, (text,), AA_TEXT, surface)
+    # Selected (not current) page cards: the accent eased towards the background, then pushed
+    # back just far enough to keep 3:1 wherever cards are shown.
+    ring_backgrounds = (*surfaces, base["canvas"])
+    ring_selected = ensure_contrast(
+        mix(accent_text, surface, 0.4), ring_backgrounds, AA_NON_TEXT, text
+    )
     return Colors(
         scheme=scheme,
         window=window,
@@ -229,6 +238,7 @@ def build_colors(scheme: Scheme, accent: str | None = None) -> Colors:
         canvas=base["canvas"],
         page_outline=base["page_outline"],
         shadow=base["shadow"],
+        ring_selected=ring_selected,
     )
 
 
@@ -236,6 +246,16 @@ def build_colors(scheme: Scheme, accent: str | None = None) -> Colors:
 # mode, must stand out from the canvas through the page itself or its outline.
 PAGE_COLORS: tuple[str, ...] = ("#ffffff", "#000000")
 PAGE_EDGE_MIN = 1.3
+
+# Non-text pairs (focus rings, selection outlines) that must reach 3:1 (WCAG 1.4.11).
+NON_TEXT_PAIRS: tuple[tuple[str, str], ...] = (
+    ("accent_text", "window"),
+    ("accent_text", "surface"),
+    ("accent_text", "canvas"),
+    ("ring_selected", "window"),
+    ("ring_selected", "surface"),
+    ("ring_selected", "canvas"),
+)
 
 # Text/background pairs that must meet AA, checked by tests for every scheme and accent.
 TEXT_PAIRS: tuple[tuple[str, str], ...] = (

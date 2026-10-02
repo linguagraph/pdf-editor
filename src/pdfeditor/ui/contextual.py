@@ -20,7 +20,16 @@ from collections.abc import Callable
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractAnimation, QPoint, QPropertyAnimation, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QCoreApplication,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+)
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -45,6 +54,7 @@ from pdfeditor.core.commands import Command, MacroCommand, UpdateAnnotationComma
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.color import Color
 from pdfeditor.ui.color_picker import pick_color, swatch_icon
+from pdfeditor.ui.i18n import QT_TRANSLATE_NOOP
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.panels.inspector import restyled, shown_color
 from pdfeditor.ui.style.tokens import METRICS
@@ -63,15 +73,21 @@ MARGIN = 4  # px kept free between the bar and the edges of the page area
 
 # Comment colors offered as swatches (document colors, not UI colors).
 SWATCHES: tuple[tuple[str, Color], ...] = (
-    ("Yellow", Color(1, 0.92, 0)),
-    ("Green", Color(0, 0.6, 0.2)),
-    ("Blue", Color(0.1, 0.3, 0.9)),
-    ("Red", Color(0.85, 0.1, 0.1)),
-    ("Orange", Color(1, 0.45, 0)),
-    ("Purple", Color(0.55, 0.2, 0.75)),
-    ("Black", Color(0, 0, 0)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Yellow"), Color(1, 0.92, 0)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Green"), Color(0, 0.6, 0.2)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Blue"), Color(0.1, 0.3, 0.9)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Red"), Color(0.85, 0.1, 0.1)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Orange"), Color(1, 0.45, 0)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Purple"), Color(0.55, 0.2, 0.75)),
+    (QT_TRANSLATE_NOOP("ContextualToolbars", "Black"), Color(0, 0, 0)),
 )
 OPACITIES = (100, 75, 50, 25)  # percent
+
+
+def _tr(text: str) -> str:
+    """Strings of the bars, context "ContextualToolbars" (QT_TRANSLATE_NOOP marks the ones
+    in tables)."""
+    return QCoreApplication.translate("ContextualToolbars", text)
 
 
 def place(size: QSize, target: QRect, area: QRect) -> QPoint:
@@ -284,42 +300,45 @@ class ContextualToolbars:
 
     # -- the bars -------------------------------------------------------------------------
     def _text_bar(self) -> MiniToolbar:
-        bar = MiniToolbar("Text actions", self.w)
+        bar = MiniToolbar(_tr("Text actions"), self.w)
         copy_keys = self.w.act_copy.shortcut().toString()
         self.copy_button = bar.add_button(
-            "copy", "Copy", self.w.act_copy.trigger, f"Copy ({copy_keys})" if copy_keys else ""
+            "copy",
+            _tr("Copy"),
+            self.w.act_copy.trigger,
+            _tr("Copy ({keys})").format(keys=copy_keys) if copy_keys else "",
         )
         bar.add_separator()
         self.highlight_button = bar.add_button(
-            "highlighter", "Highlight", lambda: self._markup("highlight")
+            "highlighter", _tr("Highlight"), lambda: self._markup("highlight")
         )
         self.underline_button = bar.add_button(
-            "underline", "Underline", lambda: self._markup("underline")
+            "underline", _tr("Underline"), lambda: self._markup("underline")
         )
         self.strikeout_button = bar.add_button(
-            "strikethrough", "Strikethrough", lambda: self._markup("strikeout")
+            "strikethrough", _tr("Strikethrough"), lambda: self._markup("strikeout")
         )
         self.note_button = bar.add_button(
-            "sticky-note", "Add note", self.add_note, "Add a note to the selected text"
+            "sticky-note", _tr("Add note"), self.add_note, _tr("Add a note to the selected text")
         )
         bar.add_separator()
         self.redact_button = bar.add_button(
-            "eraser", "Mark for redaction", self.w.protect.start_redact_tool
+            "eraser", _tr("Mark for redaction"), self.w.protect.start_redact_tool
         )
         self.edit_text_button = bar.add_button(
-            "file-pen-line", "Edit text", self.edit_text, "Edit text && images"
+            "file-pen-line", _tr("Edit text"), self.edit_text, _tr("Edit text && images")
         )
         return bar
 
     def _annotation_bar(self) -> MiniToolbar:
-        bar = MiniToolbar("Comment actions", self.w)
+        bar = MiniToolbar(_tr("Comment actions"), self.w)
         self.color_menu = QMenu(bar)
         for name, color in SWATCHES:
-            action = self.color_menu.addAction(swatch_icon(color), name)
+            action = self.color_menu.addAction(swatch_icon(color), _tr(name))
             action.triggered.connect(lambda _=False, c=color: self.set_annotation_color(c))
         self.color_menu.addSeparator()
-        self.color_menu.addAction("More Colors…", self.pick_annotation_color)
-        self.color_button = bar.add_menu_button("paint-bucket", "Color", self.color_menu)
+        self.color_menu.addAction(_tr("More Colors…"), self.pick_annotation_color)
+        self.color_button = bar.add_menu_button("paint-bucket", _tr("Color"), self.color_menu)
         self.opacity_menu = QMenu(bar)
         group = QActionGroup(self.opacity_menu)
         self.opacity_actions: dict[int, QAction] = {}
@@ -332,26 +351,30 @@ class ContextualToolbars:
             )
             self.opacity_actions[percent] = action
         self.opacity_menu.aboutToShow.connect(self._check_opacity)
-        self.opacity_button = bar.add_menu_button("droplet", "Opacity", self.opacity_menu)
+        self.opacity_button = bar.add_menu_button("droplet", _tr("Opacity"), self.opacity_menu)
         self.annotation_separator = bar.add_separator()
-        self.reply_button = bar.add_button("message-square-text", "Reply", self.reply)
+        self.reply_button = bar.add_button("message-square-text", _tr("Reply"), self.reply)
         self.info_button = bar.add_button(
-            "lock", "Locked: show properties", self.w.show_inspector, "Locked · Properties"
+            "lock",
+            _tr("Locked: show properties"),
+            self.w.show_inspector,
+            _tr("Locked · Properties"),
         )
-        self.delete_button = bar.add_button("trash-2", "Delete", self.delete_annotations)
+        self.delete_button = bar.add_button("trash-2", _tr("Delete"), self.delete_annotations)
         return bar
 
     def _page_bar(self) -> MiniToolbar:
-        bar = MiniToolbar("Page actions", self.w)
+        bar = MiniToolbar(_tr("Page actions"), self.w)
         organize = self.w.organize
         for icon_name, name, action in (
-            ("rotate-ccw", "Rotate left", organize.act_rotate_left),
-            ("rotate-cw", "Rotate right", organize.act_rotate_right),
-            ("file-x", "Delete pages", organize.act_delete),
-            ("file-output", "Extract pages", organize.act_extract),
+            ("rotate-ccw", _tr("Rotate left"), organize.act_rotate_left),
+            ("rotate-cw", _tr("Rotate right"), organize.act_rotate_right),
+            ("file-x", _tr("Delete pages"), organize.act_delete),
+            ("file-output", _tr("Extract pages"), organize.act_extract),
         ):
             keys = action.shortcut().toString()
-            bar.add_button(icon_name, name, action.trigger, f"{name} ({keys})" if keys else name)
+            tip = _tr("{name} ({keys})").format(name=name, keys=keys) if keys else name
+            bar.add_button(icon_name, name, action.trigger, tip)
         return bar
 
     # -- binding --------------------------------------------------------------------------
@@ -526,7 +549,7 @@ class ContextualToolbars:
         view = self.view
         if view is None or not view.has_selection():
             return False
-        text = annotate.ask_text(view, "Add Note")
+        text = annotate.ask_text(view, _tr("Add Note"))
         if text is None:
             return False
         return annotate.apply_markup(view, AnnotationType.HIGHLIGHT, "Add Note to Text", text)

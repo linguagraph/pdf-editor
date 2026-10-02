@@ -7,13 +7,18 @@ sight rather than single buttons. Controllers add their own tabs and groups with
 
 The ribbon can be collapsed to just its tab row (double-click a tab, or the chevron), and can
 show icons only ("compact"), for small screens.
+
+Keyboard: F6 lands on the tab row (Left/Right switch tabs); Tab then walks through the current
+tab's buttons, the "»" overflow button and the Search tools box. Tab names and group captions
+are shown translated (context "Ribbon"); code keeps addressing tabs by their English name.
 """
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QElapsedTimer, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QElapsedTimer, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,6 +44,18 @@ COMPACT_ICON_SIZE = QSize(18, 18)
 SEARCH_BOX_MIN_WIDTH = 1000
 
 
+def _translated(text: str) -> str:
+    return QCoreApplication.translate("Ribbon", text) if text else text
+
+
+def _keyboard_reachable(bar: QToolBar) -> None:
+    """Toolbar buttons don't take focus by default; ribbon buttons should be Tab stops."""
+    for action in bar.actions():
+        widget = bar.widgetForAction(action)
+        if isinstance(widget, QToolButton):
+            widget.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
+
 class RibbonGroup(QWidget):
     """A row of buttons with a caption under it."""
 
@@ -48,10 +65,10 @@ class RibbonGroup(QWidget):
         # Fixed: the tab's toolbar then moves whole groups to its "»" overflow menu instead of
         # squeezing each group's own toolbar.
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.bar = QToolBar(title, self)
+        self.bar = QToolBar(_translated(title), self)
         self.bar.setIconSize(ICON_SIZE)
         self.bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.label = QLabel(title, self)
+        self.label = QLabel(_translated(title), self)
         self.label.setProperty("role", "caption")
         self.label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.label.setVisible(bool(title))
@@ -76,7 +93,7 @@ class RibbonGroup(QWidget):
 
 class RibbonTab(QToolBar):
     def __init__(self, name: str, parent: QWidget | None = None) -> None:
-        super().__init__(name, parent)
+        super().__init__(_translated(name), parent)
         self.setMovable(False)
         self.setFloatable(False)
         self.groups: list[RibbonGroup] = []
@@ -85,9 +102,10 @@ class RibbonTab(QToolBar):
         more = self.findChild(QToolButton, "qt_toolbar_ext_button")
         if more is not None:
             more.setIcon(icon("chevrons-down"))
-            more.setToolTip("More commands")
-            more.setAccessibleName("More commands")
+            more.setToolTip(self.tr("More commands"))
+            more.setAccessibleName(self.tr("More commands"))
             more.setMinimumWidth(24)
+            more.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
     def add_group(self, *actions: QAction | QWidget | None, title: str = "") -> RibbonGroup:
         """Add actions/widgets as one captioned group; ``None`` entries are skipped."""
@@ -101,6 +119,7 @@ class RibbonTab(QToolBar):
                 group.bar.addAction(entry)
             else:
                 group.bar.addWidget(entry)
+        _keyboard_reachable(group.bar)
         group.set_compact(self._compact)
         self.groups.append(group)
         self.addWidget(group)
@@ -135,15 +154,15 @@ class Ribbon(QWidget):
         self.setObjectName("Ribbon")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.bar = QTabBar(self)
-        self.bar.setAccessibleName("Ribbon tabs")
+        self.bar.setAccessibleName(self.tr("Ribbon tabs"))
         self.bar.setDrawBase(False)
         self.bar.setExpanding(False)
         self.stack = QStackedWidget(self)
         self.stack.setObjectName("RibbonPanel")
         self.menu_button = QToolButton(self)
         self.menu_button.setIcon(icon("menu"))
-        self.menu_button.setToolTip("Menu")
-        self.menu_button.setAccessibleName("Menu")
+        self.menu_button.setToolTip(self.tr("Menu"))
+        self.menu_button.setAccessibleName(self.tr("Menu"))
         self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.menu_button.setAutoRaise(True)
         self.quick = QToolBar(self)
@@ -152,7 +171,7 @@ class Ribbon(QWidget):
         self.quick.setMovable(False)
         self.collapse_button = QToolButton(self)
         self.collapse_button.setAutoRaise(True)
-        self.collapse_button.setAccessibleName("Collapse ribbon")
+        self.collapse_button.setAccessibleName(self.tr("Collapse ribbon"))
         self.collapse_button.clicked.connect(lambda: self.set_collapsed(not self.collapsed))
         self.search: CommandSearch | None = None
         top = QHBoxLayout()
@@ -183,6 +202,7 @@ class Ribbon(QWidget):
             button = self.quick.widgetForAction(action)
             if isinstance(button, QToolButton) and action.icon().isNull():
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        _keyboard_reachable(self.quick)
 
     def set_search(self, search: CommandSearch) -> None:
         """Put the "Search tools" box at the right of the tab row, before the chevron."""
@@ -190,6 +210,33 @@ class Ribbon(QWidget):
         search.setParent(self)
         self._top.insertWidget(self._top.indexOf(self.collapse_button), search)
         self._update_search()
+        self.chain_focus()
+
+    def chain_focus(self) -> None:
+        """Tab order: menu, quick actions, tab row, the tab's buttons, "»", search, chevron.
+
+        Buttons are created long after the tab row (by each controller), so without this Tab
+        would reach them only after the docks and the page. Hidden ones (other tabs, groups
+        in the overflow menu) are skipped by Qt."""
+        chain: list[QWidget] = [self.menu_button]
+        chain += self._buttons(self.quick)
+        chain.append(self.bar)
+        for tab in self._tabs.values():
+            for group in tab.groups:
+                chain += self._buttons(group.bar)
+            more = tab.findChild(QToolButton, "qt_toolbar_ext_button")
+            if more is not None:
+                chain.append(more)
+        if self.search is not None:
+            chain += [self.search.edit, self.search.button]
+        chain.append(self.collapse_button)
+        for first, second in pairwise(chain):
+            QWidget.setTabOrder(first, second)
+
+    @staticmethod
+    def _buttons(bar: QToolBar) -> list[QWidget]:
+        widgets = (bar.widgetForAction(a) for a in bar.actions() if not a.isSeparator())
+        return [w for w in widgets if isinstance(w, QToolButton)]
 
     def _update_search(self) -> None:
         if self.search is not None:
@@ -204,7 +251,7 @@ class Ribbon(QWidget):
         tab.set_compact(self.compact)
         self._tabs[name] = tab
         self.stack.addWidget(tab)
-        self.bar.addTab(name)
+        self.bar.addTab(_translated(name))
         return tab
 
     def tab(self, name: str) -> RibbonTab:
@@ -261,7 +308,9 @@ class Ribbon(QWidget):
     def _update_collapse_button(self) -> None:
         if self.collapsed:
             self.collapse_button.setIcon(icon("chevron-down"))
-            self.collapse_button.setToolTip("Show the ribbon (Ctrl+F1)")
+            self.collapse_button.setToolTip(self.tr("Show the ribbon (Ctrl+F1)"))
+            self.collapse_button.setAccessibleName(self.tr("Show the ribbon"))
         else:
             self.collapse_button.setIcon(icon("chevron-up"))
-            self.collapse_button.setToolTip("Collapse the ribbon to its tabs (Ctrl+F1)")
+            self.collapse_button.setToolTip(self.tr("Collapse the ribbon to its tabs (Ctrl+F1)"))
+            self.collapse_button.setAccessibleName(self.tr("Collapse ribbon"))

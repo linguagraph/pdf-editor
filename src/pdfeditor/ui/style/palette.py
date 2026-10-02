@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
-from pdfeditor.ui.style.tokens import Colors, mix
+from pdfeditor.ui.style.tokens import Colors, Scheme, contrast, luminance, mix
 
 Role = QPalette.ColorRole
 Group = QPalette.ColorGroup
@@ -47,3 +47,51 @@ def build_palette(c: Colors) -> QPalette:
     p.setColor(Group.Inactive, Role.Highlight, QColor(c.accent))
     p.setColor(Group.Inactive, Role.HighlightedText, QColor(c.on_accent))
     return p
+
+
+def colors_from_palette(p: QPalette) -> Colors:
+    """Tokens taken from a system palette, for Windows High Contrast.
+
+    The style sheet is off then, but custom-painted widgets (page cards, the pill, toasts,
+    rails...) still ask for tokens; these map every token to a palette role, so the user's
+    contrast colors reach them too. Muted and subtle shades collapse to the full colors:
+    contrast themes don't have them.
+    """
+
+    def role(r: QPalette.ColorRole, group: QPalette.ColorGroup = Group.Active) -> str:
+        return p.color(group, r).name()
+
+    window, text = role(Role.Window), role(Role.WindowText)
+    surface = role(Role.Base)
+    highlight, on_highlight = role(Role.Highlight), role(Role.HighlightedText)
+    scheme: Scheme = "dark" if luminance(window) < 0.5 else "light"
+    return Colors(
+        scheme=scheme,
+        window=window,
+        surface=surface,
+        surface_alt=role(Role.AlternateBase),
+        border=text,
+        border_strong=text,
+        text=text,
+        text_muted=text,
+        text_disabled=role(Role.WindowText, Group.Disabled),
+        hover=surface,
+        pressed=surface,
+        accent=highlight,
+        on_accent=on_highlight,
+        accent_text=highlight if contrast(highlight, window) >= 3.0 else text,
+        accent_subtle=surface,
+        danger=text,
+        success=text,
+        warning=text,
+        note_bg=surface,
+        note_text=role(Role.Text),
+        tooltip_bg=role(Role.ToolTipBase),
+        tooltip_text=role(Role.ToolTipText),
+        scrollbar=text,
+        scrollbar_hover=highlight,
+        canvas=window,
+        page_outline=text,
+        shadow="#000000",
+        ring_selected=text,
+    )

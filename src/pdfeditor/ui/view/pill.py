@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.ui.i18n import QT_TR_NOOP
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.style.tokens import METRICS
 from pdfeditor.ui.theme import current_colors, theme_manager
@@ -67,20 +68,26 @@ class PageNavigator(QWidget):
     def __init__(self, pill: CanvasPill) -> None:
         super().__init__(pill)
         self._pill = pill
-        self.first = _button(self, "chevrons-up", "First page", lambda: self._go("first_page"))
+        self.first = _button(
+            self, "chevrons-up", self.tr("First page"), lambda: self._go("first_page")
+        )
         self.prev = _button(
-            self, "chevron-left", "Previous page", lambda: self._go("previous_page")
+            self, "chevron-left", self.tr("Previous page"), lambda: self._go("previous_page")
         )
         self.edit = QLineEdit(self)
-        self.edit.setAccessibleName("Page number")
-        self.edit.setToolTip("Page number: type a page and press Enter")
+        self.edit.setAccessibleName(self.tr("Page number"))
+        self.edit.setToolTip(self.tr("Page number: type a page and press Enter"))
         self.edit.setFixedWidth(44)
         self.edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.edit.returnPressed.connect(self._jump)
         self.total = QLabel(self)
-        self.total.setAccessibleName("Page count")
-        self.next = _button(self, "chevron-right", "Next page", lambda: self._go("next_page"))
-        self.last = _button(self, "chevrons-down", "Last page", lambda: self._go("last_page"))
+        self.total.setAccessibleName(self.tr("Page count"))
+        self.next = _button(
+            self, "chevron-right", self.tr("Next page"), lambda: self._go("next_page")
+        )
+        self.last = _button(
+            self, "chevrons-down", self.tr("Last page"), lambda: self._go("last_page")
+        )
         self.first.hide()
         self.last.hide()
         layout = QHBoxLayout(self)
@@ -110,6 +117,9 @@ class PageNavigator(QWidget):
         self.total.setText(
             f"/ {view.page_count}" if numeric else f"({page + 1} / {view.page_count})"
         )
+        self.total.setAccessibleName(
+            self.tr("Page {page} of {count}").format(page=page + 1, count=view.page_count)
+        )
         self.first.setEnabled(page > 0)
         self.prev.setEnabled(page > 0)
         self.next.setEnabled(page < view.page_count - 1)
@@ -131,20 +141,32 @@ class PageNavigator(QWidget):
 
 
 class ZoomBox(QComboBox):
-    PRESETS = ("Fit Width", "Fit Page", "50%", "75%", "100%", "125%", "150%", "200%", "400%")
+    # Item data is the English preset (what _apply understands); the text is translated.
+    PRESETS = (
+        QT_TR_NOOP("Fit Width"),
+        QT_TR_NOOP("Fit Page"),
+        "50%",
+        "75%",
+        "100%",
+        "125%",
+        "150%",
+        "200%",
+        "400%",
+    )
 
     def __init__(self, pill: CanvasPill) -> None:
         super().__init__(pill)
         self._pill = pill
         self.setEditable(True)
-        self.setAccessibleName("Zoom")
-        self.setToolTip("Zoom: pick a preset or type a percentage")
+        self.setAccessibleName(self.tr("Zoom"))
+        self.setToolTip(self.tr("Zoom: pick a preset or type a percentage"))
         edit = self.lineEdit()
         if edit is not None:
-            edit.setAccessibleName("Zoom")
+            edit.setAccessibleName(self.tr("Zoom"))
             edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.addItems(self.PRESETS)
+        for preset in self.PRESETS:
+            self.addItem(self.tr(preset) if not preset.endswith("%") else preset, preset)
         self.setMinimumContentsLength(5)
         self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.textActivated.connect(self._apply)
@@ -156,6 +178,9 @@ class ZoomBox(QComboBox):
         view = self._pill.view
         if view is None:
             return
+        index = self.findText(text)
+        if index >= 0:
+            text = str(self.itemData(index))  # the preset's English name
         if text == "Fit Width":
             view.fit_width()
         elif text == "Fit Page":
@@ -172,20 +197,26 @@ class CanvasPill(QFrame):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("canvasPill")
-        self.setAccessibleName("Page and zoom controls")
+        self.setAccessibleName(self.tr("Page and zoom controls"))
         # Faded out, the pill stays shown (transparent, and to the mouse too) so it remains in
         # the focus chain: Tab from the page reaches it and focusing it fades it back in.
         self.setAutoFillBackground(False)
         self.view: DocumentView | None = None
         self._home = parent  # where the pill waits while no document is open
         self.navigator = PageNavigator(self)
-        self.zoom_out_button = _button(self, "minus", "Zoom out", lambda: self._zoom("zoom_out"))
-        self.zoom_box = ZoomBox(self)
-        self.zoom_in_button = _button(self, "plus", "Zoom in", lambda: self._zoom("zoom_in"))
-        self.fit_width_button = _button(
-            self, "move-horizontal", "Fit width", lambda: self._zoom("fit_width")
+        self.zoom_out_button = _button(
+            self, "minus", self.tr("Zoom out"), lambda: self._zoom("zoom_out")
         )
-        self.fit_page_button = _button(self, "expand", "Fit page", lambda: self._zoom("fit_page"))
+        self.zoom_box = ZoomBox(self)
+        self.zoom_in_button = _button(
+            self, "plus", self.tr("Zoom in"), lambda: self._zoom("zoom_in")
+        )
+        self.fit_width_button = _button(
+            self, "move-horizontal", self.tr("Fit width"), lambda: self._zoom("fit_width")
+        )
+        self.fit_page_button = _button(
+            self, "expand", self.tr("Fit page"), lambda: self._zoom("fit_page")
+        )
         self._separator = QWidget(self)  # painted by paintEvent, in the border color
         self._separator.setFixedWidth(1)
         layout = QHBoxLayout(self)

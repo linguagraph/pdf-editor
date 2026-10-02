@@ -9,7 +9,7 @@ its width, unlike with a trailing "*".
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QHoverEvent, QIcon, QMouseEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTabBar, QTabWidget, QToolButton, QWidget
 
@@ -46,8 +46,9 @@ class TabCloseButton(QToolButton):
             self.setIcon(icon("x") if mode == self.CLOSE else QIcon())
             self.update()
         dirty = self._bar.is_dirty(self._bar.button_index(self))
-        self.setToolTip(f"Close {name}" + (" (unsaved changes)" if dirty else ""))
-        self.setAccessibleName(f"Close {name}")
+        tip = self.tr("Close {name} (unsaved changes)") if dirty else self.tr("Close {name}")
+        self.setToolTip(tip.format(name=name))
+        self.setAccessibleName(self.tr("Close {name}").format(name=name))
 
     def enterEvent(self, event: QEvent) -> None:
         super().enterEvent(event)  # type: ignore[arg-type]
@@ -74,7 +75,7 @@ class DocumentTabBar(QTabBar):
         self._middle_pressed = -1
         self._overflowing = False
         self.setObjectName("DocumentTabBar")
-        self.setAccessibleName("Document tabs")
+        self.setAccessibleName(self.tr("Document tabs"))
         self.setTabsClosable(False)  # our own buttons, see TabCloseButton
         self.setMovable(True)
         self.setExpanding(False)
@@ -101,7 +102,8 @@ class DocumentTabBar(QTabBar):
     def set_dirty(self, index: int, dirty: bool) -> None:
         self.setTabData(index, bool(dirty))
         name = self.tabText(index)
-        self.setAccessibleTabName(index, f"{name}, unsaved changes" if dirty else name)
+        unsaved = QCoreApplication.translate("DocumentTabBar", "{name}, unsaved changes")
+        self.setAccessibleTabName(index, unsaved.format(name=name) if dirty else name)
         self.refresh_buttons()
 
     def is_dirty(self, index: int) -> bool:
@@ -195,32 +197,32 @@ class DocumentTabWidget(QTabWidget):
         self.bar = DocumentTabBar(self)
         self.setTabBar(self.bar)
         self.bar.tabCloseRequested.connect(self.close_requested)
-        self.setAccessibleName("Open documents")
+        self.setAccessibleName(self.tr("Open documents"))
         self.setDocumentMode(True)
         self.setMovable(True)
 
         corner = QWidget(self)
         corner.setObjectName("DocumentTabsCorner")
-        corner.setAccessibleName("Document tab actions")
+        corner.setAccessibleName(self.tr("Document tab actions"))
         layout = QHBoxLayout(corner)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(2)
         self.overflow_button = QToolButton(corner)
         self.overflow_button.setIcon(icon("chevron-down"))
-        self.overflow_button.setToolTip("All open documents")
-        self.overflow_button.setAccessibleName("All open documents")
+        self.overflow_button.setToolTip(self.tr("All open documents"))
+        self.overflow_button.setAccessibleName(self.tr("All open documents"))
         self.overflow_button.setAutoRaise(True)
         self.overflow_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.documents_menu = QMenu(self.overflow_button)
-        self.documents_menu.setAccessibleName("Open documents")
+        self.documents_menu.setAccessibleName(self.tr("Open documents"))
         self.documents_menu.aboutToShow.connect(self.fill_documents_menu)
         self.overflow_button.setMenu(self.documents_menu)
         self.overflow_button.setObjectName("DocumentTabsMenu")
         self.overflow_button.hide()
         self.plus_button = QToolButton(corner)
         self.plus_button.setIcon(icon("plus"))
-        self.plus_button.setToolTip("Open a file (Ctrl+O)")
-        self.plus_button.setAccessibleName("Open a file")
+        self.plus_button.setToolTip(self.tr("Open a file (Ctrl+O)"))
+        self.plus_button.setAccessibleName(self.tr("Open a file"))
         self.plus_button.setAutoRaise(True)
         self.plus_button.clicked.connect(self.open_requested)
         layout.addWidget(self.overflow_button)
