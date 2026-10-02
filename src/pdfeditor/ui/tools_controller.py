@@ -20,7 +20,8 @@ from pdfeditor.services.ocr import (
 from pdfeditor.ui.dialogs.ocr import BatchOcrDialog, OcrDialog
 from pdfeditor.ui.dialogs.pages import checked_pages
 from pdfeditor.ui.icons import icon
-from pdfeditor.ui.jobs import Job, run_modal
+from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.toasts import folder_action, undo_action
 
 if TYPE_CHECKING:
     from pdfeditor.ui.main_window import MainWindow
@@ -47,12 +48,10 @@ class ToolsController:
         r = self.w.ribbon.add_tab("Tools")
         r.add_group(self.act_ocr, self.act_batch_ocr, title="Recognize Text")
 
-    # -- helpers ----------------------------------------------------------------------------
-    def run_job(self, label: str, work: Callable[[Job], object], total: int = 0) -> object:
-        return run_modal(self.w, label, work, total)
-
     # -- commands ---------------------------------------------------------------------------
-    def recognize(self, dialog: OcrDialog | None = None) -> OcrResult | None:
+    def recognize(self, dialog: OcrDialog | None = None) -> Job | None:
+        """Run OCR on the chosen pages in the background; the text layer is added (one undo
+        step) when it's done. Returns the job; its outcome is the :class:`OcrResult`."""
         tab = self.w.current_tab()
         if tab is None:
             return None
@@ -77,45 +76,54 @@ class ToolsController:
                 session.document, pages, options, job.token, job.progress, session.lock
             )
 
-        try:
-            result = self.run_job("Recognizing text…", work, len(pages))
-        except (RuntimeError, ValueError) as exc:
-            QMessageBox.warning(self.w, "OCR", str(exc))
-            return None
-        if not isinstance(result, OcrResult):
-            return None  # cancelled
-        if result.layers:
-            session.execute(
-                SnapshotCommand("Recognize Text", lambda doc: apply(doc, result), session.snapshots)
+        def done(result: object) -> OcrResult | None:
+            if not isinstance(result, OcrResult):
+                return None
+            if result.layers:
+                session.execute(
+                    SnapshotCommand(
+                        "Recognize Text", lambda doc: apply(doc, result), session.snapshots
+                    )
+                )
+            recognized, skipped = len(result.layers), len(result.skipped)
+            self.last_message = f"Recognized text on {recognized} page(s)" + (
+                f"; skipped {skipped} page(s) that already had text." if skipped else "."
             )
-        done, skipped = len(result.layers), len(result.skipped)
-        self.last_message = f"Recognized text on {done} page(s)" + (
-            f"; skipped {skipped} page(s) that already had text." if skipped else "."
-        )
-        self.w.statusBar().showMessage(self.last_message, 8000)
-        return result
+            undo = undo_action(session) if result.layers else None
+            self.w.notify(self.last_message, "success", undo)
+            return result
 
-    def batch_ocr(self, dialog: BatchOcrDialog | None = None) -> list[Path]:
+        return self.w.jobs.start(
+            "Recognizing text…", work, total=len(pages), session=session, on_done=done
+        )
+
+    def batch_ocr(self, dialog: BatchOcrDialog | None = None) -> Job | None:
+        """OCR files into searchable copies; the job's outcome is the list of files written."""
         if dialog is None:
             dialog = BatchOcrDialog(self.w)
         if not dialog.result() and not dialog.exec():
-            return []
+            return None
         paths, out_dir = dialog.paths(), Path(dialog.out_dir.text())
         if not paths or not dialog.out_dir.text():
             QMessageBox.warning(self.w, "Batch OCR", "Add files and choose an output folder.")
-            return []
+            return None
         try:
             options: OcrOptions = dialog.box.options()
-            engine = self.w.engine()
-            written = self.run_job(
-                "Batch OCR…",
-                lambda job: ocr_files(engine, paths, out_dir, options, job.token, job.progress),
-                len(paths),
-            )
-        except (RuntimeError, ValueError) as exc:
+        except ValueError as exc:
             QMessageBox.warning(self.w, "Batch OCR", str(exc))
-            return []
-        result = written if isinstance(written, list) else []
-        self.last_message = f"Wrote {len(result)} searchable file(s) to {out_dir}"
-        self.w.statusBar().showMessage(self.last_message, 8000)
-        return result
+            return None
+        engine = self.w.engine()
+
+        def done(written: object) -> list[Path]:
+            result = written if isinstance(written, list) else []
+            self.last_message = f"Wrote {len(result)} searchable file(s) to {out_dir}"
+            target = result[0] if result else out_dir
+            self.w.notify(self.last_message, "success", folder_action(target))
+            return result
+
+        return self.w.jobs.start(
+            "Batch OCR…",
+            lambda job: ocr_files(engine, paths, out_dir, options, job.token, job.progress),
+            total=len(paths),
+            on_done=done,
+        )

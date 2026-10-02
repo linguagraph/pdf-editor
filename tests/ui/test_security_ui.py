@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QLabel
 from pdfeditor.engine.base import PasswordRequired
 from pdfeditor.engine.registry import get_engine
 from pdfeditor.model.metadata import EncryptionMethod
+from pdfeditor.ui.dialogs import confirm
 from pdfeditor.ui.dialogs.properties import PropertiesDialog
 from pdfeditor.ui.dialogs.security import SecurityDialog
 from pdfeditor.ui.main_window import MainWindow
@@ -96,6 +97,11 @@ def test_remove_security_needs_owner_password(
     assert warned and "not correct" in warned[0]
     # the wrong password didn't disturb the open document
     assert view.session.document.page(0).text_page(with_chars=False).text.strip()
+    asked: list[str] = []
+    monkeypatch.setattr(confirm, "confirm_destructive", lambda _p, _t, text, _a: asked.append(text))
+    assert not window.protect.remove_security(owner_password="owner")  # declined
+    assert asked and "anyone can open" in asked[0]
+    monkeypatch.setattr(confirm, "confirm_destructive", lambda *_a: True)
     assert window.protect.remove_security(owner_password="owner")
     view.session.save()
     plain = get_engine().open(path)

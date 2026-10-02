@@ -14,6 +14,7 @@ from pdfeditor.services.optimize import ReduceOptions, ReduceResult, audit, redu
 from pdfeditor.ui.dialogs.optimize import ReduceSizeDialog, SpaceAuditDialog, human_size
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job, run_modal
+from pdfeditor.ui.toasts import folder_action
 
 if TYPE_CHECKING:
     from pdfeditor.core.session import DocumentSession
@@ -50,17 +51,27 @@ class OptimizeController:
             return session.path.stat().st_size
         return None
 
-    def _reduce(self, session: DocumentSession, options: ReduceOptions) -> ReduceResult | None:
-        doc, lock, before = session.document, session.lock, self._on_disk_size(session)
+    @staticmethod
+    def _reduce_work(
+        session: DocumentSession, options: ReduceOptions, before: int | None
+    ) -> Callable[[Job], ReduceResult]:
+        doc, lock = session.document, session.lock
 
         def work(job: Job) -> ReduceResult:
-            with lock:
+            with job.hold(lock):
                 return reduce_size(doc, options, before, job.token, job.progress)
 
+        return work
+
+    def _reduce(self, session: DocumentSession, options: ReduceOptions) -> ReduceResult | None:
+        """The estimate, run from inside the (modal) Reduce File Size dialog: it waits."""
+        work = self._reduce_work(session, options, self._on_disk_size(session))
         result = run_modal(self.w, "Optimizing…", work, 3)
         return result if isinstance(result, ReduceResult) else None
 
-    def reduce(self, dialog: ReduceSizeDialog | None = None) -> Path | None:
+    def reduce(self, dialog: ReduceSizeDialog | None = None) -> Job | Path | None:
+        """Save a smaller copy. Returns the job writing it (its outcome is the path), or the
+        path at once when the dialog's estimate already holds the result."""
         session = self._session()
         if session is None:
             return None
@@ -77,14 +88,6 @@ class OptimizeController:
         if not dialog.result() and not dialog.exec():
             return None
         options = dialog.options()
-        result = dialog.estimate if dialog.estimate_for == options else None
-        try:
-            result = result or self._reduce(session, options)
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "Reduce File Size", f"Optimizing failed:\n\n{exc}")
-            return None
-        if result is None:
-            return None  # cancelled
         target = dialog.target_path()
         if session.path is not None and target.resolve() == session.path.resolve():
             QMessageBox.warning(
@@ -93,33 +96,50 @@ class OptimizeController:
                 "Choose a different file name: the open document is not replaced.",
             )
             return None
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".part")
-        tmp.write_bytes(result.data)
-        tmp.replace(target)
+        estimate_result = dialog.estimate if dialog.estimate_for == options else None
+        if estimate_result is not None:
+            return self._write(estimate_result, target)
+        return self.w.jobs.start(
+            "Reducing file size…",
+            self._reduce_work(session, options, self._on_disk_size(session)),
+            total=3,
+            session=session,
+            on_done=lambda result: (
+                self._write(result, target) if isinstance(result, ReduceResult) else None
+            ),
+        )
+
+    def _write(self, result: ReduceResult, target: Path) -> Path | None:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".part")
+            tmp.write_bytes(result.data)
+            tmp.replace(target)
+        except OSError as exc:
+            self.w.notify(f"Couldn't save {target.name}: {exc}", "error")
+            return None
         self.last_message = (
             f"Saved {target.name}: {human_size(result.before)} → {human_size(result.after)}"
         )
-        self.w.statusBar().showMessage(self.last_message, 10000)
+        self.w.notify(self.last_message, "success", folder_action(target))
         return target
 
-    def audit(self, show: bool = True) -> SpaceUsage | None:
+    def audit(self, show: bool = True) -> Job | None:
+        """Measure what takes space; the job's outcome is the :class:`SpaceUsage`."""
         session = self._session()
         if session is None:
             return None
         doc, lock = session.document, session.lock
 
-        def work(_job: Job) -> SpaceUsage:
-            with lock:
+        def work(job: Job) -> SpaceUsage:
+            with job.hold(lock):
                 return audit(doc)
 
-        try:
-            usage = run_modal(self.w, "Measuring space usage…", work)
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "Space Usage", str(exc))
-            return None
-        if not isinstance(usage, SpaceUsage):
-            return None
-        if show:
-            SpaceAuditDialog(usage, self.w).exec()
-        return usage
+        def done(usage: object) -> SpaceUsage | None:
+            if not isinstance(usage, SpaceUsage):
+                return None
+            if show:
+                SpaceAuditDialog(usage, self.w).exec()
+            return usage
+
+        return self.w.jobs.start("Measuring space usage…", work, session=session, on_done=done)

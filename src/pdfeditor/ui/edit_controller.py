@@ -82,7 +82,11 @@ class EditController:
         self.act_replace_image = act("Re&place Image…", "image-up", self.replace_image)
         self.act_extract_image = act("E&xport Image…", "image-down", self.export_image)
         self.act_delete_objects = act("&Delete Selected Objects", "trash-2", self.delete_objects)
-        edit.notify = lambda message: window.statusBar().showMessage(message, 6000)
+
+        def notify(message: str) -> None:
+            window.notify(message)
+
+        edit.notify = notify
 
         def show_error(message: str) -> None:
             QMessageBox.warning(window, "Edit", message)
@@ -122,15 +126,13 @@ class EditController:
             return True
         with session.lock:
             signed = session.document.info().has_signatures
-        if signed:
-            answer = QMessageBox.question(
-                self.w,
-                "Signed Document",
-                "This document is digitally signed. Editing its content will invalidate the "
-                "signatures. Continue?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return False
+        if signed and not self.w.confirm(
+            "Edit a Signed Document?",
+            f"“{session.display_name}” is digitally signed. Editing its content invalidates "
+            "every signature in it: readers will be told the document changed after signing.",
+            "Edit Anyway",
+        ):
+            return False
         self._warned_signed.add(session.id)
         return True
 

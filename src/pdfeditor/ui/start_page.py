@@ -21,14 +21,12 @@ from PySide6.QtCore import (
     QRect,
     QSize,
     Qt,
-    QUrl,
     Signal,
 )
 from PySide6.QtGui import (
     QAction,
     QColor,
     QContextMenuEvent,
-    QDesktopServices,
     QDragEnterEvent,
     QDragLeaveEvent,
     QDropEvent,
@@ -66,6 +64,7 @@ from pdfeditor.services.thumbnails import first_page_thumbnail
 from pdfeditor.ui.icons import icon
 from pdfeditor.ui.jobs import Job
 from pdfeditor.ui.recent_files import RecentFiles
+from pdfeditor.ui.reveal import show_in_folder
 from pdfeditor.ui.style.tokens import METRICS
 from pdfeditor.ui.theme import current_colors, theme_manager
 from pdfeditor.ui.view.renderer import to_qimage
@@ -264,7 +263,7 @@ class RecentFilesView(QListWidget):
         )
         folder = menu.addAction(
             "Show in &Folder",
-            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(path).parent))),
+            lambda: show_in_folder(Path(path)),
         )
         folder.setEnabled(not missing)
         menu.addSeparator()

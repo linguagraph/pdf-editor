@@ -209,6 +209,17 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         assert isinstance(app, QApplication)
         if not app.styleSheet() and not theme_manager().high_contrast():
             raise AssertionError("the app style sheet was not applied")
+        # feedback (U8): a background job on the document, and a toast with its bundled icon
+        from pdfeditor.ui.jobs import wait_for
+
+        job = window.jobs.start(
+            "Self-test", lambda _job: 42, session=view.session, on_done=lambda r: r
+        )
+        if wait_for(job, 10_000) != 42 or view.session.busy:
+            raise AssertionError("background job didn't deliver its result")
+        toast = window.notify("Self-test", "success")
+        if toast.icon_label.pixmap().isNull():
+            raise AssertionError("toast icon missing")
         window.close()
         QSettings().clear()
         scheme = theme_manager().scheme

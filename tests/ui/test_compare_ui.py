@@ -10,6 +10,7 @@ from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.objects import ObjectType, ShapeKind, ShapeSpec
 from pdfeditor.model.pages import TextStamp
 from pdfeditor.ui.dialogs.compare import CompareFilesDialog
+from pdfeditor.ui.jobs import wait_for
 from pdfeditor.ui.main_window import MainWindow
 
 pytestmark = pytest.mark.gui
@@ -54,7 +55,7 @@ def run(window: MainWindow, old: Path, new: Path):
     d = CompareFilesDialog(old, window)
     d.new.setText(str(new))
     d.accept()
-    return window.compare.compare(d)
+    return wait_for(window.compare.compare(d))
 
 
 def test_compare_window(qtbot, window: MainWindow, files, tmp_path: Path) -> None:

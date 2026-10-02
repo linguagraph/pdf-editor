@@ -131,20 +131,41 @@ class MarkTextDialog(FormDialog):
         ]
 
 
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
+def redaction_loss(marks: int, pages: int) -> str:
+    """What applying ``marks`` redactions destroys, in the words the dialog uses."""
+    where = f" on {_count(pages, 'page')}" if pages else ""
+    return (
+        f"Permanently remove the text, images and graphics under {_count(marks, 'marked area')}"
+        f"{where}. You can undo it until you close the document, but this can't be undone "
+        "after saving."
+    )
+
+
 class ApplyRedactionsDialog(FormDialog):
-    def __init__(self, total: int, selected: int, parent: QWidget | None = None) -> None:
-        super().__init__(
-            "Apply Redactions",
-            "Applying removes the content under the marks permanently. It can be undone until "
-            "you close the document, but once saved the removed content is gone from the file.",
-            parent,
-            primary="Apply",
-            danger=True,
-        )
+    """``total``/``selected`` marks, on ``total_pages``/``selected_pages`` pages: the subtitle
+    says exactly what the chosen scope removes."""
+
+    def __init__(
+        self,
+        total: int,
+        selected: int,
+        parent: QWidget | None = None,
+        *,
+        total_pages: int = 0,
+        selected_pages: int = 0,
+    ) -> None:
+        super().__init__("Apply Redactions", "", parent, primary="Apply Redactions", danger=True)
+        self._counts = {True: (selected, selected_pages), False: (total, total_pages)}
         self.all = QRadioButton(f"All marks in the document ({total})")
         self.selected = QRadioButton(f"Selected marks only ({selected})")
         self.selected.setEnabled(selected > 0)
         (self.selected if selected else self.all).setChecked(True)
+        self.selected.toggled.connect(self._update_loss)
+        self._update_loss()
         self.images = QComboBox()
         for value, text in (
             (ImageRedaction.PIXELS, "Blank the covered image pixels"),
@@ -170,6 +191,11 @@ class ApplyRedactionsDialog(FormDialog):
         add_row(form, "Images:", self.images)
         add_row(form, "Vector graphics:", self.graphics)
 
+    def _update_loss(self) -> None:
+        marks, pages = self._counts[self.selected.isChecked()]
+        self.set_subtitle(redaction_loss(marks, pages))
+        self.setAccessibleDescription(self.header_subtitle.text())
+
     def options(self) -> RedactOptions:
         return RedactOptions(images=self.images.currentData(), graphics=self.graphics.currentData())
 
@@ -193,7 +219,7 @@ class SanitizeDialog(FormDialog):
         super().__init__(
             "Sanitize Document",
             "Remove hidden information that isn't visible on the pages. Everything checked "
-            "is deleted from the document.",
+            "is deleted from the document; this can't be undone after saving.",
             parent,
             primary="Sanitize",
             danger=True,

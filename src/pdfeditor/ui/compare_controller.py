@@ -14,7 +14,8 @@ from pdfeditor.services.compare import CompareResult, compare, write_report
 from pdfeditor.ui.dialogs.compare import CompareFilesDialog, CompareWindow
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.icons import icon
-from pdfeditor.ui.jobs import Job, run_modal
+from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.toasts import folder_action
 from pdfeditor.ui.view.document_view import DocumentView
 
 if TYPE_CHECKING:
@@ -34,7 +35,8 @@ class CompareController:
     def ribbon(self) -> None:
         self.w.ribbon.tab("Tools").add_group(self.act_compare, title="Compare")
 
-    def compare(self, dialog: CompareFilesDialog | None = None) -> CompareWindow | None:
+    def compare(self, dialog: CompareFilesDialog | None = None) -> Job | None:
+        """Compare two files in the background; the job's outcome is the window."""
         if dialog is None:
             view = self.w.current_view()
             dialog = CompareFilesDialog(view.session.path if view else None, self.w)
@@ -56,21 +58,38 @@ class CompareController:
             return None
         old, new = sessions
         options = dialog.options()
+        names = (old_path.name, new_path.name)
 
         def work(job: Job) -> CompareResult:
-            with old.lock:
+            with job.hold(old.lock):
                 return compare(old.document, new.document, options, job.token, job.progress)
 
-        try:
-            result = run_modal(self.w, "Comparing…", work, max(old.page_count, new.page_count))
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "Compare Files", f"Comparing failed:\n\n{exc}")
-            result = None
-        if not isinstance(result, CompareResult):
+        def close_both() -> None:
             old.close()
             new.close()
-            return None
-        return self._show(old, new, result, (old_path.name, new_path.name))
+
+        def done(result: object) -> CompareWindow | None:
+            if not isinstance(result, CompareResult):
+                close_both()
+                return None
+            return self._show(old, new, result, names)
+
+        def failed(message: str) -> None:
+            close_both()
+            self.w.notify(f"Comparing failed: {message}", "error")
+
+        def cancelled() -> None:
+            close_both()
+            self.w.notify("Comparing was cancelled.")
+
+        return self.w.jobs.start(
+            "Comparing…",
+            work,
+            total=max(old.page_count, new.page_count),
+            on_done=done,
+            on_failed=failed,
+            on_cancelled=cancelled,
+        )
 
     def _show(
         self,
@@ -100,7 +119,7 @@ class CompareController:
             if result.identical
             else f"{len(result.changes)} change(s) found"
         )
-        self.w.statusBar().showMessage(self.last_message, 8000)
+        self.w.notify(self.last_message, "success")
         window.show()
         return window
 
@@ -130,5 +149,5 @@ class CompareController:
             QMessageBox.warning(window, "Export Report", f"Couldn't write the report:\n\n{exc}")
             return None
         self.last_message = f"Report saved to {path}"
-        self.w.statusBar().showMessage(self.last_message, 8000)
+        self.w.notify(self.last_message, "success", folder_action(path))
         return path

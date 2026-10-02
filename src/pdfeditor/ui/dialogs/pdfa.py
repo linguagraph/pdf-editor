@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
+from shiboken6 import isValid
 
 from pdfeditor.services.pdfa import Issue
 from pdfeditor.ui.dialogs.base import FormDialog
@@ -27,7 +28,8 @@ class PdfaReportDialog(FormDialog):
         issues: Sequence[Issue],
         fixed: Sequence[str] = (),
         on_convert: Callable[[], object] | None = None,
-        on_verapdf: Callable[[], tuple[bool, str] | None] | None = None,
+        # starts the validation; the verdict comes back through the callback it is given
+        on_verapdf: Callable[[Callable[[tuple[bool, str]], None]], object] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(title, parent=parent, primary=None, cancel="Close")
@@ -80,9 +82,8 @@ class PdfaReportDialog(FormDialog):
                 "Validate with veraPDF", QDialogButtonBox.ButtonRole.ActionRole
             )
 
-            def run() -> None:
-                outcome = on_verapdf()
-                if outcome is None:
+            def show(outcome: tuple[bool, str]) -> None:
+                if not isValid(self):  # closed while veraPDF ran
                     return
                 ok, text = outcome
                 self.verapdf_report.setPlainText(text)
@@ -92,4 +93,4 @@ class PdfaReportDialog(FormDialog):
                     + ("\nveraPDF: compliant." if ok else "\nveraPDF: not compliant (see report).")
                 )
 
-            self.verapdf_button.clicked.connect(run)
+            self.verapdf_button.clicked.connect(lambda: on_verapdf(show))

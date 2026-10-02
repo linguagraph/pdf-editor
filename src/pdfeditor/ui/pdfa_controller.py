@@ -3,6 +3,7 @@ accessibility check and (experimental) auto-tag an untagged document."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,8 @@ from pdfeditor.services.pdfa import (
 )
 from pdfeditor.ui.dialogs.pdfa import PdfaReportDialog
 from pdfeditor.ui.icons import icon
-from pdfeditor.ui.jobs import Job, run_modal
+from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.toasts import folder_action, undo_action
 
 if TYPE_CHECKING:
     from pdfeditor.core.session import DocumentSession
@@ -76,17 +78,21 @@ class PdfaController:
             encrypted = doc.info().encryption is not EncryptionMethod.NONE
             return doc.to_bytes(SaveOptions(decrypt=True)), encrypted
 
-    def _verapdf(self, path: Path) -> tuple[bool, str] | None:
-        try:
-            outcome = run_modal(
-                self.w, "Validating with veraPDF…", lambda _j: validate_with_verapdf(path)
-            )
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "veraPDF", str(exc))
-            return None
-        return outcome if isinstance(outcome, tuple) else None
+    def _verapdf(self, path: Path, deliver: Callable[[tuple[bool, str]], object]) -> Job:
+        """Validate a saved file with veraPDF in the background, then ``deliver`` its verdict
+        (to the report dialog that asked)."""
 
-    def preflight(self, show: bool = True) -> list[Issue] | None:
+        def done(outcome: object) -> object:
+            if isinstance(outcome, tuple):
+                deliver(outcome)
+            return outcome
+
+        return self.w.jobs.start(
+            "Validating with veraPDF…", lambda _j: validate_with_verapdf(path), on_done=done
+        )
+
+    def preflight(self, show: bool = True) -> Job | None:
+        """Check the document against PDF/A-2b; the job's outcome is the list of issues."""
         session = self._session()
         if session is None:
             return None
@@ -96,11 +102,16 @@ class PdfaController:
             data, encrypted = self._plain_bytes(session)
             return preflight(data, fonts, encrypted)
 
-        try:
-            issues = run_modal(self.w, "Checking PDF/A-2b…", work)
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "PDF/A Preflight", str(exc))
-            return None
+        return self.w.jobs.start(
+            "Checking PDF/A-2b…",
+            work,
+            session=session,
+            on_done=lambda issues: self._show_preflight(session, issues, show),
+        )
+
+    def _show_preflight(
+        self, session: DocumentSession, issues: object, show: bool
+    ) -> list[Issue] | None:
         if not isinstance(issues, list):
             return None
         if show:
@@ -121,15 +132,18 @@ class PdfaController:
                 headline,
                 issues,
                 on_convert=self.save_as_pdfa if issues else None,
-                on_verapdf=(lambda: self._verapdf(saved)) if saved and find_verapdf() else None,
+                on_verapdf=(
+                    (lambda deliver: self._verapdf(saved, deliver))
+                    if saved and find_verapdf()
+                    else None
+                ),
                 parent=self.w,
             )
             self.dialog.show()
         return issues
 
-    def save_as_pdfa(
-        self, target: Path | None = None, show: bool = True
-    ) -> ConversionResult | None:
+    def save_as_pdfa(self, target: Path | None = None, show: bool = True) -> Job | None:
+        """Save a PDF/A-2b copy; the job's outcome is the :class:`ConversionResult`."""
         session = self._session()
         if session is None:
             return None
@@ -160,23 +174,33 @@ class PdfaController:
             data, _encrypted = self._plain_bytes(session)
             return convert_to_pdfa(data, fonts)
 
-        try:
-            result = run_modal(self.w, "Converting to PDF/A-2b…", work)
-        except RuntimeError as exc:
-            QMessageBox.warning(self.w, "Save as PDF/A", f"Conversion failed:\n\n{exc}")
-            return None
+        saved_as = target
+        return self.w.jobs.start(
+            "Converting to PDF/A-2b…",
+            work,
+            session=session,
+            on_done=lambda result: self._write_pdfa(result, saved_as, show),
+        )
+
+    def _write_pdfa(self, result: object, target: Path, show: bool) -> ConversionResult | None:
         if not isinstance(result, ConversionResult):
             return None
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".part")
-        tmp.write_bytes(result.data)
-        tmp.replace(target)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".part")
+            tmp.write_bytes(result.data)
+            tmp.replace(target)
+        except OSError as exc:
+            self.w.notify(f"Couldn't save {target.name}: {exc}", "error")
+            return None
         self.last_message = (
             f"Saved PDF/A-2b copy: {target.name}"
             if result.conforming
             else f"Saved {target.name}, but it isn't PDF/A yet: {len(result.remaining)} problem(s)"
         )
-        self.w.statusBar().showMessage(self.last_message, 10000)
+        self.w.notify(
+            self.last_message, "success" if result.conforming else "info", folder_action(target)
+        )
         if show:
             headline = (
                 f"Saved {target.name} as PDF/A-2b."
@@ -188,13 +212,15 @@ class PdfaController:
                 headline,
                 result.remaining,
                 result.fixed,
-                on_verapdf=(lambda: self._verapdf(target)) if find_verapdf() else None,
+                on_verapdf=(
+                    (lambda deliver: self._verapdf(target, deliver)) if find_verapdf() else None
+                ),
                 parent=self.w,
             )
             self.dialog.show()
         return result
 
-    def auto_tag(self) -> dict[str, int] | None:
+    def auto_tag(self) -> Job | None:
         """Tag an untagged document (undoable). The tagging runs on a copy in a background job;
         the result then replaces the document through a snapshot command."""
         session = self._session()
@@ -212,8 +238,8 @@ class PdfaController:
             return None
         doc, lock = session.document, session.lock
 
-        def work(_job: Job) -> tuple[bytes, dict[str, int]]:
-            with lock:
+        def work(job: Job) -> tuple[bytes, dict[str, int]]:
+            with job.hold(lock):
                 copy = doc.copy()
                 try:
                     counts = copy.auto_tag()
@@ -221,19 +247,22 @@ class PdfaController:
                 finally:
                     copy.close()
 
-        try:
-            outcome = run_modal(self.w, "Tagging the document…", work)
-        except RuntimeError as exc:
-            self.last_message = f"Auto-tagging failed:\n\n{exc}"
-            QMessageBox.warning(self.w, title, self.last_message)
-            return None
-        if not isinstance(outcome, tuple):
-            return None  # cancelled
-        data, counts = outcome
-        session.execute(SnapshotCommand(title, lambda d: d.load_state(data), session.snapshots))
-        summary = ", ".join(f"{n} {tag}" for tag, n in sorted(counts.items()))
-        self.last_message = (
-            f"Tagged the document: {summary}. Review the tags and give figures alternate text."
+        def done(outcome: object) -> dict[str, int] | None:
+            if not isinstance(outcome, tuple):
+                return None
+            data, counts = outcome
+            session.execute(SnapshotCommand(title, lambda d: d.load_state(data), session.snapshots))
+            summary = ", ".join(f"{n} {tag}" for tag, n in sorted(counts.items()))
+            self.last_message = (
+                f"Tagged the document: {summary}. Review the tags and give figures alternate text."
+            )
+            self.w.notify(self.last_message, "success", undo_action(session))
+            return dict(counts)
+
+        def failed(message: str) -> None:
+            self.last_message = f"Auto-tagging failed: {message}"
+            self.w.notify(self.last_message, "error")
+
+        return self.w.jobs.start(
+            "Tagging the document…", work, session=session, on_done=done, on_failed=failed
         )
-        self.w.statusBar().showMessage(self.last_message, 10000)
-        return counts

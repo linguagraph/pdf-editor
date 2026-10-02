@@ -7,10 +7,10 @@ import pikepdf
 import pytest
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QMessageBox
 
 from pdfeditor.model.geometry import Point
 from pdfeditor.model.objects import ObjectType
+from pdfeditor.ui.dialogs import confirm
 from pdfeditor.ui.main_window import MainWindow
 from pdfeditor.ui.tools import edit
 from pdfeditor.ui.view.text_editor import InlineTextEditor
@@ -198,13 +198,10 @@ def test_signed_document_warning(
         pdf.Root.AcroForm.SigFlags = 3
         pdf.save(path)
     window.open_path(path)
-    monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
-    )
+    asked: list[str] = []
+    monkeypatch.setattr(confirm, "confirm_destructive", lambda _p, t, *_a: asked.append(t))
     window.set_tool("edit")
-    assert window.current_tool != "edit"
-    monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
-    )
+    assert window.current_tool != "edit" and asked == ["Edit a Signed Document?"]
+    monkeypatch.setattr(confirm, "confirm_destructive", lambda *_a: True)
     window.set_tool("edit")
     assert window.current_tool == "edit"

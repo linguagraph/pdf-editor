@@ -7,11 +7,11 @@ import pikepdf
 import pypdfium2 as pdfium
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QMessageBox
 
 from pdfeditor.model.annotations import AnnotationType, ReviewState
 from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Point
+from pdfeditor.ui.dialogs import confirm
 from pdfeditor.ui.main_window import MainWindow
 from pdfeditor.ui.tools import annotate
 
@@ -259,10 +259,13 @@ def test_comments_panel_threads_filters_and_io(
 def test_flatten_all_and_save_roundtrip(qtbot, window: MainWindow, view, monkeypatch) -> None:
     window.set_tool("rectangle")
     drag(qtbot, view, 0, (100, 300), (200, 400))
+    asked: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+        confirm, "confirm_destructive", lambda _p, *args: asked.append(args) or True
     )
     assert window.flatten_all() == 1
+    ((_title, text, action),) = asked
+    assert action == "Flatten 1 Comment" and "1 comment on 1 page" in text
     assert annots(view) == []
     window.act_undo.trigger()
     assert len(annots(view)) == 1
