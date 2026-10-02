@@ -88,3 +88,39 @@ def _tessdata() -> Path:
     from pdfeditor.services.ocr import tessdata_for
 
     return tessdata_for(["eng"])
+
+
+def test_tesseract_runs_in_a_helper_process(fixture_pdf) -> None:
+    """MuPDF's OCR holds the GIL for a whole page; in the app's process it froze the window."""
+    import os
+
+    from pdfeditor.engine.mupdf import ocr_worker
+
+    doc = _open(fixture_pdf("scanned"))
+    layer = doc.page(0).ocr_text_layer("eng", 150, _tessdata())
+    doc.close()
+    assert layer
+    pool = ocr_worker._pool
+    assert pool is not None
+    assert pool.submit(os.getpid).result() != os.getpid()
+
+
+def test_ocr_falls_back_to_the_app_process(fixture_pdf, monkeypatch) -> None:
+    from concurrent.futures.process import BrokenProcessPool
+
+    from pdfeditor.engine.mupdf import ocr_worker
+
+    class Broken:
+        def submit(self, *_args: object) -> None:
+            raise BrokenProcessPool("gone")
+
+        def shutdown(self, **_kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr(ocr_worker, "_get_pool", lambda: Broken())
+    doc = _open(fixture_pdf("scanned"))
+    page = doc.page(0)
+    layer = page.ocr_text_layer("eng", 150, _tessdata())
+    page.add_text_layer(layer)
+    assert "Scanned" in page.text_page(with_chars=False).text
+    doc.close()
