@@ -90,6 +90,15 @@ class AppSettings:
         self.qs.setValue("prefs/keep_tools", "true" if value else "false")
 
     @property
+    def show_mini_toolbars(self) -> bool:
+        """Floating toolbars next to selected text, comments and pages."""
+        return self._bool("prefs/mini_toolbars", True)
+
+    @show_mini_toolbars.setter
+    def show_mini_toolbars(self, value: bool) -> None:
+        self.qs.setValue("prefs/mini_toolbars", "true" if value else "false")
+
+    @property
     def language(self) -> str:
         """UI language code ("" = follow the system)."""
         return self._str("language", "")

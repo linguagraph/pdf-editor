@@ -114,6 +114,15 @@ class PreferencesDialog(FormDialog):
             self.keep_tools,
             "Off: comment and drawing tools go back to Select after one use.",
         )
+        self.mini_toolbars = QCheckBox("Show mini toolbars")
+        self.mini_toolbars.setChecked(settings.show_mini_toolbars)
+        add_row(
+            form,
+            "",
+            self.mini_toolbars,
+            "Small floating toolbars next to selected text, comments and pages. Their "
+            "commands are also in the ribbon and the menus.",
+        )
 
         # -- Performance
         form = self.page_forms["Performance"]
@@ -219,6 +228,7 @@ class PreferencesDialog(FormDialog):
         s.default_zoom = str(self.zoom.currentData())
         s.default_tool = str(self.tool.currentData())
         s.keep_tools = self.keep_tools.isChecked()
+        s.show_mini_toolbars = self.mini_toolbars.isChecked()
         s.language = str(self.language.currentData())
         s.theme = str(self.theme.currentData())
         s.show_menu_bar = self.menu_bar.isChecked()

@@ -117,6 +117,8 @@ class DocumentView(QGraphicsView):
     document_changed = Signal(object)  # tuple[Change, ...] after the view has updated itself
     user_activity = Signal()  # mouse moved, wheel turned or pinched over the pages
     geometry_changed = Signal()  # resized, shown or hidden (floating overlays re-place)
+    pointer_pressed = Signal()  # a mouse button went down on the pages
+    pointer_released = Signal()  # ...and came up again (a drag or click is complete)
 
     def __init__(
         self, session: DocumentSession, renderer: TileRenderer, parent: QWidget | None = None
@@ -864,6 +866,7 @@ class DocumentView(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self.stop_animations()
+        self.pointer_pressed.emit()
         if event.button() == Qt.MouseButton.LeftButton:
             link = self.link_at(self.mapToScene(event.position().toPoint()))
             if link is not None:
@@ -896,6 +899,7 @@ class DocumentView(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
         self.tool.after_release(self)
+        self.pointer_released.emit()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if self.tool.respects_existing and not self.tool.busy:
@@ -989,6 +993,35 @@ class DocumentView(QGraphicsView):
 
     def clear_selection(self) -> None:
         self.set_selection(None)
+
+    def visible_pages(self) -> list[int]:
+        """Pages at least partly inside the viewport."""
+        if not self._scene_rects:
+            return []
+        area = self.mapToScene(self.viewport().rect()).boundingRect()
+        return [
+            i
+            for i in self._pages_in(area)
+            if self._items[i].isVisible() and qrect(self._scene_rects[i]).intersects(area)
+        ]
+
+    def viewport_rect(self, rects: list[tuple[int, Rect]]) -> QRect | None:
+        """Bounds in viewport pixels of page-space ``rects`` (page, rect), clipped to the
+        viewport; None when none of them is in view."""
+        port = self.viewport().rect()
+        out = QRect()
+        for page, rect in rects:
+            if 0 <= page < self.page_count:
+                box = self.mapFromScene(self.page_rect_to_scene(page, rect)).boundingRect()
+                out = out.united(box & port)
+        return out if out.isValid() and not out.isEmpty() else None
+
+    def selection_viewport_rect(self) -> QRect | None:
+        """Where the selected text is on screen (its visible part), in viewport pixels."""
+        if not self.has_selection():
+            return None
+        visible = [p for p in self.visible_pages() if self.selection and self.selection.covers(p)]
+        return self.viewport_rect([(p, r) for p in visible for r in self._selection_rects_for(p)])
 
     def has_selection(self) -> bool:
         return self.selection is not None and not self.selection.is_empty

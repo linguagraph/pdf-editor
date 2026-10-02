@@ -247,6 +247,17 @@ QToolButton#QuickAction {{
 QToolButton#QuickAction:hover {{ background: {c.hover}; border-color: {c.border_strong}; }}
 QToolButton#QuickAction:focus {{ border: 2px solid {c.accent_text}; }}
 QListWidget#RecentFiles {{ background: transparent; border: none; }}
+
+/* contextual actions (U7): the "Search tools" list under the ribbon box */
+QListWidget#CommandSearchPopup {{
+    background: {c.surface}; color: {c.text}; border: 1px solid {c.border_strong};
+    border-radius: {m.radius}px; padding: {m.space(1)}px; outline: 0;
+}}
+QListWidget#CommandSearchPopup::item {{
+    padding: {m.space(1)}px {m.space(2)}px; border-radius: {m.radius_small}px;
+}}
+QListWidget#CommandSearchPopup::item:selected {{ background: {c.accent_subtle}; color: {c.text}; }}
+QListWidget#CommandSearchPopup::item:disabled {{ color: {c.text_muted}; }}
 """
 
 

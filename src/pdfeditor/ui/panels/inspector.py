@@ -35,6 +35,33 @@ FILL_TYPES = {
 NO_BORDER = {AnnotationType.TEXT, AnnotationType.FILE_ATTACHMENT, AnnotationType.STAMP}
 
 
+def restyled(before: AnnotationModel, field: str, value: object) -> AnnotationModel | None:
+    """``before`` with ``field`` set to ``value``, or None when that changes nothing or the
+    comment is locked (locked comments only allow unlocking).
+
+    A text box's "color" is its text color: its border keeps its own."""
+    if field != "locked" and before.locked:
+        return None
+    current = before.text_color if _is_text_color(before, field) else getattr(before, field)
+    if current == value:
+        return None
+    after = copy.deepcopy(before)
+    if _is_text_color(before, field):
+        after.text_color = value  # type: ignore[assignment]
+    else:
+        setattr(after, field, value)
+    return after
+
+
+def _is_text_color(model: AnnotationModel, field: str) -> bool:
+    return field == "color" and model.type is AnnotationType.FREE_TEXT
+
+
+def shown_color(model: AnnotationModel) -> Color | None:
+    """The color a comment's "Color" control shows (a text box: its text)."""
+    return model.color or (model.text_color if model.type is AnnotationType.FREE_TEXT else None)
+
+
 class ColorButton(QPushButton):
     def __init__(self, allow_none: bool, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -148,9 +175,7 @@ class InspectorPanel(ViewPanel):
         self._loading = True
         try:
             self.heading.setText(f"<b>{type_label(m.type)}</b> on page {m.page_index + 1}")
-            self.color.set_color(
-                m.color or (m.text_color if m.type is AnnotationType.FREE_TEXT else None)
-            )
+            self.color.set_color(shown_color(m))
             self.fill.set_color(m.fill)
             self.no_fill.setChecked(m.fill is None)
             for w in (self.fill, self.no_fill):
@@ -174,15 +199,9 @@ class InspectorPanel(ViewPanel):
         if self._loading or self.model is None or self.view is None:
             return
         before = self.model
-        if field != "locked" and before.locked:
-            return  # locked comments only allow unlocking
-        if getattr(before, field) == value:
+        after = restyled(before, field, value)
+        if after is None:
             return
-        after = copy.deepcopy(before)
-        setattr(after, field, value)
-        if field == "color" and before.type is AnnotationType.FREE_TEXT:
-            after.text_color = value  # type: ignore[assignment]
-            after.color = before.color
         self.view.session.execute(
             UpdateAnnotationCommand(before, after, label, merge_key=f"inspector:{field}")
         )

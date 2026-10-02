@@ -61,7 +61,9 @@ from pdfeditor.model.annotations import (
 from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.outline import Link, LinkKind
 from pdfeditor.ui.action_help import apply_short_labels, refresh_tooltips
+from pdfeditor.ui.command_search import CommandSearch
 from pdfeditor.ui.compare_controller import CompareController
+from pdfeditor.ui.contextual import ContextualToolbars
 from pdfeditor.ui.dialogs.about import AboutDialog
 from pdfeditor.ui.dialogs.password import password_prompt
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
@@ -286,6 +288,7 @@ class MainWindow(QMainWindow):
         self.optimize = OptimizeController(self)
         self.compare = CompareController(self)
         self.pdfa = PdfaController(self)
+        self.contextual = ContextualToolbars(self)  # mini toolbars over the selection
         self.panels.insert(3, self.protect.panel)
         self.nav_panels.add_panel(self.protect.panel, "redactions", "eraser", 3)
         self.search_panel.hits_changed.connect(self._update_ui)
@@ -295,6 +298,8 @@ class MainWindow(QMainWindow):
         self._create_start_actions()
         # after every controller has made its actions: defaults + the user's own shortcuts
         self.shortcuts = ShortcutManager(self)
+        self.command_search = CommandSearch(self.shortcuts, self, self._focus_page)
+        self.ribbon.set_search(self.command_search)
         apply_short_labels(self.ribbon.button_actions())
         self._refresh_tooltips()
         self.shortcuts.changed.append(self._refresh_tooltips)
@@ -964,9 +969,20 @@ class MainWindow(QMainWindow):
         for view in self.views():
             view.session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
             view.author = self.prefs.author
+        self.contextual.refresh()
 
     def show_command_palette(self) -> None:
-        CommandPalette(self.shortcuts, self).exec()
+        """Ctrl+Shift+P: the "Search tools" box in the ribbon (the dialog if it's hidden)."""
+        if self.command_search.isVisibleTo(self) and self.isVisible():
+            self.command_search.activate()
+        else:
+            CommandPalette(self.shortcuts, self).exec()
+
+    def _focus_page(self) -> None:
+        tab = self.current_tab()
+        if tab is not None:
+            target = tab.organizer.grid if tab.organizing and tab.organizer else tab.view
+            target.setFocus()
 
     def show_shortcuts(self) -> None:
         ShortcutsDialog(self.shortcuts, self).exec()
@@ -1021,6 +1037,7 @@ class MainWindow(QMainWindow):
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
         self.pill.attach(view)
+        self.contextual.attach(view)
         self._sync_tool_ui()
         self.nav_panels.set_has_document(has_doc)
         self.inspector_panels.set_has_document(has_doc)
@@ -1203,7 +1220,7 @@ class MainWindow(QMainWindow):
         menu.addAction("Edit Text…", lambda: self.edit_annotation(model)).setEnabled(
             not model.locked
         )
-        menu.addAction("Reply…", lambda: self._reply(view, model))
+        menu.addAction("Reply…", lambda: self.reply_to(view, model))
         status = menu.addMenu("Set Status")
         for state in ReviewState:
             if state is not ReviewState.NONE:
@@ -1227,7 +1244,7 @@ class MainWindow(QMainWindow):
         menu.addAction("Delete", view.delete_selected_annotations).setEnabled(not model.locked)
         menu.exec(pos)
 
-    def _reply(self, view: DocumentView, model: AnnotationModel) -> None:
+    def reply_to(self, view: DocumentView, model: AnnotationModel) -> None:
         text = annotate.ask_text(view, "Reply")
         if text:
             add_reply(view, model, text)
@@ -1360,6 +1377,7 @@ class MainWindow(QMainWindow):
         view = self.current_view()
         self.mode_banner.attach(view)
         self.mode_banner.set_mode(self._tool_mode(name) if view is not None else None)
+        self.contextual.refresh()
 
     def _tool_text(self, name: str) -> str:
         text = self.tool_actions[name].text()

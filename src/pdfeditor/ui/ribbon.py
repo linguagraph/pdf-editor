@@ -11,8 +11,10 @@ show icons only ("compact"), for small screens.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QElapsedTimer, QSize, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -28,8 +30,13 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.ui.icons import icon
 
+if TYPE_CHECKING:
+    from pdfeditor.ui.command_search import CommandSearch
+
 ICON_SIZE = QSize(22, 22)
 COMPACT_ICON_SIZE = QSize(18, 18)
+# Below this ribbon width the "Search tools" box becomes a button, so the tabs keep their room.
+SEARCH_BOX_MIN_WIDTH = 1000
 
 
 class RibbonGroup(QWidget):
@@ -147,6 +154,7 @@ class Ribbon(QWidget):
         self.collapse_button.setAutoRaise(True)
         self.collapse_button.setAccessibleName("Collapse ribbon")
         self.collapse_button.clicked.connect(lambda: self.set_collapsed(not self.collapsed))
+        self.search: CommandSearch | None = None
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(4)
@@ -154,6 +162,7 @@ class Ribbon(QWidget):
         top.addWidget(self.quick)
         top.addWidget(self.bar, 1)
         top.addWidget(self.collapse_button)
+        self._top = top
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 0)
         layout.setSpacing(0)
@@ -174,6 +183,21 @@ class Ribbon(QWidget):
             button = self.quick.widgetForAction(action)
             if isinstance(button, QToolButton) and action.icon().isNull():
                 button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+
+    def set_search(self, search: CommandSearch) -> None:
+        """Put the "Search tools" box at the right of the tab row, before the chevron."""
+        self.search = search
+        search.setParent(self)
+        self._top.insertWidget(self._top.indexOf(self.collapse_button), search)
+        self._update_search()
+
+    def _update_search(self) -> None:
+        if self.search is not None:
+            self.search.set_collapsed(self.compact or self.width() < SEARCH_BOX_MIN_WIDTH)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._update_search()
 
     def add_tab(self, name: str) -> RibbonTab:
         tab = RibbonTab(name, self)
@@ -213,6 +237,7 @@ class Ribbon(QWidget):
         self.compact = compact
         for tab in self._tabs.values():
             tab.set_compact(compact)
+        self._update_search()
         # The stacked pages' hints change, but layouts above them keep cached sizes.
         for widget in (self.stack, self):
             layout = widget.layout()

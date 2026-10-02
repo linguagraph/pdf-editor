@@ -178,8 +178,12 @@ class MarkupTool(AnnotationTool):
         return True
 
 
-def apply_markup(view: DocumentView, kind: AnnotationType, label: str) -> bool:
-    """Turn the current text selection into one markup comment per page."""
+def apply_markup(
+    view: DocumentView, kind: AnnotationType, label: str, note: str | None = None
+) -> bool:
+    """Turn the current text selection into one markup comment per page.
+
+    The first one's text is the selected text, or ``note`` when given (a note on the text)."""
     selection = view.selection
     if selection is None or selection.is_empty:
         return False
@@ -192,7 +196,10 @@ def apply_markup(view: DocumentView, kind: AnnotationType, label: str) -> bool:
             box = box.union(r)
         model = new_model(view, kind, page, box)
         model.quads = tuple(Quad.from_rect(r) for r in rects)
-        model.contents = selection.text(view.text_cache) if len(models) == 0 else ""
+        if models:
+            model.contents = ""
+        else:
+            model.contents = selection.text(view.text_cache) if note is None else note
         models.append(model)
     view.clear_selection()
     commit(view, models, label)
