@@ -228,6 +228,51 @@ def test_progress_chip_runs_a_job_without_a_modal_dialog(qtbot, window: MainWind
     assert not view.session.busy and window.tool_actions["highlight"].isEnabled()
 
 
+def test_chip_is_busy_until_a_step_finishes_and_shows_the_status(
+    qtbot, window: MainWindow, view
+) -> None:
+    first, second = threading.Event(), threading.Event()
+
+    def work(job: Job) -> str:
+        assert first.wait(10)
+        job.status("page 1 of 2")
+        assert second.wait(10)
+        job.progress(1, 2)
+        job.status("page 2 of 2")
+        assert first.wait(10) and gate.wait(10)
+        return "done"
+
+    gate = threading.Event()
+    job = window.jobs.start("Recognizing text…", work, total=2, session=view.session)
+    chip = window.progress_chip
+    qtbot.waitUntil(chip.isVisible, timeout=3000)
+    # nothing done yet: a busy bar, not one stuck at 0 of 2
+    assert chip.button.text() == "Recognizing text  0/2"
+    assert chip.bar.minimum() == 0 and chip.bar.maximum() == 0
+    details = chip.show_details()
+    assert details is not None
+    row = details.rows[0]
+    assert row.bar.maximum() == 0 and row.name.text() == "Recognizing text"
+    first.set()
+    qtbot.waitUntil(lambda: chip.button.text() == "Recognizing text · page 1 of 2")
+    assert job.status_text == "page 1 of 2" and chip.bar.maximum() == 0
+    assert chip.button.accessibleName() == "Recognizing text · page 1 of 2. Show details"
+    assert chip.bar.accessibleName() == "Progress of Recognizing text · page 1 of 2"
+    assert row.name.text() == "Recognizing text · page 1 of 2"
+    assert row.bar.accessibleName() == "Recognizing text · page 1 of 2 progress"
+    assert row.bar.maximum() == 0
+    second.set()
+    qtbot.waitUntil(lambda: chip.button.text() == "Recognizing text · page 2 of 2")
+    # a step finished: the bar counts
+    assert chip.bar.maximum() == 2 and chip.bar.value() == 1
+    assert row.bar.maximum() == 2 and row.bar.value() == 1
+    assert "1 of 2" in row.detail.text()
+    assert chip.cancel_button.accessibleName() == "Cancel Recognizing text"
+    gate.set()
+    wait_for(job)
+    qtbot.waitUntil(lambda: not chip.isVisible())
+
+
 def test_chip_details_and_cancel(qtbot, window: MainWindow, view) -> None:
     gate = threading.Event()
     job = window.jobs.start(

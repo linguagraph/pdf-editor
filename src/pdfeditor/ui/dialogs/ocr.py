@@ -27,10 +27,12 @@ from pdfeditor.services.ocr import (
     download_language,
     installed_languages,
     language_name,
+    pick_languages,
 )
 from pdfeditor.ui.dialogs.base import FormDialog, Section, add_row, caption, form_layout, set_role
 from pdfeditor.ui.dialogs.pages import PageRangeBox
 from pdfeditor.ui.jobs import Job
+from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.style.tokens import METRICS
 
 
@@ -41,7 +43,8 @@ def format_bytes(n: int) -> str:
 
 
 class LanguageList(QListWidget):
-    """Installed languages with checkboxes (English checked by default)."""
+    """Installed languages with checkboxes; the ones used last time are checked (English if
+    none of them is installed any more)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -50,9 +53,11 @@ class LanguageList(QListWidget):
         self.reload()
 
     def reload(self, checked: set[str] | None = None) -> None:
-        checked = checked if checked is not None else {"eng"}
+        installed = sorted(installed_languages())
+        if checked is None:
+            checked = set(pick_languages(AppSettings().ocr_languages, installed))
         self.clear()
-        for code in sorted(installed_languages()):
+        for code in installed:
             item = QListWidgetItem(f"{COMMON_LANGUAGES.get(code, code)} ({code})")
             item.setData(Qt.ItemDataRole.UserRole, code)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -105,12 +110,15 @@ class OcrOptionsBox(QWidget):
         self.dpi = QSpinBox(self)
         self.dpi.setRange(100, 600)
         self.dpi.setSingleStep(50)
-        self.dpi.setValue(300)
+        remembered = AppSettings()
+        self.dpi.setValue(remembered.ocr_dpi)
         self.dpi.setSuffix(" dpi")
         self.skip_text = QCheckBox("Skip pages that already have text", self)
-        self.skip_text.setChecked(True)
+        self.skip_text.setChecked(remembered.ocr_skip_pages_with_text)
         self.preprocess = QCheckBox("Clean up the image first (grayscale, denoise, binarize)", self)
+        self.preprocess.setChecked(remembered.ocr_preprocess)
         self.deskew = QCheckBox("Straighten skewed scans (deskew)", self)
+        self.deskew.setChecked(remembered.ocr_deskew)
         download = QHBoxLayout()
         download.addWidget(self.download_combo, 1)
         download.addWidget(self.download_button)

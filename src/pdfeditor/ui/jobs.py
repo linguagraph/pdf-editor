@@ -24,16 +24,21 @@ JobFn = Callable[["Job"], Any]
 # Pause at each progress step while a job holds the engine lock (see Job.hold), long enough
 # for a thread waiting on the lock (the GUI, a render worker) to get it first.
 YIELD_SECONDS = 0.001
+# Pause after a status update, so the GUI thread can show it before the step it announces:
+# some steps (Tesseract inside MuPDF) hold the GIL for seconds, and a queued signal waits.
+STATUS_YIELD_SECONDS = 0.05
 
 
 class Job(QObject):
     """One background task. ``fn(job)`` runs off the GUI thread; signals arrive on the GUI thread.
 
     Inside ``fn``, call ``job.report(...)`` to stream partial results, pass ``job.progress`` as a
-    progress callback, and ``job.token`` to services that support cancellation.
+    progress callback, ``job.status`` as a status callback (what the current step is doing,
+    shown next to the job's name), and ``job.token`` to services that support cancellation.
     """
 
     progress_changed = Signal(int, int)  # done, total
+    status_changed = Signal(str)  # e.g. "page 2 of 5"
     partial = Signal(object)
     finished = Signal(object)  # return value
     failed = Signal(str)
@@ -57,6 +62,7 @@ class Job(QObject):
         self.session = session
         self.done_steps = 0
         self.total = total
+        self.status_text = ""  # (JobCenter) the last status, kept in step with done_steps
         self.created = time.monotonic()
         self.started = False
         self.is_settled = False
@@ -68,6 +74,14 @@ class Job(QObject):
         self.progress_changed.emit(done, total)
         if self._held:
             self._yield_locks()
+
+    def status(self, text: str) -> None:
+        """Say what the job is doing now, e.g. before a step that takes a while."""
+        self.status_changed.emit(text)
+        if self._held:
+            self._yield_locks(STATUS_YIELD_SECONDS)
+        else:
+            time.sleep(STATUS_YIELD_SECONDS)
 
     def report(self, value: object) -> None:
         self.partial.emit(value)
@@ -92,12 +106,12 @@ class Job(QObject):
             finally:
                 self._held.remove(lock)
 
-    def _yield_locks(self) -> None:
+    def _yield_locks(self, seconds: float = YIELD_SECONDS) -> None:
         held = list(self._held)
         for lock in reversed(held):
             lock.__exit__(None, None, None)
         try:
-            time.sleep(YIELD_SECONDS)
+            time.sleep(seconds)
         finally:
             for lock in held:
                 lock.__enter__()

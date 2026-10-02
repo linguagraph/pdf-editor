@@ -68,12 +68,19 @@ class ToolsController:
         except ValueError as exc:
             QMessageBox.warning(self.w, "OCR", str(exc))
             return None
+        self.w.prefs.remember_ocr_options(options)
         session = view.session
 
         def work(job: Job) -> OcrResult:
             # engine access is serialized page by page, so the view keeps rendering meanwhile
             return recognize(
-                session.document, pages, options, job.token, job.progress, session.lock
+                session.document,
+                pages,
+                options,
+                job.token,
+                job.progress,
+                session.lock,
+                status=job.status,
             )
 
         def done(result: object) -> OcrResult | None:
@@ -112,6 +119,7 @@ class ToolsController:
         except ValueError as exc:
             QMessageBox.warning(self.w, "Batch OCR", str(exc))
             return None
+        self.w.prefs.remember_ocr_options(options)
         engine = self.w.engine()
 
         def done(written: object) -> list[Path]:
@@ -123,7 +131,9 @@ class ToolsController:
 
         return self.w.jobs.start(
             "Batch OCR…",
-            lambda job: ocr_files(engine, paths, out_dir, options, job.token, job.progress),
+            lambda job: ocr_files(
+                engine, paths, out_dir, options, job.token, job.progress, job.status
+            ),
             total=len(paths),
             on_done=done,
         )

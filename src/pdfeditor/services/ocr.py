@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +39,9 @@ COMMON_LANGUAGES = {
 }
 DOWNLOAD_CHUNK = 64 * 1024
 MIN_TEXT_CHARS = 20  # pages with at least this much extractable text are skipped
+DEFAULT_LANGUAGE = "eng"
+
+StatusFn = Callable[[str], None]  # what a step is doing, e.g. "page 2 of 5"
 
 
 def user_tessdata() -> Path:
@@ -78,6 +81,21 @@ def tessdata_for(languages: Sequence[str]) -> Path:
     for lang in languages:
         shutil.copy2(installed[lang] / f"{lang}.traineddata", merged / f"{lang}.traineddata")
     return merged
+
+
+def pick_languages(saved: Sequence[str], installed: Collection[str]) -> tuple[str, ...]:
+    """The remembered OCR languages that are still installed, in their saved order.
+
+    A language can go away (its downloaded data deleted), so when none of the saved ones is
+    left this falls back to English, else to the first installed language. Empty only when
+    no language is installed at all.
+    """
+    picked = tuple(dict.fromkeys(lang for lang in saved if lang in installed))
+    if picked:
+        return picked
+    if DEFAULT_LANGUAGE in installed:
+        return (DEFAULT_LANGUAGE,)
+    return (min(installed),) if installed else ()
 
 
 def language_name(code: str) -> str:
@@ -148,15 +166,21 @@ def recognize(
     token: CancelToken | None = None,
     progress: ProgressFn = no_progress,
     lock: AbstractContextManager[object] | None = None,
+    status: StatusFn | None = None,
 ) -> OcrResult:
     """Recognize ``pages`` (read-only). ``lock``, if given, is held per page so other work
-    (rendering) can interleave with a long OCR run."""
+    (rendering) can interleave with a long OCR run.
+
+    ``status`` hears which page is being read *before* the work on it starts: one page can
+    take Tesseract several seconds, and ``progress`` only moves once it is done."""
     tessdata = tessdata_for(options.languages)
     language = "+".join(options.languages)
     result = OcrResult()
     for n, index in enumerate(pages):
         if token is not None:
             token.check()
+        if status is not None:
+            status(f"page {n + 1} of {len(pages)}")
         with lock if lock is not None else nullcontext():
             if options.skip_pages_with_text and page_has_text(doc, index):
                 result.skipped.append(index)
@@ -173,6 +197,10 @@ def apply(doc: Document, result: OcrResult) -> None:
         doc.page(index).add_text_layer(layer)
 
 
+def _prefixed(status: StatusFn, prefix: str) -> StatusFn:
+    return lambda text: status(prefix + text)
+
+
 def ocr_files(
     engine: Engine,
     paths: Sequence[Path],
@@ -180,16 +208,24 @@ def ocr_files(
     options: OcrOptions,
     token: CancelToken | None = None,
     progress: ProgressFn = no_progress,
+    status: StatusFn | None = None,
 ) -> list[Path]:
-    """Batch OCR: write a searchable copy of each file to ``out_dir`` (same file name)."""
+    """Batch OCR: write a searchable copy of each file to ``out_dir`` (same file name).
+
+    ``status`` hears the file being worked on ("file 2 of 3: name.pdf") and, while it is
+    recognized, its page ("file 2 of 3: name.pdf, page 4 of 9")."""
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for n, path in enumerate(paths):
         if token is not None:
             token.check()
+        current = f"file {n + 1} of {len(paths)}: {path.name}"
+        if status is not None:
+            status(current)
+        page_status = None if status is None else _prefixed(status, f"{current}, ")
         doc = engine.open(path)
         try:
-            result = recognize(doc, list(range(doc.page_count)), options, token)
+            result = recognize(doc, list(range(doc.page_count)), options, token, status=page_status)
             apply(doc, result)
             written.append(doc.save(out_dir / path.name, SaveOptions(garbage=3)))
         finally:

@@ -6,6 +6,7 @@ import getpass
 
 from PySide6.QtCore import QSettings
 
+from pdfeditor.services.ocr import OcrOptions, installed_languages, pick_languages
 from pdfeditor.ui.style.tokens import is_color
 
 DEFAULT_ZOOMS = ("fit_width", "fit_page", "100")
@@ -33,6 +34,12 @@ class AppSettings:
     def _str(self, key: str, default: str) -> str:
         value = self.qs.value(key, default)
         return value if isinstance(value, str) else default
+
+    def _str_list(self, key: str) -> list[str]:
+        value = self.qs.value(key, [])
+        if isinstance(value, str):  # QSettings returns a one-item list as a plain string
+            return [value] if value else []
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
     # comments & identity
     @property
@@ -183,11 +190,69 @@ class AppSettings:
     @property
     def custom_stamps(self) -> list[str]:
         """Custom stamp keys (file names in the stamp library), in menu order."""
-        value = self.qs.value("stamps/custom", [])
-        if isinstance(value, str):  # QSettings returns a one-item list as a plain string
-            return [value] if value else []
-        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+        return self._str_list("stamps/custom")
 
     @custom_stamps.setter
     def custom_stamps(self, value: list[str]) -> None:
         self.qs.setValue("stamps/custom", list(value))
+
+    # OCR: the options of the last run, preselected next time (and used by automatic OCR)
+    @property
+    def ocr_languages(self) -> list[str]:
+        """Language codes as last chosen; may name languages that are no longer installed."""
+        return self._str_list("ocr/languages")
+
+    @ocr_languages.setter
+    def ocr_languages(self, value: list[str]) -> None:
+        self.qs.setValue("ocr/languages", list(value))
+
+    @property
+    def ocr_dpi(self) -> int:
+        return min(600, max(100, self._int("ocr/dpi", OcrOptions.dpi)))
+
+    @ocr_dpi.setter
+    def ocr_dpi(self, value: int) -> None:
+        self.qs.setValue("ocr/dpi", int(value))
+
+    @property
+    def ocr_skip_pages_with_text(self) -> bool:
+        return self._bool("ocr/skip_pages_with_text", OcrOptions.skip_pages_with_text)
+
+    @ocr_skip_pages_with_text.setter
+    def ocr_skip_pages_with_text(self, value: bool) -> None:
+        self.qs.setValue("ocr/skip_pages_with_text", "true" if value else "false")
+
+    @property
+    def ocr_preprocess(self) -> bool:
+        return self._bool("ocr/preprocess", OcrOptions.preprocess)
+
+    @ocr_preprocess.setter
+    def ocr_preprocess(self, value: bool) -> None:
+        self.qs.setValue("ocr/preprocess", "true" if value else "false")
+
+    @property
+    def ocr_deskew(self) -> bool:
+        return self._bool("ocr/deskew", OcrOptions.deskew)
+
+    @ocr_deskew.setter
+    def ocr_deskew(self, value: bool) -> None:
+        self.qs.setValue("ocr/deskew", "true" if value else "false")
+
+    def remember_ocr_options(self, options: OcrOptions) -> None:
+        self.ocr_languages = list(options.languages)
+        self.ocr_dpi = options.dpi
+        self.ocr_skip_pages_with_text = options.skip_pages_with_text
+        self.ocr_preprocess = options.preprocess
+        self.ocr_deskew = options.deskew
+
+    def ocr_options(self) -> OcrOptions:
+        """The remembered OCR options, limited to the languages installed now (English, or
+        the first installed language, when none of the saved ones is). ``languages`` is
+        empty only when no language data is installed at all."""
+        return OcrOptions(
+            pick_languages(self.ocr_languages, installed_languages()),
+            self.ocr_dpi,
+            self.ocr_skip_pages_with_text,
+            self.ocr_preprocess,
+            self.ocr_deskew,
+        )
