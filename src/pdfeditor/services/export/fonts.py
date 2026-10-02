@@ -17,8 +17,8 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 
 from pdfeditor.engine.base import Document
-from pdfeditor.services.fonts import BITMAP_ONLY as _BITMAP_ONLY
-from pdfeditor.services.fonts import RESTRICTED as _RESTRICTED
+from pdfeditor.model.fonts import BITMAP_ONLY as _BITMAP_ONLY
+from pdfeditor.model.fonts import RESTRICTED as _RESTRICTED
 
 # Free fonts made to the metrics of Helvetica, Times and Courier: where the PDF can't give Word
 # the font itself, the metric twin every Word installation has keeps the lines the same length

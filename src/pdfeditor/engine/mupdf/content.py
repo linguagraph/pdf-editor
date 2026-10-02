@@ -13,8 +13,10 @@ import html
 import io
 import logging
 import re
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pymupdf
@@ -36,6 +38,7 @@ from pdfeditor.engine.mupdf.flatten import flatten_inserted_forms
 from pdfeditor.engine.textlayout import editable_blocks
 from pdfeditor.engine.textspacing import detect_spacing, spaced_text
 from pdfeditor.model.color import Color
+from pdfeditor.model.fonts import BITMAP_ONLY, RESTRICTED, FontRefKind
 from pdfeditor.model.geometry import Matrix, Rect
 from pdfeditor.model.objects import (
     Align,
@@ -53,6 +56,9 @@ if TYPE_CHECKING:
     from pdfeditor.engine.mupdf.page import MuPage
 
 log = logging.getLogger(__name__)
+
+# fontTools warns about some real-world fonts' implausible 'created' timestamp; it's noise here.
+logging.getLogger("fontTools.ttLib.tables._h_e_a_d").setLevel(logging.ERROR)
 
 # Standard (base-14) font codes by family and (bold, italic)
 _STANDARD = {
@@ -321,11 +327,94 @@ def font_program(page: MuPage, name: str) -> bytes | None:
     return None
 
 
-def _font_for(
-    page: MuPage, style: TextStyle, text: str, reuse_embedded: bool = True
+_FILE_FONT_CACHE_MAX = 8
+# (path, face index, mtime) -> standalone font program; avoids re-reading large font files on
+# every edit, and a stat()-based key so an edited/replaced font file is picked up again.
+_file_font_cache: OrderedDict[tuple[str, int, float], bytes] = OrderedDict()
+
+
+def _check_embeddable(fs_type: int, path: str) -> None:
+    if fs_type & RESTRICTED:
+        raise UnsupportedFeature(f"{path!r} can't be embedded: its license forbids embedding")
+    if fs_type & BITMAP_ONLY:
+        raise UnsupportedFeature(f"{path!r} can't be embedded: its license allows bitmaps only")
+
+
+def _extract_face(path: str, index: int) -> bytes:
+    """``path``'s face ``index`` as a standalone TTF/OTF buffer (collections are split apart;
+    PDF font embedding doesn't support .ttc/.otc). Raises :class:`UnsupportedFeature` if the
+    font's own fsType forbids embedding; never leaves a file handle open (Windows locks them)."""
+    from fontTools.ttLib import TTFont
+    from fontTools.ttLib.ttCollection import TTCollection
+
+    suffix = Path(path).suffix.lower()
+    if suffix in (".ttc", ".otc"):
+        collection = TTCollection(path, lazy=True)
+        try:
+            if not 0 <= index < len(collection.fonts):
+                raise UnsupportedFeature(f"font face {index} not found in {path!r}")
+            font = collection.fonts[index]
+            os2 = font.get("OS/2")
+            _check_embeddable(int(getattr(os2, "fsType", 0)) if os2 is not None else 0, path)
+            out = io.BytesIO()
+            font.save(out)
+            return out.getvalue()
+        finally:
+            collection.close()
+    font = TTFont(path, lazy=True, fontNumber=index)
+    try:
+        os2 = font.get("OS/2")
+        _check_embeddable(int(getattr(os2, "fsType", 0)) if os2 is not None else 0, path)
+        out = io.BytesIO()
+        font.save(out)
+        return out.getvalue()
+    finally:
+        font.close()
+
+
+def load_file_font(path: str, index: int) -> bytes:
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError as exc:
+        raise UnsupportedFeature(f"font file not found: {path}") from exc
+    key = (path, index, mtime)
+    cached = _file_font_cache.get(key)
+    if cached is not None:
+        _file_font_cache.move_to_end(key)
+        return cached
+    try:
+        buffer = _extract_face(path, index)
+    except UnsupportedFeature:
+        raise
+    except Exception as exc:
+        raise EngineError(f"can't read font file {path!r}: {exc}") from exc
+    _file_font_cache[key] = buffer
+    _file_font_cache.move_to_end(key)
+    if len(_file_font_cache) > _FILE_FONT_CACHE_MAX:
+        _file_font_cache.popitem(last=False)
+    return buffer
+
+
+def _missing_chars(buffer: bytes, chars: set[str]) -> str:
+    """The characters of ``chars`` the font program can't show, for the substitution notice."""
+    try:
+        from fontTools.ttLib import TTFont
+
+        cmap = TTFont(io.BytesIO(buffer), lazy=True).getBestCmap() or {}
+        return "".join(sorted(c for c in chars if ord(c) not in cmap))
+    except Exception:
+        try:
+            font = pymupdf.Font(fontbuffer=buffer)
+            return "".join(sorted(c for c in chars if not font.has_glyph(ord(c))))
+        except Exception:
+            return "".join(sorted(chars))
+
+
+def _font_for_known(
+    page: MuPage, style: TextStyle, wanted: set[str], reuse_embedded: bool
 ) -> tuple[bytes, FontChoice]:
-    """The font buffer to typeset ``text`` with, preferring the document's own font."""
-    wanted = {c for c in text if not c.isspace()}
+    """The embedded-reuse-then-base-14 fallback used for ``DOCUMENT``/no ``font_ref``, and as
+    the fallback when a ``FILE`` ref doesn't cover the text."""
     buffer = font_program(page, style.font)
     original_embedded = buffer is not None
     if reuse_embedded and buffer and _covers(buffer, wanted):
@@ -334,6 +423,33 @@ def _font_for(
     font = pymupdf.Font(code)
     substituted = original_embedded or not _BASE14.match(style.font)
     return font.buffer, FontChoice(font.name, substituted=substituted)
+
+
+def _font_for(
+    page: MuPage, style: TextStyle, text: str, reuse_embedded: bool = True
+) -> tuple[bytes, FontChoice]:
+    """The font buffer to typeset ``text`` with, preferring the document's own font.
+
+    ``style.font_ref`` picks the font explicitly: ``FILE`` embeds that font file (falling back,
+    with a substitution notice listing the missing characters, if it doesn't cover ``text``),
+    ``STANDARD`` goes straight to the matching base-14 font, and ``DOCUMENT`` (or no ref at all)
+    keeps today's embedded-font reuse.
+    """
+    wanted = {c for c in text if not c.isspace()}
+    ref = style.font_ref
+    if ref is not None and ref.kind is FontRefKind.FILE:
+        buffer = load_file_font(ref.path, ref.index)
+        if _covers(buffer, wanted):
+            page._doc.note_file_font_embedded()
+            return _single_codepoint_cmap(buffer, wanted), FontChoice(ref.name or style.font)
+        missing = _missing_chars(buffer, wanted)
+        fallback_buffer, choice = _font_for_known(page, style, wanted, reuse_embedded)
+        return fallback_buffer, replace(choice, substituted=True, missing=missing)
+    if ref is not None and ref.kind is FontRefKind.STANDARD:
+        code = _STANDARD[family_of(style.font)][(style.bold, style.italic)]
+        font = pymupdf.Font(code)
+        return font.buffer, FontChoice(font.name)
+    return _font_for_known(page, style, wanted, reuse_embedded)
 
 
 def _single_codepoint_cmap(buffer: bytes, used: set[str]) -> bytes:

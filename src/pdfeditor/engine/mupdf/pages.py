@@ -7,14 +7,19 @@ bookmarks and links; page labels are saved and re-applied since ``select`` drops
 from __future__ import annotations
 
 import io
+import os
+import re
+import tempfile
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import pymupdf
 
 from pdfeditor.engine.base import EngineError
+from pdfeditor.engine.mupdf import content as ct
 from pdfeditor.engine.mupdf.marks import marked
 from pdfeditor.engine.mupdf.pagecopy import select_with_copies
+from pdfeditor.model.fonts import FontRefKind
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.pages import ImageStamp, LabelStyle, MarkKind, PageLabelRule, TextStamp
 
@@ -165,18 +170,33 @@ def stamp_text(page: MuPage, stamp: TextStamp) -> None:
     origin = pymupdf.Point(stamp.origin.x, stamp.origin.y) * fz.derotation_matrix
     # morph angle = page rotation + visible counter-clockwise angle (keeps text upright/at angle)
     morph = (origin, pymupdf.Matrix(fz.rotation + stamp.angle))
+    ref = stamp.font_ref
+    kwargs: dict[str, object] = dict(
+        fontsize=stamp.font_size,
+        color=stamp.color.rgb(),
+        fill_opacity=stamp.opacity,
+        stroke_opacity=stamp.opacity,
+        morph=morph,
+        overlay=stamp.on_top,
+    )
     with marked(page, stamp.mark, stamp.origin.y < page.rect.height / 2):
-        fz.insert_text(
-            origin,
-            stamp.text,
-            fontsize=stamp.font_size,
-            fontname=stamp.font,
-            color=stamp.color.rgb(),
-            fill_opacity=stamp.opacity,
-            stroke_opacity=stamp.opacity,
-            morph=morph,
-            overlay=stamp.on_top,
-        )
+        if ref is not None and ref.kind is FontRefKind.FILE:
+            # insert_text() only takes a font file by path, not a buffer: write the (possibly
+            # face-extracted) program to a scratch file for the call, then remove it. The PDF
+            # resource name it registers the font under can't contain spaces.
+            buffer = ct.load_file_font(ref.path, ref.index)
+            resource_name = re.sub(r"[^A-Za-z0-9]", "", ref.name or stamp.font) or "FileFont"
+            with tempfile.NamedTemporaryFile(suffix=".ttf", delete=False) as tmp:
+                tmp.write(buffer)
+            try:
+                fz.insert_text(
+                    origin, stamp.text, fontname=resource_name, fontfile=tmp.name, **kwargs
+                )
+            finally:
+                os.unlink(tmp.name)
+            page._doc.note_file_font_embedded()
+        else:
+            fz.insert_text(origin, stamp.text, fontname=stamp.font, **kwargs)
     page._doc.mark_page_changed(page.index)
 
 

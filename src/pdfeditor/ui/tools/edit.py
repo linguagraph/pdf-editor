@@ -52,8 +52,10 @@ def run_edit(view: DocumentView, label: str, operation: Callable[[Document], obj
         return False
     choice = result[0] if result else None
     if isinstance(choice, FontChoice) and choice.substituted:
+        detail = f" (missing: {choice.missing})" if choice.missing else ""
         notify(
-            f"The document's font can't show this text in this style; used {choice.name} instead."
+            "The document's font can't show this text in this style; "
+            f"used {choice.name} instead{detail}."
         )
     return True
 

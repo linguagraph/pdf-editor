@@ -10,6 +10,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+# fsType bits (OS/2 table): the license forbids embedding, or allows only as bitmaps.
+# Shared by services/fonts.py (catalog scan), services/export/fonts.py (.docx export) and
+# engine/mupdf/content.py (embedding a FILE font ref), which must all refuse the same fonts.
+RESTRICTED = 0x0002
+BITMAP_ONLY = 0x0200
+
 
 class FontRefKind(Enum):
     STANDARD = "standard"  # one of the base-14 PDF fonts, by name (e.g. "Helvetica")
