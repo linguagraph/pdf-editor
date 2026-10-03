@@ -109,6 +109,14 @@ def normalize_font_name(name: str) -> tuple[str, bool, bool]:
     return base, bold, italic
 
 
+def _family_key(name: str) -> str:
+    key = "".join(c for c in name.lower() if c.isalnum())
+    for suffix in ("psmt", "mt", "ps"):
+        if key.endswith(suffix) and len(key) > len(suffix) + 2:
+            return key[: -len(suffix)]
+    return key
+
+
 def installed_ref_for_font_name(
     catalog: FontCatalog, font_name: str, bold: bool = False, italic: bool = False
 ) -> FontRef | None:
@@ -122,6 +130,12 @@ def installed_ref_for_font_name(
     if not family:
         return None
     face = catalog.find(family, bold or name_bold, italic or name_italic)
+    if face is None:
+        # PDF names drop the spaces ("TimesNewRomanPSMT", "SegoeUI"): compare loosely
+        wanted = _family_key(family)
+        match = next((f for f in catalog.families() if _family_key(f) == wanted), None)
+        if match is not None:
+            face = catalog.find(match, bold or name_bold, italic or name_italic)
     if face is None or not face.embeddable:
         return None
     return FontRef.file(face.path, face.index, face.family)

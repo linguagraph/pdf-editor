@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.core.commands import SetMetadataCommand
 from pdfeditor.core.session import DocumentSession
-from pdfeditor.model.metadata import EncryptionMethod
+from pdfeditor.model.metadata import EncryptionMethod, FontInfo
+from pdfeditor.services.fonts import cached_catalog, installed_ref_for_font_name
 from pdfeditor.ui.dialogs.base import FormDialog, add_row, form_layout
 from pdfeditor.ui.panels.attachments import human_size
 from pdfeditor.ui.style.tokens import METRICS
@@ -32,6 +33,39 @@ def _selectable(text: str) -> QLabel:
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     label.setWordWrap(True)
     return label
+
+
+def page_ranges(pages: tuple[int, ...]) -> str:
+    """1-based, compact: ``1-3, 7``."""
+    out: list[str] = []
+    start = prev = -2
+    for p in sorted(pages):
+        if p == prev + 1:
+            prev = p
+            continue
+        if start >= 0:
+            out.append(f"{start + 1}" if start == prev else f"{start + 1}-{prev + 1}")
+        start = prev = p
+    if start >= 0:
+        out.append(f"{start + 1}" if start == prev else f"{start + 1}-{prev + 1}")
+    return ", ".join(out)
+
+
+def editing_use(font: FontInfo) -> tuple[str, str]:
+    """How text in ``font`` is set when edited, and why (for the Fonts tab)."""
+    if font.type == "Type3":
+        return "Can't edit", "Text in Type3 fonts can't be edited."
+    installed = installed_ref_for_font_name(cached_catalog(), font.name)
+    if font.embedded and not font.subset:
+        return "Reused", "The complete font is embedded, so edits use it."
+    if installed is not None:
+        return "Installed copy", "This font is installed on this computer; edits use that copy."
+    if font.subset:
+        return (
+            "Partly reused",
+            "Only the characters already used are embedded; others are set in a standard font.",
+        )
+    return "Standard substitute", "The font isn't embedded or installed; edits use a standard font."
 
 
 class PropertiesDialog(FormDialog):
@@ -119,17 +153,24 @@ class PropertiesDialog(FormDialog):
         form.addRow("Repaired on open:", _selectable(_yes_no(info.is_repaired)))
         tabs.addTab(advanced, "Advanced")
 
-        self.fonts_table = QTableWidget(len(fonts), 4)
+        self.fonts_table = QTableWidget(len(fonts), 6)
         self.fonts_table.setAccessibleName("Fonts")
-        self.fonts_table.setHorizontalHeaderLabels(["Font", "Type", "Encoding", "Embedding"])
+        self.fonts_table.setHorizontalHeaderLabels(
+            ["Font", "Type", "Encoding", "Embedding", "Pages", "For editing"]
+        )
         self.fonts_table.verticalHeader().setVisible(False)
         self.fonts_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         for row, f in enumerate(sorted(fonts, key=lambda f: f.name.lower())):
             embedding = (
                 "Embedded subset" if f.subset else "Embedded" if f.embedded else "Not embedded"
             )
-            for col, text in enumerate((f.name, f.type, f.encoding, embedding)):
-                self.fonts_table.setItem(row, col, QTableWidgetItem(text))
+            editing, why = editing_use(f)
+            cells = (f.name, f.type, f.encoding, embedding, page_ranges(f.pages), editing)
+            for col, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                if col == 5:
+                    item.setToolTip(why)
+                self.fonts_table.setItem(row, col, item)
         self.fonts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         tabs.addTab(self.fonts_table, f"Fonts ({len(fonts)})")
 

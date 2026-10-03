@@ -21,6 +21,7 @@ def font_catalog(monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path) -> FontCat
     catalog.scan([fixtures_dir / "fonts"])
     monkeypatch.setattr("pdfeditor.ui.font_picker.cached_catalog", lambda: catalog)
     monkeypatch.setattr("pdfeditor.ui.view.text_editor.cached_catalog", lambda: catalog)
+    monkeypatch.setattr("pdfeditor.ui.dialogs.properties.cached_catalog", lambda: catalog)
     return catalog
 
 

@@ -9,6 +9,7 @@ import re
 import shutil
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -381,8 +382,12 @@ class MuDocument:
 
     def fonts(self) -> list[FontInfo]:
         seen: dict[int, FontInfo] = {}
+        pages: dict[int, list[int]] = {}
         for pno in range(self.page_count):
             for xref, ext, ftype, basefont, _name, encoding, *_ in self._fz.get_page_fonts(pno):
+                used = pages.setdefault(xref, [])
+                if not used or used[-1] != pno:
+                    used.append(pno)
                 if xref in seen:
                     continue
                 subset = len(basefont) > 7 and basefont[6] == "+" and basefont[:6].isupper()
@@ -394,7 +399,7 @@ class MuDocument:
                     subset=subset,
                     ref=xref,
                 )
-        return list(seen.values())
+        return [replace(info, pages=tuple(pages[x])) for x, info in seen.items()]
 
     def extract_font(self, ref: int) -> tuple[str, bytes]:
         basename, ext, _type, buffer = self._fz.extract_font(ref)
