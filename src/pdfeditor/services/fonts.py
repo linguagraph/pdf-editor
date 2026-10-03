@@ -117,6 +117,12 @@ def _family_key(name: str) -> str:
     return key
 
 
+def same_font_family(a: str, b: str) -> bool:
+    """Whether two font names (PDF BaseFont, extracted span font or family) are one family."""
+    fa, fb = normalize_font_name(a)[0], normalize_font_name(b)[0]
+    return bool(fa) and _family_key(fa) == _family_key(fb)
+
+
 def installed_ref_for_font_name(
     catalog: FontCatalog, font_name: str, bold: bool = False, italic: bool = False
 ) -> FontRef | None:

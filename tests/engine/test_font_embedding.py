@@ -254,3 +254,34 @@ def test_incremental_save_of_signed_document_does_not_subset(
         sig = pdf.Root.AcroForm.Fields[0].V
         assert [int(x) for x in sig.ByteRange] == byte_range
         assert bytes(sig.Contents) == contents
+
+
+def test_save_subsets_only_fonts_added_since_loading(
+    editable: Engine, tmp_path: Path, fonts_dir: Path
+) -> None:
+    """The file's own complete fonts stay complete, so later edits can add characters."""
+    src = pymupdf.open()
+    page = src.new_page(width=300, height=200)
+    page.insert_font(fontname="orig", fontfile=str(fonts_dir / "TestLarge-Regular.ttf"))
+    page.insert_text((20, 50), "abc", fontname="orig", fontsize=12)
+    src.save(tmp_path / "orig.pdf")  # no subsetting: the whole program is embedded
+    src.close()
+    doc = editable.open(tmp_path / "orig.pdf")
+    (before,) = _embedded_fontinfo(doc)
+    assert not before.subset
+    doc.page(0).add_text(
+        Rect(20, 80, 280, 120),
+        "abc",
+        TextStyle(font="Test Sans", font_ref=FontRef.file(str(fonts_dir / "TestSans-Regular.ttf"))),
+    )
+    doc.save(tmp_path / "edited.pdf")
+    doc.close()
+    reopened = editable.open(tmp_path / "edited.pdf")
+    try:
+        fonts = {f.name: f for f in _embedded_fontinfo(reopened)}
+    finally:
+        reopened.close()
+    original = next(f for n, f in fonts.items() if "large" in n.lower())
+    added = next(f for n, f in fonts.items() if "sans" in n.lower())
+    assert not original.subset  # left alone
+    assert added.subset  # the font this session embedded was trimmed

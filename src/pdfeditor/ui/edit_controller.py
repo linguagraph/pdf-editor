@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from shiboken6 import isValid
 
 from pdfeditor.model.objects import ObjectType, ShapeKind
 from pdfeditor.ui.icons import icon
@@ -83,13 +84,17 @@ class EditController:
         self.act_extract_image = act("E&xport Image…", "image-down", self.export_image)
         self.act_delete_objects = act("&Delete Selected Objects", "trash-2", self.delete_objects)
 
+        # The edit tools report through module-level hooks. Another window may have been
+        # closed since it set them, so they check that their window still exists.
         def notify(message: str) -> None:
-            window.notify(message)
+            if isValid(window):
+                window.notify(message)
 
         edit.notify = notify
 
         def show_error(message: str) -> None:
-            QMessageBox.warning(window, "Edit", message)
+            if isValid(window):
+                QMessageBox.warning(window, "Edit", message)
 
         edit.error = show_error
 

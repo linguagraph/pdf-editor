@@ -180,6 +180,9 @@ class MuDocument:
         # Set when content editing embedded a font file (content.py, pages.py); a full save
         # then subsets it so an installed font's whole program isn't kept in the PDF.
         self._gained_file_fonts = False
+        # Objects below this number came with the file: their fonts are never subset on save
+        # (a complete embedded font lets later edits add characters).
+        self._loaded_xrefs = int(self._fz.xref_length())
 
     # -- internal ---------------------------------------------------------------------------
     @property
@@ -527,7 +530,32 @@ class MuDocument:
         self._fz = _open_fz(path)
         if self._fz.needs_pass:
             self._fz.authenticate(self._password or "")
+        self._loaded_xrefs = int(self._fz.xref_length())
         self._reset_pages()
+
+    def _subset_new_fonts(self) -> None:
+        """Subset the fonts added since the file was loaded, and only those.
+
+        ``subset_fonts`` works on every font, but skips names that already carry a subset tag:
+        the file's own complete fonts get one for the duration of the call.
+        """
+        fz = self._fz
+        hidden: dict[int, str] = {}
+        for pno in range(fz.page_count):
+            for xref, ext, _type, basefont, *_ in fz.get_page_fonts(pno):
+                tagged = len(basefont) > 7 and basefont[6] == "+"
+                if xref in hidden or xref >= self._loaded_xrefs or tagged or ext in ("n/a", ""):
+                    continue
+                source = fz.xref_object(xref, compressed=True)
+                tagged_source = re.sub(r"/BaseFont\s*/", "/BaseFont/KEEPFT+", source, count=1)
+                if tagged_source != source:  # (names with "+" can't go through xref_set_key)
+                    hidden[xref] = source
+                    fz.update_object(xref, tagged_source)
+        try:
+            fz.subset_fonts()
+        finally:
+            for xref, source in hidden.items():
+                fz.update_object(xref, source)
 
     def save(self, path: Path | None = None, options: SaveOptions | None = None) -> Path:
         options = options or SaveOptions()
@@ -579,7 +607,7 @@ class MuDocument:
                 else security.owner_password or security.user_password
             )
         if self._gained_file_fonts and options.subset_fonts:
-            self._fz.subset_fonts()
+            self._subset_new_fonts()
         try:
             self._fz.save(tmp, **self._save_kwargs(options))
             self._verify(tmp, pages)
