@@ -9,6 +9,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 
 from pdfeditor.model.color import Color
+from pdfeditor.model.fonts import FontRef, FontRefKind
 from pdfeditor.model.geometry import Point
 from pdfeditor.model.objects import Align, ObjectType, family_of
 from pdfeditor.ui.main_window import MainWindow
@@ -62,7 +63,7 @@ def test_editor_holds_only_its_column(qtbot, view) -> None:
     editor = open_editor(qtbot, view, "Заключване на вратата")
     assert editor.toPlainText() == "Заключване на вратата"
     assert editor.style_bar.isVisible()
-    assert editor.style_bar.font_combo.currentText().endswith("(document font)")
+    assert editor.style_bar.font_picker.current_ref().kind is FontRefKind.DOCUMENT
     assert editor.style_bar.size_box.value() == pytest.approx(10)
     editor.cancel()
 
@@ -119,7 +120,7 @@ def test_add_text_remembers_style(qtbot, window, view) -> None:
     qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=b)
     editor = view.viewport().findChild(InlineTextEditor)
     editor.setPlainText("Нов текст")
-    editor.style_bar.font_combo.setCurrentIndex(editor.style_bar.font_combo.findData("Courier"))
+    editor.style_bar.font_picker.set_selection(FontRef.standard("Courier"), "Courier")
     editor.style_bar.size_box.setValue(16)
     editor.style_bar.line_spacing.setValue(1.5)
     assert editor.text_style().line_height == 1.5

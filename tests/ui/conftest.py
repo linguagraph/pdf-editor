@@ -8,8 +8,20 @@ from PySide6.QtGui import QImage
 
 from pdfeditor.core.render_cache import RenderCache
 from pdfeditor.core.session import DocumentSession
+from pdfeditor.services.fonts import FontCatalog
 from pdfeditor.ui.view.document_view import DocumentView
 from pdfeditor.ui.view.renderer import TileRenderer
+
+
+@pytest.fixture(autouse=True)
+def font_catalog(monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path) -> FontCatalog:
+    """Point the font picker at the synthetic fonts (never scan real system fonts, and never
+    start the lazy background scan, which would otherwise fire once per test session)."""
+    catalog = FontCatalog()
+    catalog.scan([fixtures_dir / "fonts"])
+    monkeypatch.setattr("pdfeditor.ui.font_picker.cached_catalog", lambda: catalog)
+    monkeypatch.setattr("pdfeditor.ui.view.text_editor.cached_catalog", lambda: catalog)
+    return catalog
 
 
 @pytest.fixture(autouse=True)
@@ -72,3 +84,15 @@ def wait_rendered(qtbot, view: DocumentView, timeout: int = 5000) -> QImage:
     qtbot.waitUntil(done, timeout=timeout)
     qtbot.wait(50)
     return view.viewport().grab().toImage()
+
+
+@pytest.fixture(autouse=True)
+def _reset_font_picker_state() -> Iterator[None]:
+    """The picker's cross-process "only scan once" bookkeeping must not leak between tests."""
+    from pdfeditor.ui import font_picker
+
+    font_picker._open_pickers.clear()
+    font_picker._scan_started = False
+    font_picker._scan_job = None
+    yield
+    font_picker._open_pickers.clear()
