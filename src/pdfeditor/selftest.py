@@ -348,6 +348,41 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"OCR text was not made editable: {info}")
         return f"read the scanned sample and made it editable in {time.perf_counter() - start:.2f}s"
 
+    def installed_fonts() -> str:
+        """Installed fonts are found and one is embedded (subset) into a saved PDF."""
+        from dataclasses import replace
+
+        from pdfeditor.model.fonts import FontRef
+        from pdfeditor.model.geometry import Rect
+        from pdfeditor.model.objects import TextStyle
+        from pdfeditor.services.fonts import FontCatalog, system_font_dirs
+
+        start = time.perf_counter()
+        catalog = FontCatalog()
+        catalog.scan(system_font_dirs())
+        faces = [f for f in catalog.faces() if f.embeddable and "latin" in f.scripts]
+        if not faces:
+            return f"no installed fonts found in {len(system_font_dirs())} folder(s); skipped"
+        face = next((f for f in faces if f.family.lower() == "arial" and not f.italic), faces[0])
+        doc = get_engine().new_document()
+        doc.insert_blank_page(0, 300, 200)
+        style = replace(TextStyle(size=14), font=face.family)
+        style = replace(style, font_ref=FontRef.file(face.path, face.index, face.family))
+        doc.page(0).add_text(Rect(20, 20, 280, 60), "Font check", style)
+        out = doc.save(workdir / "fonts.pdf")
+        doc.close()
+        doc = get_engine().open(out)
+        try:
+            names = [f.name for f in doc.fonts()]
+            text = doc.page(0).text_page(with_chars=False).text
+        finally:
+            doc.close()
+        key = face.family.replace(" ", "").lower()
+        if "Font check" not in text or not any(key in n.replace(" ", "").lower() for n in names):
+            raise AssertionError(f"{face.family} was not embedded: {names}")
+        took = time.perf_counter() - start
+        return f"{len(catalog.faces())} installed faces; embedded {face.family} in {took:.2f}s"
+
     def export() -> str:
         import zipfile
 
@@ -444,6 +479,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("modern UI", modern_ui),
         ("print to PDF", printing),
         ("OCR", ocr),
+        ("installed fonts", installed_fonts),
         ("export", export),
         ("optimize", optimize),
         ("security", security),
