@@ -97,3 +97,21 @@ def _reset_font_picker_state() -> Iterator[None]:
     font_picker._scan_job = None
     yield
     font_picker._open_pickers.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_blocking_message_boxes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record warnings/errors instead of opening them: offscreen, a modal message box (say,
+    from an edit committed while a failed test tears down) would block the whole run. Tests
+    that check a message stub these themselves, which overrides this."""
+    from PySide6.QtWidgets import QMessageBox
+
+    shown: list[str] = []
+
+    def record(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        shown.append(str(args[2]) if len(args) > 2 else "")
+        return QMessageBox.StandardButton.Ok
+
+    for name in ("warning", "critical", "information"):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(record))
+    return shown

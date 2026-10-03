@@ -6,12 +6,15 @@ import copy
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -160,7 +163,11 @@ class PropertiesDialog(FormDialog):
         )
         self.fonts_table.verticalHeader().setVisible(False)
         self.fonts_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        for row, f in enumerate(sorted(fonts, key=lambda f: f.name.lower())):
+        self.fonts_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.fonts_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.font_rows = sorted(fonts, key=lambda f: f.name.lower())
+        self.show_font: FontInfo | None = None  # set by "Show Text in This Font"
+        for row, f in enumerate(self.font_rows):
             embedding = (
                 "Embedded subset" if f.subset else "Embedded" if f.embedded else "Not embedded"
             )
@@ -172,7 +179,21 @@ class PropertiesDialog(FormDialog):
                     item.setToolTip(why)
                 self.fonts_table.setItem(row, col, item)
         self.fonts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        tabs.addTab(self.fonts_table, f"Fonts ({len(fonts)})")
+        self.show_font_button = QPushButton("Show Text in This Font")
+        self.show_font_button.setToolTip("Select the text set in this font, ready to edit")
+        self.show_font_button.setEnabled(False)
+        self.show_font_button.clicked.connect(self._show_selected_font)
+        self.fonts_table.itemSelectionChanged.connect(
+            lambda: self.show_font_button.setEnabled(self._selected_font() is not None)
+        )
+        fonts_page = QWidget()
+        fonts_layout = QVBoxLayout(fonts_page)
+        fonts_layout.addWidget(self.fonts_table, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self.show_font_button)
+        fonts_layout.addLayout(buttons)
+        tabs.addTab(fonts_page, f"Fonts ({len(fonts)})")
 
         self.add_widget(tabs, 1)
         self.tabs = tabs
@@ -185,3 +206,15 @@ class PropertiesDialog(FormDialog):
         if meta != self.original:
             self.session.execute(SetMetadataCommand(meta))
         super().accept()
+
+    def _selected_font(self) -> FontInfo | None:
+        rows = {i.row() for i in self.fonts_table.selectedIndexes()}
+        if len(rows) != 1:
+            return None
+        font = self.font_rows[rows.pop()]
+        return font if font.pages and font.type != "Type3" else None
+
+    def _show_selected_font(self) -> None:
+        self.show_font = self._selected_font()
+        if self.show_font is not None:
+            self.accept()

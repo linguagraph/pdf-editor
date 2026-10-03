@@ -273,6 +273,90 @@ Run the built `dist/pdfeditor.exe` on Windows 11 with a real mouse, keyboard and
 - **Animations**: with Settings ▸ Accessibility ▸ Visual effects ▸ Animation effects off, zoom, page jumps, the pill and toasts don't animate.
 - **Screen reader** (Narrator): rail buttons, pill controls, mini toolbars, tabs ("unsaved changes") and start-page cards are announced by name; a toast is read out when it appears.
 
+### Phase F: Font management (M–L)
+Goal: when editing or adding text, offer the fonts installed on the computer as well as the document's own fonts, the way Acrobat does. The chosen font must be embedded correctly and kept small, and a font's license must be respected.
+
+**Why the list is short today:**
+- The text style bar offers only the paragraph's own embedded font plus three standard families (Helvetica, Times, Courier). Edited text that can't reuse the embedded font falls back to MuPDF's built-in base-14 fonts.
+- Header/footer/watermark stamps choose from six base-14 codes (`model/pages.FONTS`).
+- FreeText comments always use `helv`.
+- OCR's editable output uses the built-in sans.
+
+Nothing can embed a font from the system.
+
+**Approach:**
+- **Font catalog.** A headless service indexes the system's font files once, in the background, and caches the index in the user data folder.
+- **Font references.** Text styles name a font through an engine-neutral reference: standard, document or file.
+- **Engine.** The engine loads the font program, checks glyph coverage (as it already does for embedded fonts), embeds it and subsets it on save.
+- **UI.** One searchable font picker replaces the fixed lists everywhere text is typeset.
+- **No new dependencies.** fontTools is already a runtime dependency. Fonts come from the user's system at runtime, so nothing extra is bundled in the exe.
+- **Licensing.** The project doesn't redistribute these fonts; the user embeds them in their own PDFs. That is governed by each font's OS/2 `fsType`, which is enforced as below.
+
+- [x] **F1 Model: font references.** _(PR #66)_
+  - `model/fonts.py` adds `FontFace`: family, style name, weight, italic, file path, collection index, `embeddable`, a reason when it isn't, a coverage summary (scripts such as Latin, Cyrillic, Greek, CJK), and whether it's a variable font.
+  - `FontRef` is one of three kinds: `standard(name)`, `document(name)` or `file(path, index)`.
+  - `TextStyle` and `TextStamp` gain an optional `FontRef`. The existing `font` name stays for display and backward compatibility; with no ref it means today's behavior.
+  - Unit tests: construction, equality, and serialization for settings (recent fonts).
+- [x] **F2 Font catalog service** _(PR #66)_ (`services/fonts.py`, headless):
+  - **Folders scanned:**
+    - Windows: `%WINDIR%\Fonts` and the per-user `%LOCALAPPDATA%\Microsoft\Windows\Fonts`.
+    - macOS: `/Library/Fonts` and `~/Library/Fonts`.
+    - Linux: `/usr/share/fonts`, `/usr/local/share/fonts` and `~/.local/share/fonts`.
+    - The folder list can be overridden, for tests.
+  - **Reading each file:** `.ttf`, `.otf`, `.ttc` and `.otc` are read with fontTools (`lazy=True`; only the `name`, `OS/2`, `head` and `cmap` tables). Bitmap `.fon` and Type 1 files are skipped.
+  - **Families:** faces are grouped into families from the typographic family/subfamily names (name IDs 16/17, falling back to 1/2). Bold and italic faces are paired with their regular face.
+  - **Embedding (`fsType`):**
+    - The installable, editable and preview & print levels are allowed.
+    - Restricted (`0x0002`) or bitmap-only (`0x0200`) faces are listed but not usable, with the reason shown.
+    - Reuse the check in `services/export/fonts.py` rather than duplicating it.
+  - **Variable fonts:** for now, only the named instances whose axis values match the default instance are usable. Instancing other weights with `fontTools.varLib.instancer` is a follow-up.
+  - **Cache:** a JSON index in `data_dir()/fonts.json`, keyed by path, size and modification time. Changed or new files are re-read; removed ones are dropped.
+  - **Performance:** the first scan of about 1,000 font files runs as a cancellable `Job` after startup. Later starts load the cache in under 100 ms (a performance-budget test).
+  - **Tests:** synthetic fonts made with fontTools `FontBuilder` in `scripts/make_fixtures.py`: a regular/bold/italic family, a TTC, a restricted font, a variable font, and fonts with Latin-only and Cyrillic coverage. Nothing depends on the CI machine's installed fonts.
+- [x] **F3 Engine: typeset with a font file.** _(PR #67; follow-ups done: installed fonts are reused after reopening (#68, #70), and only fonts added since loading are subset)_
+  - **Loading and coverage:** `_font_for` (`engine/mupdf/content.py`) accepts a `FontRef.file`. It loads the program (the right face of a collection) and checks coverage for the text with the existing `_covers`.
+  - **Missing glyphs:** if glyphs are missing, it reports `FontChoice(substituted=True)` and names the characters. The style bar shows that. Text is never silently set in a different font.
+  - **Insertion:** `insert_text` (`insert_htmlbox`) already takes a font buffer. Check that bold and italic come from the real faces (no synthetic styles), and that character/word spacing and justification still work with the new fonts.
+  - **Subsetting on save:** every font this app embeds is subset when saving, unless the save is incremental (signed documents) or the user turned it off. Today only Reduce File Size subsets, so one edit in Segoe UI or a CJK font would add megabytes. Measure the size before and after in a test.
+  - **Page objects:** `font_program()` and the page object listing keep reporting the font by its family name, so a later edit of the same paragraph reuses it.
+  - **Round-trip tests** (per the testing rules): edit with a file font, save, reopen. Check that:
+    - the text extracts unchanged and the font is embedded (`FontFile2` or `FontFile3`) and subset;
+    - pikepdf opens the file and pypdfium2 renders it;
+    - a restricted font is refused with a clear message.
+- [x] **F4 Font picker widget** _(PR #68)_ (`ui/font_picker.py`):
+  - **One component everywhere:** a searchable drop-down that replaces the font combo boxes in the text style bar, Add Text, and the header/footer/watermark dialogs.
+  - **Sections, in order:**
+    - *In this document*: embedded fonts complete enough for the current text, from `doc.fonts()` plus a coverage check.
+    - *Recent*: up to 8, saved in settings.
+    - *Standard*: always available, never embedded beyond the built-ins.
+    - *Installed*: from the catalog.
+  - **Display:**
+    - Each family name is drawn in its own face. Qt already knows system fonts by family; uninstalled document fonts go through the existing `preview_family`.
+    - Non-embeddable fonts are greyed out, with a tooltip explaining why.
+    - Fonts that can't show the selected text's script (e.g. Cyrillic) sort last and are marked.
+  - **Search:** type to filter. Keyboard navigation and screen-reader names follow the U10 conventions.
+  - **Bold/Italic:** the toggles are enabled only when the family has those faces.
+  - **Before the catalog is ready:** the picker shows the document and standard fonts with a "Loading installed fonts…" row, then fills in.
+  - **GUI tests:** filtering, sections, a disabled restricted font, persisted recents, and B/I enabled per family.
+- [x] **F5 Use it everywhere text is typeset.** _(PR #68)_
+  - **Edit Text and Add Text:** use the picker. Add Text remembers the last `FontRef`. Changing the font of an existing paragraph re-typesets it with the new file font.
+  - **Header/footer/watermark stamps:** use `insert_text`/`TextWriter` with a font file instead of base-14 codes. Page-mark detection and editing (Phase 6 marks) must keep working: the marks' settings record the `FontRef`.
+  - **FreeText comments:** they stay on base-14 fonts, because MuPDF's appearance generator and most viewers support only those for FreeText. The picker there shows just the standard section, with a note why.
+  - **OCR editable text:** stays on the built-in sans and CJK fonts. Matching the scanned font is out of scope.
+- [x] **F6 Fonts in Document Properties.** _(PR #70 and this PR)_
+  - The existing Fonts tab gains columns for where each font is used (pages) and whether it can be reused for editing (complete program or subset, coverage).
+  - There's an action to "Show text using this font", which selects those blocks in edit mode.
+  - Replacing a font throughout the document is a later item: it re-typesets every block and changes the layout.
+- [x] **F7 Packaging and self-test.** _(PR #69)_
+  - `--self-test` checks that the catalog finds at least one font, or degrades cleanly with a message when the folder is empty. It embeds a file font (the synthetic test font is bundled only for the self-test, in `data/`), saves, reopens and extracts the text.
+  - Size budget unchanged: no fonts are bundled for users.
+  - Check in the frozen exe (one-file and, later, MSIX) that the system font folders are read normally. MSIX redirects only writes, not reads of `%WINDIR%\Fonts`.
+
+**Done when:**
+- A user can pick any embeddable installed font in the editor and in header/footer/watermark stamps, see it in the editing preview, save, and get a small file that looks the same in other viewers.
+- Restricted fonts are clearly unavailable.
+- All checks, round-trip tests and `build_exe.py --test` pass.
+
 ### Later / not in current scope
 - AcroForm creation and editing, digital signatures (PAdES) and certificate validation. Rendering and keeping existing forms and signatures intact is covered above.
 - A permissive engine backend (pypdfium2 + pikepdf) implementing `engine/base.py`. The contract tests from Phase 1 are its acceptance suite.

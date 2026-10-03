@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import functools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -67,7 +67,9 @@ from pdfeditor.model.annotations import (
     ReviewState,
 )
 from pdfeditor.model.geometry import Matrix
+from pdfeditor.model.objects import ObjectType
 from pdfeditor.model.outline import Link, LinkKind
+from pdfeditor.services.fonts import same_font_family
 from pdfeditor.ui.action_help import apply_short_labels, refresh_tooltips
 from pdfeditor.ui.command_search import CommandSearch
 from pdfeditor.ui.compare_controller import CompareController
@@ -1588,8 +1590,28 @@ class MainWindow(QMainWindow):
     def show_properties(self) -> None:
         view = self.current_view()
         if view is not None:
-            PropertiesDialog(view.session, self).exec()
+            dialog = PropertiesDialog(view.session, self)
+            dialog.exec()
             self._update_ui()
+            if dialog.show_font is not None:
+                self.show_text_in_font(view, dialog.show_font.name, dialog.show_font.pages)
+
+    def show_text_in_font(self, view: DocumentView, font: str, pages: Sequence[int]) -> int:
+        """Edit Text & Images, with every editable text block set in ``font`` selected."""
+        self.set_tool("edit", view)
+        chosen = [
+            (page, obj.key)
+            for page in pages
+            for obj in view.page_objects(page)
+            if obj.type is ObjectType.TEXT and obj.style and same_font_family(obj.style.font, font)
+        ]
+        view.set_object_selection(chosen)
+        if chosen:
+            view.go_to_page(chosen[0][0], animated=True)
+            self.notify(f"Selected {len(chosen)} text block(s) in {font}.")
+        else:
+            self.notify(f"No editable text uses {font}.")
+        return len(chosen)
 
     def show_about(self) -> None:
         engine_version = ""
