@@ -389,3 +389,15 @@ def test_installed_ref_for_font_name_restricted_returns_none(fonts_dir: Path) ->
     catalog = FontCatalog()
     catalog.scan(dirs=[fonts_dir])
     assert installed_ref_for_font_name(catalog, "Test Restricted") is None
+
+
+def test_pdf_font_names_find_installed_families_without_spaces(tmp_path) -> None:
+    from pdfeditor.services.fonts import FontCatalog, installed_ref_for_font_name
+
+    fonts = Path(__file__).resolve().parent.parent / "fixtures" / "generated" / "fonts"
+    catalog = FontCatalog()
+    catalog.scan([fonts])
+    ref = installed_ref_for_font_name(catalog, "ABCDEF+TestSans-Bold")
+    assert ref is not None and ref.name == "Test Sans"
+    assert installed_ref_for_font_name(catalog, "TestSansMT") is not None
+    assert installed_ref_for_font_name(catalog, "NoSuchFont") is None

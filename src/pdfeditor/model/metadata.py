@@ -72,6 +72,7 @@ class FontInfo:
     embedded: bool
     subset: bool
     ref: int  # engine object id
+    pages: tuple[int, ...] = ()  # page indices that use the font (0-based)
 
 
 @dataclass(frozen=True, slots=True)
