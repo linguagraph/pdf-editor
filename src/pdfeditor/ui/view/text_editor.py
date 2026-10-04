@@ -103,6 +103,8 @@ def _initial_font_ref(style: TextStyle) -> tuple[FontRef, str]:
     """
     if style.font_ref is not None:
         return style.font_ref, style.font
+    if style.font in _STANDARD_NAMES:  # shown as its Standard entry; see text_style()
+        return FontRef.standard(style.font), style.font
     return _document_ref(style.font, style.bold, style.italic), style.font
 
 
@@ -134,7 +136,9 @@ class TextStyleBar(QFrame):
         document_fonts = [] if style.font in _STANDARD_NAMES else [style.font]
         self.font_picker = FontPicker(self, document_fonts=document_fonts)
         self.font_picker.setToolTip("Font")
-        self.font_picker.set_selection(*_initial_font_ref(style))
+        self._initial_ref, initial_display = _initial_font_ref(style)
+        self._initial_default = style.font_ref is None
+        self.font_picker.set_selection(self._initial_ref, initial_display)
         self.font_picker.font_chosen.connect(self._on_font_chosen)
         self.size_box = QDoubleSpinBox(self)
         self.size_box.setToolTip("Font size (pt)")
@@ -244,8 +248,12 @@ class TextStyleBar(QFrame):
     def text_style(self) -> TextStyle:
         align = self.align_combo.currentData()
         ref = self.font_picker.current_ref()
-        # a document font is the default (None) unless it carries an installed fallback
-        font_ref = None if ref.kind is FontRefKind.DOCUMENT and not ref.path else ref
+        # The default path (None) reuses the PDF's embedded program, else a base-14 font: keep
+        # it for a plain document font, and for a standard font the user didn't change.
+        default = (ref.kind is FontRefKind.DOCUMENT and not ref.path) or (
+            ref.kind is FontRefKind.STANDARD and ref == self._initial_ref and self._initial_default
+        )
+        font_ref = None if default else ref
         return replace(
             self._base,
             font=ref.name,
