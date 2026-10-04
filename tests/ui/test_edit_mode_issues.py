@@ -264,3 +264,38 @@ def test_new_documents_start_with_the_default_tool(
     b = open_copy(window, fixture_pdf, tmp_path, "mixed_content")
     assert a.tool.name == "edit" and b.tool.name == "hand"
     assert window.tool_actions["hand"].isChecked() and not window.mode_banner.isVisible()
+
+
+def test_previewing_an_embedded_font_keeps_the_installed_family(qtbot, fixtures_dir) -> None:
+    """#71: registered under its own name, a PDF's embedded "Arial" replaced the installed
+    Arial for the whole app (other editors got its metrics, or missing glyphs)."""
+    from PySide6.QtGui import QFontDatabase
+
+    from pdfeditor.ui.view.text_editor import preview_family
+
+    data = (fixtures_dir / "fonts" / "TestSans-Regular.ttf").read_bytes()
+    family = preview_family(data)
+    assert family is not None and family.startswith("PDF Font ")
+    assert "Test Sans" not in QFontDatabase.families()
+    assert preview_family(data) == family  # registered once
+
+
+def test_editor_is_at_least_one_line_tall(qtbot) -> None:
+    """#71: a box shorter than one line cut the text off and couldn't be scrolled."""
+    from PySide6.QtWidgets import QWidget
+
+    from pdfeditor.model.objects import TextStyle
+    from pdfeditor.ui.view.text_editor import InlineTextEditor
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    host.resize(800, 600)
+    host.show()
+    qtbot.waitExposed(host)
+    editor = InlineTextEditor(
+        host, "one line", TextStyle(size=40, line_height=1.5), 1.0, lambda *_: None, lambda: None
+    )
+    editor.place((10, 10, 300, 4))  # a box far shorter than one 40 pt line
+    first = editor.document().firstBlock()
+    assert editor.viewport().height() >= editor.blockBoundingRect(first).height()
+    assert editor.verticalScrollBar().maximum() == 0
