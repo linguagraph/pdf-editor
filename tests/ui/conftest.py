@@ -115,3 +115,25 @@ def no_blocking_message_boxes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     for name in ("warning", "critical", "information"):
         monkeypatch.setattr(QMessageBox, name, staticmethod(record))
     return shown
+
+
+@pytest.fixture(autouse=True)
+def destroy_leftover_windows() -> Iterator[None]:
+    """Really delete the windows a test closed.
+
+    ``close()``/``deleteLater()`` only free a widget once an event loop runs, which most tests
+    never reach: thousands of hidden widgets (whole main windows with their menus) piled up.
+    Every new main window re-applies the app style sheet, and Qt restyles each live widget,
+    so later tests slowed down and, on Windows, crashed inside ``setStyleSheet`` (#71).
+    """
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        return
+    for widget in app.topLevelWidgets():
+        if widget.parentWidget() is None and not widget.isVisible():
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

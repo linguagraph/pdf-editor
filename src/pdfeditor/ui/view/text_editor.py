@@ -48,13 +48,46 @@ _STANDARD_NAMES = {name for _label, name in STANDARD_FONTS}
 _loaded_fonts: dict[str, str] = {}  # sha1 of font program -> Qt family name
 
 
+def _private_copy(font_data: bytes, family: str) -> bytes:
+    """``font_data`` renamed to ``family``.
+
+    An embedded program keeps its family name ("Arial"). Registered under that name it would
+    replace the installed font of the same name everywhere in the app, often with only the
+    few glyphs the PDF used, so other text would show with the wrong metrics or no glyphs.
+    """
+    import io
+
+    from fontTools.ttLib import TTFont
+
+    try:
+        font = TTFont(io.BytesIO(font_data))
+        names = font["name"]
+        for record in list(names.names):
+            if record.nameID in (1, 3, 4, 6, 16, 17, 21, 22):
+                names.removeNames(nameID=record.nameID)
+        names.setName(family, 1, 3, 1, 0x409)
+        names.setName("Regular", 2, 3, 1, 0x409)
+        names.setName(family, 3, 3, 1, 0x409)
+        names.setName(family, 4, 3, 1, 0x409)
+        names.setName(family.replace(" ", ""), 6, 3, 1, 0x409)
+        out = io.BytesIO()
+        font.save(out)
+        font.close()
+        return out.getvalue()
+    except Exception:
+        return b""  # a program fontTools can't rewrite is not registered at all
+
+
 def preview_family(font_data: bytes | None) -> str | None:
-    """Register an embedded font program with Qt so the editor shows the page's real font."""
+    """Register an embedded font program with Qt, under a private family name, so the
+    editor shows the page's real font without hiding the installed font of that name."""
     if not font_data:
         return None
     digest = hashlib.sha1(font_data).hexdigest()
     if digest not in _loaded_fonts:
-        font_id = QFontDatabase.addApplicationFontFromData(font_data)
+        family = f"PDF Font {digest[:12]}"
+        data = _private_copy(font_data, family)
+        font_id = QFontDatabase.addApplicationFontFromData(data) if data else -1
         families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
         _loaded_fonts[digest] = families[0] if families else ""
     return _loaded_fonts[digest] or None
@@ -302,7 +335,14 @@ class InlineTextEditor(QPlainTextEdit):
     # -- geometry ---------------------------------------------------------------------------
     def place(self, viewport_rect: tuple[int, int, int, int]) -> None:
         x, y, w, h = viewport_rect
-        self.setGeometry(x - 4, y - 4, max(w + 8, 120), max(h + 8, 40))
+        # never shorter than one line of its font: the text would be cut off (and a box
+        # with a page step of 0 can't be scrolled with the wheel)
+        first = self.document().firstBlock()
+        line = max(self.fontMetrics().lineSpacing(), self.blockBoundingRect(first).height())
+        one_line = (
+            round(line) + 2 * self.frameWidth() + 2 * round(self.document().documentMargin()) + 2
+        )
+        self.setGeometry(x - 4, y - 4, max(w + 8, 120), max(h + 8, 40, one_line))
         bar = self.style_bar
         bar.adjustSize()
         above = y - 6 - bar.height()
@@ -381,6 +421,13 @@ class InlineTextEditor(QPlainTextEdit):
             self._pass_to_page(event)  # zoom the page, not the editor's font
         elif bar.maximum() <= bar.minimum():
             self._pass_to_page(event)  # nothing to scroll here
+        elif bar.pageStep() < 1:
+            # A box shorter than one line has a page step of 0, and Qt limits a wheel step to
+            # the page step, so it would never scroll: step through the lines here instead.
+            notches = (delta.x() if horizontal else delta.y()) / 120
+            lines = round(-notches * QApplication.wheelScrollLines()) or (-1 if notches > 0 else 1)
+            bar.setValue(bar.value() + lines * bar.singleStep())
+            event.accept()
         else:
             super().wheelEvent(event)
             event.accept()  # at the first or last line too: see the class docstring
