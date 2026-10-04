@@ -6,9 +6,9 @@ bookmarks and links; page labels are saved and re-applied since ``select`` drops
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
-import re
 import tempfile
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -182,10 +182,13 @@ def stamp_text(page: MuPage, stamp: TextStamp) -> None:
     with marked(page, stamp.mark, stamp.origin.y < page.rect.height / 2):
         if ref is not None and ref.kind is FontRefKind.FILE:
             # insert_text() only takes a font file by path, not a buffer: write the (possibly
-            # face-extracted) program to a scratch file for the call, then remove it. The PDF
-            # resource name it registers the font under can't contain spaces.
+            # face-extracted) program to a scratch file for the call, then remove it. PyMuPDF
+            # reuses a font already on the page under the same resource name, and treats base-14
+            # names ("Symbol", "helv") as its built-ins: name it after the file and face, so two
+            # faces of a family (or an installed "Symbol") each get their own program.
             buffer = ct.load_file_font(ref.path, ref.index)
-            resource_name = re.sub(r"[^A-Za-z0-9]", "", ref.name or stamp.font) or "FileFont"
+            face_id = hashlib.sha1(f"{ref.path}|{ref.index}".encode()).hexdigest()[:10]
+            resource_name = f"PEF{face_id}"
             with tempfile.NamedTemporaryFile(suffix=".ttf", delete=False) as tmp:
                 tmp.write(buffer)
             try:

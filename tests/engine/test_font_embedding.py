@@ -7,6 +7,7 @@ font ref's family on a later edit of the same block.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pikepdf
@@ -285,3 +286,123 @@ def test_save_subsets_only_fonts_added_since_loading(
     added = next(f for n, f in fonts.items() if "sans" in n.lower())
     assert not original.subset  # left alone
     assert added.subset  # the font this session embedded was trimmed
+
+
+# -- review fixes (code review of Phase F) ---------------------------------------------------
+def _with_original_font(tmp_path: Path, fonts_dir: Path) -> Path:
+    src = pymupdf.open()
+    page = src.new_page(width=300, height=200)
+    page.insert_font(fontname="orig", fontfile=str(fonts_dir / "TestLarge-Regular.ttf"))
+    page.insert_text((20, 50), "abc", fontname="orig", fontsize=12)
+    src.save(tmp_path / "orig.pdf")
+    src.close()
+    return tmp_path / "orig.pdf"
+
+
+def _sans(fonts_dir: Path, text: str = "abc") -> TextStyle:
+    return TextStyle(
+        font="Test Sans", font_ref=FontRef.file(str(fonts_dir / "TestSans-Regular.ttf"))
+    )
+
+
+def test_document_ref_reuses_the_embedded_font_before_the_installed_copy(
+    editable: Engine, fixture_pdf, tmp_path: Path, fonts_dir: Path
+) -> None:
+    """An edit the user didn't restyle keeps the PDF's own font; the installed copy carried
+    by the ref only supplies characters that font lacks."""
+    from pdfeditor.model.fonts import FontRefKind
+
+    doc, _path = _open(editable, fixture_pdf, tmp_path)
+    try:
+        page = doc.page(0)
+        body = _by_type(page, ObjectType.TEXT)[1]
+        page.replace_text(body.key, "ABC abc", _sans(fonts_dir))  # now embedded, reusable
+        edited = _by_type(doc.page(0), ObjectType.TEXT)[1]
+        assert edited.style is not None
+        fallback = str(fonts_dir / "TestCyrillic-Regular.ttf")
+        ref = FontRef(FontRefKind.DOCUMENT, edited.style.font, fallback, 0)
+        styled = replace(edited.style, font_ref=ref)
+        reused = doc.page(0).replace_text(edited.key, "abc ABC", styled)
+        assert reused is not None and reused.embedded_reused
+        edited = _by_type(doc.page(0), ObjectType.TEXT)[1]
+        assert edited.style is not None
+        cyrillic = doc.page(0).replace_text(edited.key, "аб", replace(edited.style, font_ref=ref))
+        assert cyrillic is not None and not cyrillic.substituted  # from the installed copy
+    finally:
+        doc.close()
+
+
+def test_standard_font_reports_characters_it_lacks(
+    editable: Engine, fixture_pdf, tmp_path: Path
+) -> None:
+    doc, _path = _open(editable, fixture_pdf, tmp_path)
+    try:
+        style = TextStyle(font="Helvetica", font_ref=FontRef.standard("Helvetica"))
+        choice = doc.page(0).add_text(Rect(20, 20, 280, 60), "abc 中", style)
+        assert choice.substituted and "中" in choice.missing
+    finally:
+        doc.close()
+
+
+def test_save_then_undo_keeps_the_document_fonts_whole(tmp_path: Path, fonts_dir: Path) -> None:
+    path = _with_original_font(tmp_path, fonts_dir)
+    session = DocumentSession.open(path)
+    try:
+
+        def add(doc) -> None:
+            doc.page(0).add_text(Rect(20, 80, 280, 120), "abc", _sans(fonts_dir))
+
+        session.execute(SnapshotCommand("Add Text", add, session.snapshots))
+        session.save()
+        session.undo()  # back to a snapshot numbered as before the save
+        session.execute(SnapshotCommand("Add Text", add, session.snapshots))
+        session.save()
+    finally:
+        session.close()
+    with pikepdf.open(path) as pdf:
+        names = {
+            str(f.get("/BaseFont"))
+            for page in pdf.pages
+            for f in page.Resources.get("/Font", {}).values()
+        }
+    assert any("Test Large" in n and "+" not in n for n in names), names  # still complete
+
+
+def test_a_failing_subset_is_a_save_error(
+    editable: Engine, tmp_path: Path, fonts_dir: Path, monkeypatch
+) -> None:
+    from pdfeditor.engine.base import SaveError
+    from pdfeditor.engine.mupdf.document import MuDocument
+
+    doc = editable.open(_with_original_font(tmp_path, fonts_dir))
+    try:
+        doc.page(0).add_text(Rect(20, 80, 280, 120), "abc", _sans(fonts_dir))
+
+        def boom(self: MuDocument) -> None:
+            raise RuntimeError("subset failed")
+
+        monkeypatch.setattr(MuDocument, "_subset_new_fonts", boom)
+        with pytest.raises(SaveError, match="subset failed"):
+            doc.save(tmp_path / "out.pdf")
+    finally:
+        doc.close()
+
+
+def test_two_faces_of_one_family_stamp_with_their_own_programs(
+    editable: Engine, fixture_pdf, tmp_path: Path, fonts_dir: Path
+) -> None:
+    doc, _path = _open(editable, fixture_pdf, tmp_path)
+    try:
+        page = doc.page(0)
+        for y, face in ((40, "TestSans-Regular.ttf"), (80, "TestSans-Bold.ttf")):
+            ref = FontRef.file(str(fonts_dir / face), name="Test Sans")
+            page.stamp_text(TextStamp("abc", Point(40, y), font_ref=ref))
+        doc.save(tmp_path / "stamped.pdf")
+    finally:
+        doc.close()
+    reopened = editable.open(tmp_path / "stamped.pdf")
+    try:
+        sans = [f for f in _embedded_fontinfo(reopened) if "test" in f.name.lower()]
+    finally:
+        reopened.close()
+    assert len(sans) >= 2, sans  # regular and bold each embedded, not one shared program

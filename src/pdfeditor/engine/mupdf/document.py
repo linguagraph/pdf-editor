@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import re
@@ -183,6 +184,9 @@ class MuDocument:
         # Objects below this number came with the file: their fonts are never subset on save
         # (a complete embedded font lets later edits add characters).
         self._loaded_xrefs = int(self._fz.xref_length())
+        # snapshot digest -> (_loaded_xrefs, _gained_file_fonts) when it was taken: a full save
+        # renumbers objects, so undoing past it must bring back the numbering's own boundary
+        self._snapshot_fonts: dict[bytes, tuple[int, bool]] = {}
 
     # -- internal ---------------------------------------------------------------------------
     @property
@@ -606,9 +610,9 @@ class MuDocument:
                 if security.method is EncryptionMethod.NONE
                 else security.owner_password or security.user_password
             )
-        if self._gained_file_fonts and options.subset_fonts:
-            self._subset_new_fonts()
         try:
+            if self._gained_file_fonts and options.subset_fonts:
+                self._subset_new_fonts()
             self._fz.save(tmp, **self._save_kwargs(options))
             self._verify(tmp, pages)
         except Exception as exc:
@@ -653,6 +657,11 @@ class MuDocument:
             raise OpenError("snapshot can't be decrypted with the document's password")
         self._fz.close()
         self._fz = new
+        known = self._snapshot_fonts.get(hashlib.sha1(data).digest())
+        if known is not None:
+            self._loaded_xrefs, self._gained_file_fonts = known
+        else:  # unknown numbering: treat every font as the document's own (never subset it)
+            self._loaded_xrefs, self._gained_file_fonts = int(new.xref_length()), False
         self._reset_pages()
 
     def select_pages(self, order: Sequence[int]) -> None:
@@ -760,7 +769,9 @@ class MuDocument:
                 report.append(f"{glyphs} off-page text character(s)")
         if options.hidden_layers and layers:
             # MuPDF reads /OCProperties once, at open: reload so the layer list is current
+            fonts = self._loaded_xrefs, self._gained_file_fonts  # same numbering: keep them
             self.load_state(bytes(self._fz.tobytes(garbage=0, encryption=pymupdf.PDF_ENCRYPT_KEEP)))
+            self._loaded_xrefs, self._gained_file_fonts = fonts
             self._force_dirty = True
         self._reset_pages()
         return report
@@ -778,7 +789,11 @@ class MuDocument:
 
     def to_bytes(self, options: SaveOptions | None = None) -> bytes:
         options = options or SaveOptions()
-        return bytes(self._fz.tobytes(**self._save_kwargs(options)))
+        data = bytes(self._fz.tobytes(**self._save_kwargs(options)))
+        if options.garbage == 0:  # keeps object numbers: a snapshot that may be loaded back
+            key = hashlib.sha1(data).digest()
+            self._snapshot_fonts[key] = (self._loaded_xrefs, self._gained_file_fonts)
+        return data
 
     def close(self) -> None:
         self._reset_pages()

@@ -304,7 +304,8 @@ def _face_to_json(face: FontFace) -> dict[str, object]:
 
 def _face_from_json(path: str, data: dict[str, object]) -> FontFace:
     scripts = data["scripts"]
-    assert isinstance(scripts, list)
+    if not isinstance(scripts, list):  # a damaged cache file: skip the entry, never crash
+        raise ValueError("bad cache entry: scripts")
     return FontFace(
         family=str(data["family"]),
         style=str(data["style"]),
