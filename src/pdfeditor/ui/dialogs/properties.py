@@ -62,7 +62,11 @@ def editing_use(font: FontInfo) -> tuple[str, str]:
     if font.embedded and not font.subset:
         return "Reused", "The complete font is embedded, so edits use it."
     if installed is not None:
-        return "Installed copy", "This font is installed on this computer; edits use that copy."
+        return (
+            "Installed copy",
+            "Edits use the characters embedded in the PDF and take any others from the copy "
+            "of this font installed on this computer.",
+        )
     if font.subset:
         return (
             "Partly reused",

@@ -133,8 +133,11 @@ def test_remember_font_skips_document_refs(qtbot, font_catalog: FontCatalog):
     assert AppSettings().recent_fonts == []
 
 
-def test_recent_section_shown_in_picker(qtbot, font_catalog: FontCatalog):
-    remember_font(FontRef.standard("Courier"))
+def test_recent_section_shown_in_picker(qtbot, font_catalog: FontCatalog, fixtures_dir):
+    # only installed fonts are remembered: standard ones are always listed anyway
+    remember_font(
+        FontRef.file(str(fixtures_dir / "fonts" / "TestSans-Regular.ttf"), 0, "Test Sans")
+    )
     picker = FontPicker()
     qtbot.addWidget(picker)
     assert "Recent" in _rows(picker)

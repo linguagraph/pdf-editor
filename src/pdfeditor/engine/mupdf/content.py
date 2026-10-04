@@ -448,7 +448,19 @@ def _font_for(
     if ref is not None and ref.kind is FontRefKind.STANDARD:
         code = _STANDARD[family_of(style.font)][(style.bold, style.italic)]
         font = pymupdf.Font(code)
-        return font.buffer, FontChoice(font.name)
+        missing = "".join(sorted(c for c in wanted if not font.has_glyph(ord(c))))
+        return font.buffer, FontChoice(font.name, substituted=bool(missing), missing=missing)
+    if ref is not None and ref.kind is FontRefKind.DOCUMENT and ref.path:
+        # the document's own program first; the installed copy for what it can't show
+        embedded = font_program(page, style.font)
+        if not (reuse_embedded and embedded and _covers(embedded, wanted)):
+            try:
+                installed = load_file_font(ref.path, ref.index)
+            except (OSError, UnsupportedFeature, EngineError):
+                installed = None
+            if installed is not None and _covers(installed, wanted):
+                page._doc.note_file_font_embedded()
+                return _single_codepoint_cmap(installed, wanted), FontChoice(style.font)
     return _font_for_known(page, style, wanted, reuse_embedded)
 
 

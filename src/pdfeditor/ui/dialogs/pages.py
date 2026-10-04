@@ -43,15 +43,31 @@ from pdfeditor.ui.font_picker import FontPicker, remember_font
 from pdfeditor.ui.style.tokens import METRICS
 
 # base-14 codes used by the engine (MuPDF's short names) <-> the font picker's standard refs
-_BASE14_BY_STANDARD = {"Helvetica": "helv", "Times-Roman": "tiro", "Courier": "cour"}
+_BASE14_BY_STANDARD = {
+    "Helvetica": "helv",
+    "Helvetica-Bold": "hebo",
+    "Times-Roman": "tiro",
+    "Times-Bold": "tibo",
+    "Courier": "cour",
+    "Courier-Bold": "cobo",
+}
+# the stamp dialogs offer the bold standard fonts too (the base-14 codes have no bold toggle)
+STAMP_STANDARD_FONTS = (
+    ("Sans (Helvetica)", "Helvetica"),
+    ("Sans Bold (Helvetica)", "Helvetica-Bold"),
+    ("Serif (Times)", "Times-Roman"),
+    ("Serif Bold (Times)", "Times-Bold"),
+    ("Mono (Courier)", "Courier"),
+    ("Mono Bold (Courier)", "Courier-Bold"),
+)
 _BASE14_BY_FAMILY = {"sans": "helv", "serif": "tiro", "mono": "cour"}
 _STANDARD_BY_BASE14 = {
     "helv": "Helvetica",
-    "hebo": "Helvetica",
+    "hebo": "Helvetica-Bold",
     "tiro": "Times-Roman",
-    "tibo": "Times-Roman",
+    "tibo": "Times-Bold",
     "cour": "Courier",
-    "cobo": "Courier",
+    "cobo": "Courier-Bold",
 }
 
 
@@ -514,7 +530,7 @@ class HeaderFooterDialog(FormDialog):
         if bates:
             self.slots[Slot.FOOTER_RIGHT].setText("<<bates>>")
         help_label = caption(f"Fields: {TOKENS_HELP}")
-        self.font_picker = FontPicker(self)
+        self.font_picker = FontPicker(self, standard_fonts=STAMP_STANDARD_FONTS)
         self.size_box = QDoubleSpinBox()
         self.size_box.setRange(4, 72)
         self.size_box.setValue(9)
@@ -604,7 +620,7 @@ class WatermarkDialog(FormDialog):
         self.image_path.setAccessibleName("Watermark image file")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
-        self.font_picker = FontPicker(self)
+        self.font_picker = FontPicker(self, standard_fonts=STAMP_STANDARD_FONTS)
         self.font_picker.set_selection(FontRef.standard("Helvetica"), "Helvetica")
         self.size_box = QDoubleSpinBox()
         self.size_box.setRange(6, 400)

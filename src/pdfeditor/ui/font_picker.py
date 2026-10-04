@@ -24,33 +24,48 @@ STANDARD_FONTS = (
 )
 
 _LOADING_TEXT = "Loading installed fonts…"
+_NONE_TEXT = "No installed fonts found"
+_FAILED_TEXT = "Couldn't read the installed fonts"
 
 # module-wide: only one scan runs no matter how many pickers are open, started lazily by the
 # first one created (never at app start).
 _scan_started = False
+_scan_running = False
+_scan_failed = False  # the last scan failed or was cancelled: the next new picker retries it
 _scan_job: Job | None = None
 _open_pickers: list[weakref.ref[FontPicker]] = []
 
 
 def _ensure_scan_started(catalog: FontCatalog) -> None:
-    global _scan_started, _scan_job
+    """Start the one background scan. A scan that failed or was cancelled is retried once
+    more when another picker opens (never in a loop from the refresh it triggers)."""
+    global _scan_started, _scan_running, _scan_failed, _scan_job
     if _scan_started:
         return
-    _scan_started = True
+    _scan_started = _scan_running = True
+    _scan_failed = False
 
     def work(job: Job) -> None:
         catalog.scan(token=job.token)
 
+    def ended(failed: bool) -> None:
+        global _scan_running, _scan_failed
+        _scan_running = False
+        _scan_failed = failed
+        _notify_pickers()
+
     job = Job(work, label="Scanning installed fonts")
-    job.finished.connect(lambda _result: _notify_pickers())
+    job.finished.connect(lambda _result: ended(failed=False))
+    job.failed.connect(lambda _message: ended(failed=True))
+    job.cancelled.connect(lambda: ended(failed=True))
     _scan_job = job
     job.start()
 
 
 def remember_font(ref: FontRef) -> None:
     """Add ``ref`` to the Recent section (call from a commit path, not merely on browsing)."""
-    if ref.kind is FontRefKind.DOCUMENT:
-        return  # not a font choice worth remembering across documents
+    if ref.kind is not FontRefKind.FILE:
+        return  # document fonts belong to one PDF; standard fonts are always listed
     AppSettings().add_recent_font(ref)
     _notify_pickers()
 
@@ -79,6 +94,7 @@ class FontPicker(QComboBox):
         parent: QWidget | None = None,
         document_fonts: Sequence[str] = (),
         sample_text: str = "",
+        standard_fonts: Sequence[tuple[str, str]] = STANDARD_FONTS,
     ) -> None:
         super().__init__(parent)
         self.setAccessibleName("Font")
@@ -87,7 +103,11 @@ class FontPicker(QComboBox):
         line_edit = self.lineEdit()
         if line_edit is not None:
             line_edit.setAccessibleName("Font")
+        global _scan_started
+        if _scan_failed and not _scan_running:
+            _scan_started = False  # a new picker gets one more try at a failed scan
         self._document_fonts = list(document_fonts)
+        self._standard_fonts = tuple(standard_fonts)
         self._sample_text = sample_text
         self._current: FontRef = FontRef.standard("Helvetica")
         self._model = QStandardItemModel(self)
@@ -144,7 +164,7 @@ class FontPicker(QComboBox):
                 self._add_ref(ref.name or ref.path or ref.kind.value, ref)
 
         self._add_header("Standard")
-        for label, name in STANDARD_FONTS:
+        for label, name in self._standard_fonts:
             self._add_ref(label, FontRef.standard(name))
 
         self._add_header("Installed")
@@ -152,7 +172,8 @@ class FontPicker(QComboBox):
         families = catalog.families()
         if not families:
             _ensure_scan_started(catalog)
-            loading = QStandardItem(_LOADING_TEXT)
+            text = _LOADING_TEXT if _scan_running else _FAILED_TEXT if _scan_failed else _NONE_TEXT
+            loading = QStandardItem(text)
             loading.setFlags(
                 loading.flags() & ~Qt.ItemFlag.ItemIsSelectable & ~Qt.ItemFlag.ItemIsEnabled
             )
