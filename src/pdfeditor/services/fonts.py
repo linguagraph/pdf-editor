@@ -123,22 +123,32 @@ def same_font_family(a: str, b: str) -> bool:
     return bool(fa) and _family_key(fa) == _family_key(fb)
 
 
+def _name_key(name: str) -> str:
+    """``name`` without subset prefix, case, punctuation and Adobe's PostScript decorations on
+    each part ("ABCDEF+TimesNewRomanPS-BoldMT" and "Times New Roman Bold" both give
+    "timesnewromanbold"; the family "Calisto MT" gives "calisto")."""
+    parts = re.split(r"[-,]", _SUBSET_PREFIX.sub("", name).lower())
+    return "".join(re.sub(r"(ps)?(mt)?$", "", re.sub(r"[^a-z0-9]", "", p)) for p in parts)
+
+
 def _face_by_full_name(catalog: FontCatalog, font_name: str) -> FontFace | None:
-    """The face whose "family style" is exactly ``font_name``, ignoring case, spaces and
-    hyphens. MuPDF reports a reopened font by its full name ("Georgia Regular", "Segoe UI
-    Semibold"), which suffix stripping alone can't map to the right face. Adobe's PostScript
-    decorations are dropped from each part ("TimesNewRomanPS-BoldMT")."""
-    parts = re.split(r"[-,]", _SUBSET_PREFIX.sub("", font_name).lower())
-    key = "".join(re.sub(r"(ps)?(mt)?$", "", re.sub(r"[^a-z0-9]", "", p)) for p in parts)
+    """The face whose "family style" is ``font_name`` (compared by :func:`_name_key`).
+
+    MuPDF reports a reopened font by its full name ("Georgia Regular", "Segoe UI Semibold"),
+    which suffix stripping alone can't map to the right face. A bare family name means its
+    upright face nearest to regular weight ("Futura" is Book, not Light).
+    """
+    key = _name_key(font_name)
     if not key:
         return None
     for family in catalog.families():
-        family_key = re.sub(r"[^a-z0-9]", "", family.lower())
+        family_key = _name_key(family)
         if not family_key or not key.startswith(family_key):
             continue
+        if key == family_key:
+            return catalog.find(family)
         for face in catalog.faces_of(family):
-            style_key = re.sub(r"[^a-z0-9]", "", face.style.lower())
-            if key == family_key + style_key or (key == family_key and style_key == "regular"):
+            if key == family_key + _name_key(face.style):
                 return face
     return None
 
@@ -163,10 +173,13 @@ def installed_ref_for_font_name(
         if (bold is not None and bold != face_bold) or (
             italic is not None and italic != face.italic
         ):
+            # keep the named weight when only the slant changes (Black -> Black Italic)
+            weight = face.weight if bold is None or bold == face_bold else None
             face = catalog.find(
                 face.family,
                 face_bold if bold is None else bold,
                 face.italic if italic is None else italic,
+                weight,
             )
         if face is not None:
             return FontRef.file(face.path, face.index, face.family) if face.embeddable else None
@@ -377,15 +390,23 @@ class FontCatalog:
     def faces_of(self, family: str) -> list[FontFace]:
         return [face for face in self._faces if face.family == family]
 
-    def find(self, family: str, bold: bool = False, italic: bool = False) -> FontFace | None:
-        """The face of ``family`` that best matches ``bold``/``italic``, or ``None``."""
+    def find(
+        self, family: str, bold: bool = False, italic: bool = False, weight: int | None = None
+    ) -> FontFace | None:
+        """The face of ``family`` that best matches ``bold``/``italic``, or ``None``.
+
+        Among equal matches the weight nearest ``weight`` wins (default 400, or 700 for bold),
+        so a family with Light/Semibold/Black faces gives Regular and Bold, not whichever face
+        was scanned first.
+        """
         candidates = self.faces_of(family)
         if not candidates:
             return None
+        target = weight if weight is not None else 700 if bold else 400
 
-        def score(face: FontFace) -> tuple[int, int]:
+        def score(face: FontFace) -> tuple[int, int, int]:
             is_bold = face.weight >= 600
-            return (int(is_bold != bold), int(face.italic != italic))
+            return (int(is_bold != bold), int(face.italic != italic), abs(face.weight - target))
 
         return min(candidates, key=score)
 

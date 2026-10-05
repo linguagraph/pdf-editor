@@ -413,6 +413,59 @@ def test_installed_ref_for_full_font_name_picks_that_face(fonts_dir: Path) -> No
     assert installed_ref_for_font_name(catalog, "Test Restricted Regular") is None
 
 
+def _multi_weight_catalog() -> FontCatalog:
+    """A family like Segoe UI: several weights per slant, light faces listed first."""
+    from pdfeditor.model.fonts import FontFace
+
+    catalog = FontCatalog()
+    catalog._faces = [
+        FontFace("Multi", style, weight, italic, f"/f/{style.replace(' ', '')}.ttf")
+        for style, weight, italic in [
+            ("ExtraLight", 200, False),
+            ("Light", 300, False),
+            ("Regular", 400, False),
+            ("Semibold", 600, False),
+            ("Black", 900, False),
+            ("Bold", 700, False),
+            ("Light Italic", 300, True),
+            ("Italic", 400, True),
+            ("Black Italic", 900, True),
+            ("Bold Italic", 700, True),
+        ]
+    ]
+    catalog._by_path = {face.path: [face] for face in catalog._faces}
+    return catalog
+
+
+def test_find_prefers_regular_and_bold_weights() -> None:
+    catalog = _multi_weight_catalog()
+    picks = {(b, i): catalog.find("Multi", b, i) for b in (False, True) for i in (False, True)}
+    assert {k: f.style for k, f in picks.items() if f} == {
+        (False, False): "Regular",
+        (True, False): "Bold",
+        (False, True): "Italic",
+        (True, True): "Bold Italic",
+    }
+
+
+def test_full_name_keeps_weights_that_are_not_bold_or_regular() -> None:
+    catalog = _multi_weight_catalog()
+
+    def style_of(name: str, bold: bool | None = None, italic: bool | None = None) -> str:
+        ref = installed_ref_for_font_name(catalog, name, bold, italic)
+        assert ref is not None, name
+        face = catalog.face_for(ref)
+        assert face is not None
+        return face.style
+
+    assert style_of("Multi Black") == "Black"  # the name decides; no span bold flag involved
+    assert style_of("Multi-Semibold") == "Semibold"
+    assert style_of("Multi") == "Regular"
+    assert style_of("Multi Black", italic=True) == "Black Italic"  # only the slant toggled
+    assert style_of("Multi Black", bold=False) == "Regular"  # un-bolding
+    assert style_of("Multi Light", bold=True) == "Bold"
+
+
 def test_pdf_font_names_find_installed_families_without_spaces(tmp_path) -> None:
     from pdfeditor.services.fonts import FontCatalog, installed_ref_for_font_name
 

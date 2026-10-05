@@ -110,10 +110,13 @@ def _initial_font_ref(style: TextStyle) -> tuple[FontRef, str]:
         return style.font_ref, style.font
     if style.font in _STANDARD_NAMES:  # shown as its Standard entry; see text_style()
         return FontRef.standard(style.font), style.font
-    return _document_ref(style.font, style.bold, style.italic), style.font
+    # the name picks the face: the span's bold flag misses Black, Heavy, Semibold...
+    return _document_ref(style.font), style.font
 
 
-def _document_ref(font: str, bold: bool, italic: bool) -> FontRef:
+def _document_ref(font: str, bold: bool | None = None, italic: bool | None = None) -> FontRef:
+    """``font`` from the document, with its installed face as the fallback; ``bold``/``italic``
+    (when not None) override the style the name implies."""
     installed = installed_ref_for_font_name(cached_catalog(), font, bold, italic)
     if installed is None:
         return FontRef.document(font)
@@ -234,8 +237,15 @@ class TextStyleBar(QFrame):
     def _switch_variant(self, _checked: bool) -> None:
         ref = self.font_picker.current_ref()
         if ref.kind is FontRefKind.DOCUMENT and ref.path:  # keep the fallback face in step
+            # override only what the user toggled, so Black Italic stays Black
             bold, italic = self.bold.isChecked(), self.italic.isChecked()
-            self.font_picker.set_variant(_document_ref(ref.name, bold, italic))
+            self.font_picker.set_variant(
+                _document_ref(
+                    ref.name,
+                    bold if bold != self._base.bold else None,
+                    italic if italic != self._base.italic else None,
+                )
+            )
         elif ref.kind is FontRefKind.FILE:
             face = cached_catalog().find(ref.name, self.bold.isChecked(), self.italic.isChecked())
             if face is not None:
@@ -327,17 +337,22 @@ class InlineTextEditor(QPlainTextEdit):
     def _restyle(self) -> None:
         style = self.text_style()
         family: str | None
-        if style.font_ref is not None and style.font_ref.kind is FontRefKind.FILE:
-            family = style.font_ref.name  # a system family Qt can resolve by name
+        ref = style.font_ref
+        face = None
+        if ref is not None and ref.kind is FontRefKind.FILE:
+            family = ref.name  # a system family Qt can resolve by name
+            face = cached_catalog().face_for(ref)
         else:
             family = self._doc_family if style.font == self._doc_font else None
-            if family is None and style.font_ref is not None and style.font_ref.path:
+            if family is None and ref is not None and ref.path:
                 # the embedded program can't be previewed: show its installed counterpart
-                face = cached_catalog().face_for(
-                    FontRef.file(style.font_ref.path, style.font_ref.index)
-                )
+                face = cached_catalog().face_for(FontRef.file(ref.path, ref.index))
                 family = face.family if face is not None else None
-        self.setFont(screen_font(style, self._zoom, family))
+        font = screen_font(style, self._zoom, family)
+        if face is not None:  # the face's own weight: Light, Semibold and Black aren't "bold"
+            font.setWeight(QFont.Weight(min(900, max(100, round(face.weight, -2)))))
+            font.setItalic(face.italic)
+        self.setFont(font)
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Text, QColor.fromRgbF(*style.color.rgb()))
         self.setPalette(palette)
