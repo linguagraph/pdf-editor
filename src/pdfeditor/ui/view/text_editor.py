@@ -61,6 +61,11 @@ def _private_copy(font_data: bytes, family: str) -> bytes:
 
     try:
         font = TTFont(io.BytesIO(font_data))
+        if "cmap" not in font:
+            # MuPDF drops the cmap when it subsets on save (the PDF maps codes to glyphs
+            # itself): Qt couldn't map a single character, and would draw a fallback font
+            font.close()
+            return b""
         names = font["name"]
         for record in list(names.names):
             if record.nameID in (1, 3, 4, 6, 16, 17, 21, 22):
@@ -326,6 +331,12 @@ class InlineTextEditor(QPlainTextEdit):
             family = style.font_ref.name  # a system family Qt can resolve by name
         else:
             family = self._doc_family if style.font == self._doc_font else None
+            if family is None and style.font_ref is not None and style.font_ref.path:
+                # the embedded program can't be previewed: show its installed counterpart
+                face = cached_catalog().face_for(
+                    FontRef.file(style.font_ref.path, style.font_ref.index)
+                )
+                family = face.family if face is not None else None
         self.setFont(screen_font(style, self._zoom, family))
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Text, QColor.fromRgbF(*style.color.rgb()))

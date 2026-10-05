@@ -123,25 +123,65 @@ def same_font_family(a: str, b: str) -> bool:
     return bool(fa) and _family_key(fa) == _family_key(fb)
 
 
+def _face_by_full_name(catalog: FontCatalog, font_name: str) -> FontFace | None:
+    """The face whose "family style" is exactly ``font_name``, ignoring case, spaces and
+    hyphens. MuPDF reports a reopened font by its full name ("Georgia Regular", "Segoe UI
+    Semibold"), which suffix stripping alone can't map to the right face. Adobe's PostScript
+    decorations are dropped from each part ("TimesNewRomanPS-BoldMT")."""
+    parts = re.split(r"[-,]", _SUBSET_PREFIX.sub("", font_name).lower())
+    key = "".join(re.sub(r"(ps)?(mt)?$", "", re.sub(r"[^a-z0-9]", "", p)) for p in parts)
+    if not key:
+        return None
+    for family in catalog.families():
+        family_key = re.sub(r"[^a-z0-9]", "", family.lower())
+        if not family_key or not key.startswith(family_key):
+            continue
+        for face in catalog.faces_of(family):
+            style_key = re.sub(r"[^a-z0-9]", "", face.style.lower())
+            if key == family_key + style_key or (key == family_key and style_key == "regular"):
+                return face
+    return None
+
+
 def installed_ref_for_font_name(
-    catalog: FontCatalog, font_name: str, bold: bool = False, italic: bool = False
+    catalog: FontCatalog,
+    font_name: str,
+    bold: bool | None = None,
+    italic: bool | None = None,
 ) -> FontRef | None:
     """The catalog's best face for ``font_name`` (after normalizing it), or ``None``.
 
     For reusing an installed font after reopening a document: the embedded font program MuPDF
     wrote loses its original name/cmap tables, so a later edit needs to recognize the family
-    from the (possibly subsetted, styled) name alone.
+    from the (possibly subsetted, styled) name alone. ``bold``/``italic`` are the style bar's
+    toggles and override what the name says, so un-bolding a "Georgia Bold" paragraph works;
+    ``None`` takes them from the name.
     """
+    face = _face_by_full_name(catalog, font_name)
+    if face is not None:
+        face_bold = face.weight >= 600
+        if (bold is not None and bold != face_bold) or (
+            italic is not None and italic != face.italic
+        ):
+            face = catalog.find(
+                face.family,
+                face_bold if bold is None else bold,
+                face.italic if italic is None else italic,
+            )
+        if face is not None:
+            return FontRef.file(face.path, face.index, face.family) if face.embeddable else None
     family, name_bold, name_italic = normalize_font_name(font_name)
     if not family:
         return None
-    face = catalog.find(family, bold or name_bold, italic or name_italic)
+    bold = name_bold if bold is None else bold
+    italic = name_italic if italic is None else italic
+    face = catalog.find(family, bold, italic)
     if face is None:
         # PDF names drop the spaces ("TimesNewRomanPSMT", "SegoeUI"): compare loosely
         wanted = _family_key(family)
         match = next((f for f in catalog.families() if _family_key(f) == wanted), None)
         if match is not None:
-            face = catalog.find(match, bold or name_bold, italic or name_italic)
+            face = catalog.find(match, bold, italic)
     if face is None or not face.embeddable:
         return None
     return FontRef.file(face.path, face.index, face.family)

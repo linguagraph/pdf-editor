@@ -391,6 +391,28 @@ def test_installed_ref_for_font_name_restricted_returns_none(fonts_dir: Path) ->
     assert installed_ref_for_font_name(catalog, "Test Restricted") is None
 
 
+def test_installed_ref_for_full_font_name_picks_that_face(fonts_dir: Path) -> None:
+    # MuPDF reports a reopened font by its full name: "Regular" isn't part of the family
+    catalog = FontCatalog()
+    catalog.scan(dirs=[fonts_dir])
+    for name, file in [
+        ("Test Sans Regular", "TestSans-Regular.ttf"),
+        ("ABCDEF+Test Sans Bold Italic", "TestSans-BoldItalic.ttf"),
+        ("TestSansPS-BoldMT", "TestSans-Bold.ttf"),
+    ]:
+        ref = installed_ref_for_font_name(catalog, name)
+        assert ref is not None and Path(ref.path).name == file, name
+        assert ref.name == "Test Sans"
+    # the style bar's bold toggle still switches face
+    bold = installed_ref_for_font_name(catalog, "Test Sans Regular", bold=True)
+    assert bold is not None and Path(bold.path).name == "TestSans-Bold.ttf"
+    # ... and un-bolding a bold paragraph goes back to the regular face
+    for name in ("Test Sans Bold", "ABCDEF+TestSans-Bold"):
+        plain = installed_ref_for_font_name(catalog, name, bold=False, italic=False)
+        assert plain is not None and Path(plain.path).name == "TestSans-Regular.ttf", name
+    assert installed_ref_for_font_name(catalog, "Test Restricted Regular") is None
+
+
 def test_pdf_font_names_find_installed_families_without_spaces(tmp_path) -> None:
     from pdfeditor.services.fonts import FontCatalog, installed_ref_for_font_name
 
