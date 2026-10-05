@@ -7,8 +7,10 @@ import shutil
 from pathlib import Path
 
 import pikepdf
+import pypdfium2 as pdfium
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontDatabase, QFontInfo
 
 from pdfeditor.model.fonts import FontRef, FontRefKind
 from pdfeditor.model.objects import ObjectType, TextStyle
@@ -205,6 +207,75 @@ def test_commit_with_installed_font_embeds_it(
 
     recents = AppSettings().recent_fonts
     assert any(r.name == "Test Sans" for r in recents)
+
+
+def test_reediting_after_reopen_keeps_the_installed_font(
+    qtbot, window: MainWindow, view, fixtures_dir, tmp_path: Path, font_catalog: FontCatalog
+):
+    """The saved subset has no cmap, so neither Qt nor the engine can use it for new text:
+    a re-edit must map the reopened name back to the installed face, not fall back to a
+    base-14 font or preview in a fallback font."""
+
+    def edit(v, text: str, ref: FontRef | None = None) -> InlineTextEditor:
+        obj = next(o for o in v.page_objects(0) if o.type is ObjectType.TEXT)
+        center = v.mapFromScene(v.page_point_to_scene(0, obj.bbox.center))
+        qtbot.mouseDClick(v.viewport(), Qt.MouseButton.LeftButton, pos=center)
+        editor = v.viewport().findChild(InlineTextEditor)
+        assert editor is not None
+        if ref is not None:
+            editor.style_bar.font_picker.set_selection(ref, ref.name)
+        editor.setPlainText(text)
+        return editor
+
+    window.set_tool("edit")
+    regular = fixtures_dir / "fonts" / "TestSans-Regular.ttf"
+    edit(view, "ABC abc", FontRef.file(str(regular), 0, "Test Sans")).commit()
+    qtbot.waitUntil(lambda: view.viewport().findChild(InlineTextEditor) is None, timeout=2000)
+    saved = tmp_path / "saved.pdf"
+    view.session.save(saved)
+    view.session.undo_stack.set_clean()
+
+    reopened = window.open_path(saved)
+    reopened.set_zoom(1.0)
+    reopened.go_to_page(0, record=False)
+    window.set_tool("edit")
+    # "installed" for Qt too, so the preview can resolve it by family name
+    font_id = QFontDatabase.addApplicationFont(str(regular))
+    assert font_id >= 0
+    try:
+        editor = edit(reopened, "abc ABC")
+        ref = editor.style_bar.font_picker.current_ref()
+        assert ref.kind is FontRefKind.DOCUMENT and Path(ref.path) == regular
+        assert QFontInfo(editor.font()).family() == "Test Sans"  # not a fallback font
+        editor.commit()
+        qtbot.waitUntil(
+            lambda: reopened.viewport().findChild(InlineTextEditor) is None, timeout=2000
+        )
+    finally:
+        QFontDatabase.removeApplicationFont(font_id)
+
+    obj = next(o for o in reopened.page_objects(0) if o.type is ObjectType.TEXT)
+    assert obj.text == "abc ABC"
+    assert obj.style is not None and "test sans" in obj.style.font.lower()
+
+    # round trip: the re-edited file keeps the font and opens in independent implementations
+    again = tmp_path / "again.pdf"
+    reopened.session.save(again)
+    reopened.session.undo_stack.set_clean()
+    with pikepdf.open(again) as pdf:
+        names = {
+            str(f.get("/BaseFont", "")) for f in pdf.pages[0].Resources.get("/Font", {}).values()
+        }
+    assert any("TestSans" in n or "Test Sans" in n for n in names), names
+    pdfium_doc = pdfium.PdfDocument(again)
+    try:
+        assert pdfium_doc[0].render(scale=0.5).to_pil().size[0] > 0
+    finally:
+        pdfium_doc.close()
+    final = window.open_path(again)
+    text = next(o for o in final.page_objects(0) if o.type is ObjectType.TEXT)
+    assert text.text == "abc ABC" and text.style is not None
+    assert "test sans" in text.style.font.lower()
 
 
 # -- header/footer dialog round-trip -------------------------------------------------------------

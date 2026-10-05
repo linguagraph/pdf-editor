@@ -123,25 +123,78 @@ def same_font_family(a: str, b: str) -> bool:
     return bool(fa) and _family_key(fa) == _family_key(fb)
 
 
+def _name_key(name: str) -> str:
+    """``name`` without subset prefix, case, punctuation and Adobe's PostScript decorations on
+    each part ("ABCDEF+TimesNewRomanPS-BoldMT" and "Times New Roman Bold" both give
+    "timesnewromanbold"; the family "Calisto MT" gives "calisto")."""
+    parts = re.split(r"[-,]", _SUBSET_PREFIX.sub("", name).lower())
+    return "".join(re.sub(r"(ps)?(mt)?$", "", re.sub(r"[^a-z0-9]", "", p)) for p in parts)
+
+
+def _face_by_full_name(catalog: FontCatalog, font_name: str) -> FontFace | None:
+    """The face whose "family style" is ``font_name`` (compared by :func:`_name_key`).
+
+    MuPDF reports a reopened font by its full name ("Georgia Regular", "Segoe UI Semibold"),
+    which suffix stripping alone can't map to the right face. A bare family name means its
+    upright face nearest to regular weight ("Futura" is Book, not Light).
+    """
+    key = _name_key(font_name)
+    if not key:
+        return None
+    for family in catalog.families():
+        family_key = _name_key(family)
+        if not family_key or not key.startswith(family_key):
+            continue
+        if key == family_key:
+            return catalog.find(family)
+        for face in catalog.faces_of(family):
+            if key == family_key + _name_key(face.style):
+                return face
+    return None
+
+
 def installed_ref_for_font_name(
-    catalog: FontCatalog, font_name: str, bold: bool = False, italic: bool = False
+    catalog: FontCatalog,
+    font_name: str,
+    bold: bool | None = None,
+    italic: bool | None = None,
 ) -> FontRef | None:
     """The catalog's best face for ``font_name`` (after normalizing it), or ``None``.
 
     For reusing an installed font after reopening a document: the embedded font program MuPDF
     wrote loses its original name/cmap tables, so a later edit needs to recognize the family
-    from the (possibly subsetted, styled) name alone.
+    from the (possibly subsetted, styled) name alone. ``bold``/``italic`` are the style bar's
+    toggles and override what the name says, so un-bolding a "Georgia Bold" paragraph works;
+    ``None`` takes them from the name.
     """
+    face = _face_by_full_name(catalog, font_name)
+    if face is not None:
+        face_bold = face.weight >= 600
+        if (bold is not None and bold != face_bold) or (
+            italic is not None and italic != face.italic
+        ):
+            # keep the named weight when only the slant changes (Black -> Black Italic)
+            weight = face.weight if bold is None or bold == face_bold else None
+            face = catalog.find(
+                face.family,
+                face_bold if bold is None else bold,
+                face.italic if italic is None else italic,
+                weight,
+            )
+        if face is not None:
+            return FontRef.file(face.path, face.index, face.family) if face.embeddable else None
     family, name_bold, name_italic = normalize_font_name(font_name)
     if not family:
         return None
-    face = catalog.find(family, bold or name_bold, italic or name_italic)
+    bold = name_bold if bold is None else bold
+    italic = name_italic if italic is None else italic
+    face = catalog.find(family, bold, italic)
     if face is None:
         # PDF names drop the spaces ("TimesNewRomanPSMT", "SegoeUI"): compare loosely
         wanted = _family_key(family)
         match = next((f for f in catalog.families() if _family_key(f) == wanted), None)
         if match is not None:
-            face = catalog.find(match, bold or name_bold, italic or name_italic)
+            face = catalog.find(match, bold, italic)
     if face is None or not face.embeddable:
         return None
     return FontRef.file(face.path, face.index, face.family)
@@ -337,15 +390,23 @@ class FontCatalog:
     def faces_of(self, family: str) -> list[FontFace]:
         return [face for face in self._faces if face.family == family]
 
-    def find(self, family: str, bold: bool = False, italic: bool = False) -> FontFace | None:
-        """The face of ``family`` that best matches ``bold``/``italic``, or ``None``."""
+    def find(
+        self, family: str, bold: bool = False, italic: bool = False, weight: int | None = None
+    ) -> FontFace | None:
+        """The face of ``family`` that best matches ``bold``/``italic``, or ``None``.
+
+        Among equal matches the weight nearest ``weight`` wins (default 400, or 700 for bold),
+        so a family with Light/Semibold/Black faces gives Regular and Bold, not whichever face
+        was scanned first.
+        """
         candidates = self.faces_of(family)
         if not candidates:
             return None
+        target = weight if weight is not None else 700 if bold else 400
 
-        def score(face: FontFace) -> tuple[int, int]:
+        def score(face: FontFace) -> tuple[int, int, int]:
             is_bold = face.weight >= 600
-            return (int(is_bold != bold), int(face.italic != italic))
+            return (int(is_bold != bold), int(face.italic != italic), abs(face.weight - target))
 
         return min(candidates, key=score)
 
