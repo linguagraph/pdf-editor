@@ -10,8 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0-or-later" }
 dependencies = [
-    "pymupdf>=1.24",
-    "PySide6>=6.6",
+    # Capped until the PyMuPDF 2.0 and PySide6 6.12 changes are adopted: both break tests
+    # (AcroForm page copy, table export, a native crash in the 1000-page scroll benchmark).
+    "pymupdf>=1.24,<2",
+    "PySide6>=6.6,<6.12",
     "pikepdf>=8.0",
     "fonttools>=4.47",
     "Pillow>=10.0",
