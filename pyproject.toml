@@ -45,7 +45,7 @@ packages = ["src/pdfeditor"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = [".claude"]  # agent worktrees live here
+extend-exclude = [".claude", "src/pdfeditor/data"]  # agent worktrees; bundled data
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
@@ -59,6 +59,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.11"
 mypy_path = "src"
 packages = ["pdfeditor"]
+exclude = ["src/pdfeditor/data/"]  # bundled data (the branding pack ships a verifier script)
 ignore_missing_imports = true
 warn_unused_ignores = true
 

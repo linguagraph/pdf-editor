@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor import APP_DISPLAY_NAME
 from pdfeditor.core import engine_lock
 from pdfeditor.core.autosave import Autosaver, RecoveryStore
 from pdfeditor.core.commands import (
@@ -214,7 +215,7 @@ PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("pdfeditor")
+        self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1280, 860)
         self.setAcceptDrops(True)
         self.settings = QSettings()
@@ -548,7 +549,7 @@ class MainWindow(QMainWindow):
             "Previous Pane", lambda: self.cycle_focus(-1), "Shift+F6", None, False
         )
         self.act_prev_pane.setObjectName("previous-pane")
-        self.act_about = a("&About pdfeditor", self.show_about, None, None, False)
+        self.act_about = a("&About Elanero", self.show_about, None, None, False)
         # Home/End belong to the view (it handles them itself); keep them out of window shortcuts.
         self.act_first.setShortcut(QKeySequence())
         self.act_last.setShortcut(QKeySequence())
@@ -1200,7 +1201,8 @@ class MainWindow(QMainWindow):
         self.edit.update_state(view)
         if view is not None:
             dirty = view.session.is_dirty
-            self.setWindowTitle(f"{view.session.display_name}{'*' if dirty else ''} — pdfeditor")
+            name = f"{view.session.display_name}{'*' if dirty else ''}"
+            self.setWindowTitle(f"{name} — {APP_DISPLAY_NAME}")
             stack = view.session.undo_stack
             self.act_undo.setEnabled(stack.can_undo)
             self.act_undo.setText(f"&Undo {stack.undo_label}".rstrip())
@@ -1220,9 +1222,9 @@ class MainWindow(QMainWindow):
             self.act_prev.setEnabled(view.current_page > 0)
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
         elif combining:
-            self.setWindowTitle("Combine Files — pdfeditor")
+            self.setWindowTitle(f"Combine Files — {APP_DISPLAY_NAME}")
         else:
-            self.setWindowTitle("pdfeditor")
+            self.setWindowTitle(APP_DISPLAY_NAME)
         self._sync_read_only(view)
         self.toasts.refresh()
 

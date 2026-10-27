@@ -1,0 +1,318 @@
+{
+  "source_archive": "Elanero_Final_Assets.zip",
+  "source_archive_sha256": "1aaaf7eb6725b2a306cc0b1ad9a9f32349738f4612002bac1ae4c65d31953211",
+  "original_file_count": 21,
+  "files": [
+    {
+      "path": "README.txt",
+      "bytes": 1256,
+      "sha256": "24061b642c30e891efbed9a4a729005b6fc9f6fe8626aa3e8721ea15696747a1"
+    },
+    {
+      "path": "icons/platform/elanero.icns",
+      "bytes": 1366864,
+      "sha256": "72619b67752b753dfe964c37b573239e6d136e68cfa10ad9af7b743f7e50d1f1",
+      "format": "ICNS",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "representations": [
+        [
+          512,
+          512,
+          2
+        ],
+        [
+          512,
+          512,
+          1
+        ],
+        [
+          256,
+          256,
+          2
+        ],
+        [
+          256,
+          256,
+          1
+        ],
+        [
+          128,
+          128,
+          2
+        ],
+        [
+          128,
+          128,
+          1
+        ],
+        [
+          32,
+          32,
+          2
+        ],
+        [
+          16,
+          16,
+          2
+        ]
+      ]
+    },
+    {
+      "path": "icons/platform/favicon.ico",
+      "bytes": 8642,
+      "sha256": "4963a936e625090b968e9a6fc3055428a264045239e893f3e859f938f9131577",
+      "format": "ICO",
+      "dimensions": [
+        48,
+        48
+      ],
+      "mode": "RGBA",
+      "representations": [
+        [
+          16,
+          16
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          48,
+          48
+        ]
+      ]
+    },
+    {
+      "path": "icons/platform/elanero.ico",
+      "bytes": 127916,
+      "sha256": "c17416340f4de4b17d175bc4cc9f64c921118e8ea97b73e8cec5c91788a8c383",
+      "format": "ICO",
+      "dimensions": [
+        256,
+        256
+      ],
+      "mode": "RGBA",
+      "representations": [
+        [
+          16,
+          16
+        ],
+        [
+          24,
+          24
+        ],
+        [
+          32,
+          32
+        ],
+        [
+          48,
+          48
+        ],
+        [
+          64,
+          64
+        ],
+        [
+          128,
+          128
+        ],
+        [
+          256,
+          256
+        ]
+      ]
+    },
+    {
+      "path": "icons/png/elanero-32.png",
+      "bytes": 2662,
+      "sha256": "1758c9a5ac89fceddea762a2f7ae976aafbedd096127f7bbf869584a5ccdc447",
+      "format": "PNG",
+      "dimensions": [
+        32,
+        32
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-16.png",
+      "bytes": 882,
+      "sha256": "5937d68ae1e919030eac1cc663f6f4d1ab657886a98347c2cec4694cd3b51fb0",
+      "format": "PNG",
+      "dimensions": [
+        16,
+        16
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-48.png",
+      "bytes": 5044,
+      "sha256": "bd45df7a64dc450ec651d8187c0b654824b5c3d37016b81ca484c8d92d62af42",
+      "format": "PNG",
+      "dimensions": [
+        48,
+        48
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-24.png",
+      "bytes": 1673,
+      "sha256": "096276c4ecd599a6f5d60a8b3af90a84058791a7c5359868f1bc0203e343a357",
+      "format": "PNG",
+      "dimensions": [
+        24,
+        24
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-96.png",
+      "bytes": 15316,
+      "sha256": "7b2338fcbb54769a0760f3a7e3d12cd23db023ce18082b0c5687f3afaafdf870",
+      "format": "PNG",
+      "dimensions": [
+        96,
+        96
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-128.png",
+      "bytes": 25043,
+      "sha256": "a2d89b5354987416647d5a9fa7e89624b929452ef4b918725e29dfa226809516",
+      "format": "PNG",
+      "dimensions": [
+        128,
+        128
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-512.png",
+      "bytes": 284371,
+      "sha256": "1a976e010f6b7a2447e583091db97baaa16cbda47b4f4c570d1c2513c9882e66",
+      "format": "PNG",
+      "dimensions": [
+        512,
+        512
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-256.png",
+      "bytes": 84536,
+      "sha256": "e5ebfd689cfede25b4eea10d9ec829165377acb2c5fd1e694d456da627983420",
+      "format": "PNG",
+      "dimensions": [
+        256,
+        256
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-1024.png",
+      "bytes": 630087,
+      "sha256": "c6b0e76d23e77a29a707f293e83b6b99c04d466e11ab041ddaccc2daea715e16",
+      "format": "PNG",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "icons/png/elanero-64.png",
+      "bytes": 7958,
+      "sha256": "c6498c835b078fa750e5946e7591f141415869e6cdbda952ecd1b8a18ce8a5f4",
+      "format": "PNG",
+      "dimensions": [
+        64,
+        64
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "source/elanero-master-1024.png",
+      "bytes": 630087,
+      "sha256": "c6b0e76d23e77a29a707f293e83b6b99c04d466e11ab041ddaccc2daea715e16",
+      "format": "PNG",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "source/elanero-master.svg",
+      "bytes": 840367,
+      "sha256": "ddff1abc6a6a8f9666e40f3870987af6521d439d370fbed632239cd48fc553b2",
+      "svg_attributes": {
+        "width": "1024",
+        "height": "1024",
+        "viewBox": "0 0 1024 1024"
+      },
+      "embedded_png_matches_master": true
+    },
+    {
+      "path": "branding/elanero-wordmark.png",
+      "bytes": 117957,
+      "sha256": "643fdddd26ed96a75f20a98e048a926ddd960aad0d8545a85c2bf0287cf05e2f",
+      "format": "PNG",
+      "dimensions": [
+        1200,
+        360
+      ],
+      "mode": "RGBA"
+    },
+    {
+      "path": "splash/svg/elanero-splash-dark.svg",
+      "bytes": 841011,
+      "sha256": "469748cca01ca124105e6681cfa26f7760e560e1e74e04b6f41fa110a4f31479",
+      "svg_attributes": {
+        "width": "1920",
+        "height": "1200",
+        "viewBox": "0 0 1920 1200"
+      },
+      "embedded_png_matches_master": true
+    },
+    {
+      "path": "splash/svg/elanero-splash-light.svg",
+      "bytes": 841011,
+      "sha256": "284e283976dafa2c97b524d2b136ba3bf003ece9b52bc9627486a3f38afc9c48",
+      "svg_attributes": {
+        "width": "1920",
+        "height": "1200",
+        "viewBox": "0 0 1920 1200"
+      },
+      "embedded_png_matches_master": true
+    },
+    {
+      "path": "splash/png/elanero-splash-dark-1920x1200.png",
+      "bytes": 107654,
+      "sha256": "f141772a1585d39964c0bf45371c13f713b5c017feb2894530cf39df3698664a",
+      "format": "PNG",
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "mode": "RGB"
+    },
+    {
+      "path": "splash/png/elanero-splash-light-1920x1200.png",
+      "bytes": 105056,
+      "sha256": "d7327642099f7a7ae5e0ce043ffbb92d1907b47f63e2ae79068954b98b178383",
+      "format": "PNG",
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "mode": "RGB"
+    }
+  ]
+}

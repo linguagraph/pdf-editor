@@ -1,17 +1,24 @@
-"""Help ▸ About: version, AGPL notice with the source offer, third-party licenses."""
+"""Help ▸ About: the Elanero artwork, version, AGPL notice with the source offer, licenses."""
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QLabel,
     QPlainTextEdit,
     QTabWidget,
     QWidget,
 )
 
-from pdfeditor import SOURCE_URL, __version__
+from pdfeditor import APP_DISPLAY_NAME, SOURCE_URL, __version__
 from pdfeditor.licenses import about_text, license_text, notices
+from pdfeditor.ui.branding import app_icon, wordmark
 from pdfeditor.ui.dialogs.base import FormDialog
+from pdfeditor.ui.theme import theme_manager
+
+WORDMARK_HEIGHT = 72
+ICON_SIZE = 64
 
 
 def _text(content: str, name: str) -> QPlainTextEdit:
@@ -24,14 +31,29 @@ def _text(content: str, name: str) -> QPlainTextEdit:
 class AboutDialog(FormDialog):
     def __init__(self, engine_version: str = "", parent: QWidget | None = None) -> None:
         super().__init__(
-            f"pdfeditor {__version__}",
-            "An open-source PDF editor." + (f" {engine_version}" if engine_version else ""),
+            APP_DISPLAY_NAME,
+            f"Version {__version__}. An open-source PDF editor."
+            + (f" {engine_version}" if engine_version else ""),
             parent,
-            window_title="About pdfeditor",
+            window_title="About Elanero",
             primary=None,
             cancel="Close",
         )
-        self.resize(640, 520)
+        self.resize(640, 560)
+        # The wordmark's lettering is deep teal for light backgrounds and mustn't be recolored,
+        # so dark and high-contrast themes show the icon alone (the title names the app).
+        self.brand = QLabel(self)
+        self.brand.setAccessibleName("Elanero logo")
+        manager = theme_manager()
+        ratio = self.devicePixelRatioF()
+        if manager.scheme == "light" and not manager.high_contrast_applied:
+            self.brand.setPixmap(wordmark(WORDMARK_HEIGHT, ratio))
+        else:
+            self.brand.setPixmap(app_icon().pixmap(ICON_SIZE, ICON_SIZE))
+        self.brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        outer = self.layout()
+        assert isinstance(outer, QBoxLayout)
+        outer.insertWidget(0, self.brand)
         head = QLabel(f'Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>', self)
         head.setOpenExternalLinks(True)
         head.setWordWrap(True)

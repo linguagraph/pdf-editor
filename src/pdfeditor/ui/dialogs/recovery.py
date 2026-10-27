@@ -23,7 +23,7 @@ class RecoveryDialog(FormDialog):
     def __init__(self, entries: list[RecoveryEntry], parent: QWidget | None = None) -> None:
         super().__init__(
             "Recover Unsaved Documents",
-            "pdfeditor closed unexpectedly. These documents had unsaved changes. "
+            "Elanero closed unexpectedly. These documents had unsaved changes. "
             "Select the ones to recover:",
             parent,
             primary="Recover",

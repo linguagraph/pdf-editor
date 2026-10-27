@@ -336,3 +336,47 @@ def test_primary_button_validates_before_accepting(
     printing.range_edit.setText("1")
     printing.print_button.click()
     assert calls == ["warned", "run"] and printing.result() == QDialog.DialogCode.Accepted
+
+
+def test_preferences_registers_as_pdf_editor(qtbot, settings: AppSettings, monkeypatch) -> None:
+    from pdfeditor.services import file_association as fa
+
+    state = {"registered": False, "default": False}
+    opened: list[str] = []
+    monkeypatch.setattr(fa, "is_supported", lambda: True)
+    monkeypatch.setattr(fa, "is_registered", lambda: state["registered"])
+    monkeypatch.setattr(fa, "is_default", lambda: state["default"])
+    monkeypatch.setattr(fa, "register", lambda: state.update(registered=True))
+    monkeypatch.setattr(fa, "unregister", lambda: state.update(registered=False))
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.preferences.QDesktopServices.openUrl",
+        lambda url: opened.append(bytes(url.toEncoded().data()).decode()),
+    )
+    d = PreferencesDialog(settings)
+    qtbot.addWidget(d)
+    d.show()
+    assert d.association_row.isVisible()
+    assert d.register_button.text() == "Register as PDF Editor"
+    assert not d.default_button.isEnabled()
+    d.register_button.click()  # applies at once, without OK
+    assert state["registered"] and d.register_button.text() == "Remove PDF Registration"
+    assert d.default_button.isEnabled() and "default app" in d.pdf_status.text()
+    d.default_button.click()
+    assert opened == [fa.default_apps_uri()]
+    state["default"] = True
+    d._sync_association()
+    assert "its icon" in d.pdf_status.text()
+    d.register_button.click()
+    assert not state["registered"] and d.register_button.text() == "Register as PDF Editor"
+
+
+def test_preferences_hides_pdf_registration_off_windows(
+    qtbot, settings: AppSettings, monkeypatch
+) -> None:
+    from pdfeditor.services import file_association as fa
+
+    monkeypatch.setattr(fa, "is_supported", lambda: False)
+    d = PreferencesDialog(settings)
+    qtbot.addWidget(d)
+    d.show()
+    assert not d.association_row.isVisible()

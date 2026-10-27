@@ -402,7 +402,7 @@ class StartPage(QWidget):
         outer.addWidget(column, 100)
         outer.addStretch(1)
 
-        title = QLabel(self.tr("Welcome to pdfeditor"), column)
+        title = QLabel(self.tr("Welcome to Elanero"), column)
         title.setObjectName("StartTitle")
         title.setWordWrap(True)
         subtitle = QLabel(self.tr("Open a PDF to start, or pick up where you left off."), column)

@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.pdf binary
 *.png binary
+# The Elanero branding pack is kept byte for byte (its SHA256SUMS.txt covers every file).
+src/pdfeditor/data/branding/** -text

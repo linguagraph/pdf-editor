@@ -30,6 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "packaging" / "pdfeditor.spec"
 ISS = ROOT / "packaging" / "installer.iss"
+BRAND = ROOT / "src" / "pdfeditor" / "data" / "branding" / "elanero"
+ICON = BRAND / "icons" / "platform" / "elanero.ico"  # exe and installer icon
 DIST = ROOT / "dist"
 GENERATED = ROOT / "build" / "generated"
 SIZE_BUDGET_MB = 150
@@ -211,6 +213,7 @@ def installer_script(exe: Path, out_dir: Path) -> Path:
     text = ISS.read_text(encoding="utf-8")
     text = text.replace("@VERSION@", version()).replace("@EXE@", str(exe))
     text = text.replace("@OUTDIR@", str(out_dir)).replace("@LICENSE@", str(ROOT / "LICENSE"))
+    text = text.replace("@ICON@", str(ICON))
     GENERATED.mkdir(parents=True, exist_ok=True)
     script = GENERATED / "installer.iss"
     script.write_text(text, encoding="utf-8")
