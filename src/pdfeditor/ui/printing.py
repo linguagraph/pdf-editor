@@ -7,9 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF
-from PySide6.QtGui import QPageLayout, QPainter
-from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtCore import QByteArray, QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QImage, QPageLayout, QPainter
+from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 from PySide6.QtSvg import QSvgRenderer
 
 from pdfeditor.core.jobs import CancelToken
@@ -42,6 +42,8 @@ class PrintOptions:
     annotations: bool = True
     grayscale: bool = False
     as_image: bool = False  # force the raster path (Acrobat's "Print as image")
+    copies: int = 1
+    collate: bool = True  # 1,2,1,2 rather than 1,1,2,2
 
 
 def qt_friendly_svg(svg: str) -> str:
@@ -71,77 +73,85 @@ def vector_svg(svg: str) -> QSvgRenderer | None:
     return renderer if renderer.isValid() else None
 
 
-def print_pages(
-    session: DocumentSession,
-    printer: QPrinter,
-    options: PrintOptions,
-    token: CancelToken | None = None,
-    progress: Callable[[int, int], None] | None = None,
-) -> int:
-    """Paint ``options.pages`` onto ``printer``; returns the number of pages printed.
+@dataclass(frozen=True, slots=True)
+class Placement:
+    rotation: int  # 0 or 90 degrees
+    factor: float  # page size multiplier (1.0 = actual size)
 
-    Runs on the calling (GUI) thread: printer painting must not move to a worker thread on all
-    platforms. Callers keep the UI alive through ``progress``.
+
+def place_page(
+    page_w: float, page_h: float, area_w_pt: float, area_h_pt: float, options: PrintOptions
+) -> Placement:
+    """How a page of ``page_w`` x ``page_h`` points sits on a printable area of
+    ``area_w_pt`` x ``area_h_pt`` points. Shared by printing and the preview, so they agree."""
+    paper_landscape = area_w_pt > area_h_pt
+    rotation = 90 if options.auto_rotate and (page_w > page_h) != paper_landscape else 0
+    rw, rh = rotated_size(page_w, page_h, rotation)
+    fit = min(area_w_pt / rw, area_h_pt / rh)
+    factor = {Scaling.FIT: fit, Scaling.ACTUAL: 1.0, Scaling.SHRINK: min(1.0, fit)}[options.scaling]
+    return Placement(rotation, factor)
+
+
+def sheet_sequence(count: int, copies: int = 1, collate: bool = True) -> list[int]:
+    """Positions (into ``options.pages``) of the sheets to print, in order, for ``copies``
+    copies: 0,1,0,1 collated, 0,0,1,1 otherwise."""
+    copies = max(1, copies)
+    if collate:
+        return list(range(count)) * copies
+    return [n for n in range(count) for _ in range(copies)]
+
+
+def paint_sheet(
+    painter: QPainter,
+    session: DocumentSession,
+    index: int,
+    options: PrintOptions,
+    area: QSizeF,
+    resolution: int,
+) -> None:
+    """Paint document page ``index`` onto the printable ``area`` (device pixels at
+    ``resolution`` dpi) whose top-left is the painter's origin.
+
+    One routine serves the printer and the preview, so the preview shows what will print.
+    The engine is touched only under the session lock and nothing engine-side is kept.
     """
-    if not options.pages:
-        return 0
-    dpi = min(printer.resolution(), MAX_PRINT_DPI)
-    device_per_render_px = printer.resolution() / dpi
-    painter = QPainter()
-    if not painter.begin(printer):
-        raise RuntimeError("could not start printing")
-    printed = 0
+    dpi = min(resolution, MAX_PRINT_DPI)
+    device_per_render_px = resolution / dpi
     vector_ok = not (options.as_image or options.grayscale or not options.annotations)
+    with session.lock:
+        page = session.document.page(index)
+        page_rect = page.rect
+        w, h = page_rect.width, page_rect.height
+        placement = place_page(
+            w, h, area.width() / resolution * 72, area.height() / resolution * 72, options
+        )
+        svg = page.to_svg() if vector_ok else ""
+        renderer = vector_svg(svg) if svg else None
+        result = (
+            page.render(
+                RenderRequest(
+                    matrix=view_matrix(page_rect, placement.rotation, dpi / 72 * placement.factor),
+                    color=ColorMode.GRAY if options.grayscale else ColorMode.RGB,
+                    annotations=options.annotations,
+                )
+            )
+            if renderer is None
+            else None
+        )
+    painter.save()
     try:
-        area = printer.pageLayout().paintRectPixels(printer.resolution())
-        paper_landscape = area.width() > area.height()
-        for n, index in enumerate(options.pages):
-            if token is not None and token.cancelled:
-                break
-            if n:
-                printer.newPage()
-            with session.lock:
-                page = session.document.page(index)
-                page_rect = page.rect
-                w, h = page_rect.width, page_rect.height
-                rotation = 90 if options.auto_rotate and (w > h) != paper_landscape else 0
-                rw, rh = rotated_size(w, h, rotation)
-                fit = min(
-                    area.width() / (rw / 72 * printer.resolution()),
-                    area.height() / (rh / 72 * printer.resolution()),
-                )
-                factor = {
-                    Scaling.FIT: fit,
-                    Scaling.ACTUAL: 1.0,
-                    Scaling.SHRINK: min(1.0, fit),
-                }[options.scaling]
-                scale = dpi / 72 * factor  # render pixels per point
-                svg = page.to_svg() if vector_ok else ""
-                renderer = vector_svg(svg) if svg else None
-                result = (
-                    page.render(
-                        RenderRequest(
-                            matrix=view_matrix(page_rect, rotation, scale),
-                            color=ColorMode.GRAY if options.grayscale else ColorMode.RGB,
-                            annotations=options.annotations,
-                        )
-                    )
-                    if renderer is None
-                    else None
-                )
-            if renderer is not None:
-                # device pixels for the page at this scaling, centred like the raster path
-                k = printer.resolution() / 72 * factor
-                pw, ph = w * k, h * k
-                painter.save()
-                painter.translate(QPointF(area.width() / 2, area.height() / 2))
-                painter.rotate(rotation)
-                renderer.render(painter, QRectF(-pw / 2, -ph / 2, pw, ph))
-                painter.restore()
-                printed += 1
-                if progress is not None:
-                    progress(n + 1, len(options.pages))
-                continue
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        # pages larger than the printable area are cut off there, never spilling into margins
+        painter.setClipRect(QRectF(0, 0, area.width(), area.height()))
+        if renderer is not None:
+            # device pixels for the page at this scaling, centred like the raster path
+            k = resolution / 72 * placement.factor
+            pw, ph = w * k, h * k
+            painter.translate(QPointF(area.width() / 2, area.height() / 2))
+            painter.rotate(placement.rotation)
+            renderer.render(painter, QRectF(-pw / 2, -ph / 2, pw, ph))
+        else:
             assert result is not None
             image = to_qimage(result)
             target_w = image.width() * device_per_render_px
@@ -149,12 +159,106 @@ def print_pages(
             x = (area.width() - target_w) / 2
             y = (area.height() - target_h) / 2
             painter.drawImage(QRectF(x, y, target_w, target_h), image)
+    finally:
+        painter.restore()
+
+
+def print_pages(
+    session: DocumentSession,
+    printer: QPrinter,
+    options: PrintOptions,
+    token: CancelToken | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> int:
+    """Paint ``options.pages`` onto ``printer``; returns the number of sheets printed.
+
+    Runs on the calling (GUI) thread: printer painting must not move to a worker thread on all
+    platforms. Callers keep the UI alive through ``progress``.
+    """
+    if not options.pages:
+        return 0
+    copies = max(1, options.copies)
+    if printer.supportsMultipleCopies():
+        printer.setCopyCount(copies)
+        printer.setCollateCopies(options.collate)
+        sequence = list(range(len(options.pages)))
+    else:  # PDF output has no copies: print them one after another
+        sequence = sheet_sequence(len(options.pages), copies, options.collate)
+    resolution = printer.resolution()
+    painter = QPainter()
+    if not painter.begin(printer):
+        raise RuntimeError("could not start printing")
+    printed = 0
+    try:
+        rect = printer.pageLayout().paintRectPixels(resolution)
+        area = QSizeF(rect.width(), rect.height())
+        for n, position in enumerate(sequence):
+            if token is not None and token.cancelled:
+                break
+            if n:
+                printer.newPage()
+            paint_sheet(painter, session, options.pages[position], options, area, resolution)
             printed += 1
             if progress is not None:
-                progress(n + 1, len(options.pages))
+                progress(n + 1, len(sequence))
     finally:
         painter.end()
     return printed
+
+
+def render_sheet_image(
+    session: DocumentSession,
+    index: int,
+    options: PrintOptions,
+    layout: QPageLayout,
+    dpi: int,
+) -> QImage:
+    """The whole sheet of paper (white, margins included) as it will print, at ``dpi``.
+
+    Safe on a worker thread: it needs only a copy of the page layout, never the printer.
+    """
+    scale = dpi / 72
+    full = layout.fullRectPoints()
+    image = QImage(
+        max(1, round(full.width() * scale)),
+        max(1, round(full.height() * scale)),
+        QImage.Format.Format_ARGB32_Premultiplied,
+    )
+    image.fill(Qt.GlobalColor.white)
+    paint = layout.paintRectPoints()
+    painter = QPainter(image)
+    try:
+        painter.translate(paint.left() * scale, paint.top() * scale)
+        paint_sheet(
+            painter,
+            session,
+            index,
+            options,
+            QSizeF(paint.width() * scale, paint.height() * scale),
+            dpi,
+        )
+    finally:
+        painter.end()
+    return image
+
+
+def available_printers() -> tuple[list[str], str | None]:
+    """Installed printer names and the default one. The only place printers are queried, so
+    tests replace this one function."""
+    names = list(QPrinterInfo.availablePrinterNames())
+    default = QPrinterInfo.defaultPrinterName() or None
+    return names, default if default in names else None
+
+
+def printer_for(name: str | None) -> QPrinter:
+    """A printer by name; None means "Save as PDF" (the file name is set when printing)."""
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    if name is None:
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setResolution(150)
+    else:
+        printer.setPrinterName(name)
+    return printer
 
 
 def pdf_printer(path: str, landscape: bool = False) -> QPrinter:
