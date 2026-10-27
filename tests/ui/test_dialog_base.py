@@ -358,8 +358,15 @@ def test_preferences_registers_as_pdf_editor(qtbot, settings: AppSettings, monke
     assert d.association_row.isVisible()
     assert d.register_button.text() == "Register as PDF Editor"
     assert not d.default_button.isEnabled()
+
+    def unclipped() -> bool:  # the style sheet's min-width once let the layout cut the text
+        buttons = (d.register_button, d.default_button)
+        return all(b.width() >= b.sizeHint().width() for b in buttons)
+
+    assert unclipped()
     d.register_button.click()  # applies at once, without OK
     assert state["registered"] and d.register_button.text() == "Remove PDF Registration"
+    qtbot.waitUntil(unclipped)  # the longer label still fits
     assert d.default_button.isEnabled() and "default app" in d.pdf_status.text()
     d.default_button.click()
     assert opened == [fa.default_apps_uri()]

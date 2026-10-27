@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -246,6 +246,11 @@ class PreferencesDialog(FormDialog):
             "Remove PDF Registration" if registered else "Register as PDF Editor"
         )
         self.default_button.setEnabled(registered)
+        for button in (self.register_button, self.default_button):
+            # The style sheet's min-width would otherwise let the layout clip the text.
+            button.ensurePolished()
+            button.setMinimumWidth(button.sizeHint().width())
+        self._fit_width()
         if not registered:
             text = (
                 "Add Elanero to Explorer's “Open with” list and to Windows' default apps "
@@ -259,6 +264,18 @@ class PreferencesDialog(FormDialog):
                 "choose it as the default app in Windows Settings."
             )
         self.pdf_status.setText(text)
+
+    def _fit_width(self) -> None:
+        """Widen the dialog to its fields' minimum (the PDF file buttons need the most).
+
+        FormDialog sets an explicit minimum width, so Qt won't grow the window by itself."""
+        needed = self.minimumSizeHint().width()
+        if self.width() < needed:
+            self.resize(needed, self.height())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._fit_width()  # now that the style sheet's metrics apply
 
     def toggle_registration(self) -> None:
         try:
