@@ -137,3 +137,25 @@ def destroy_leftover_windows() -> Iterator[None]:
         if widget.parentWidget() is None and not widget.isVisible():
             widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def fake_printers(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    """No test sees the machine's real printers (Qt lists them even offscreen): the Print
+    dialog gets one fake printer backed by a PDF-format QPrinter. Returns the names asked for."""
+    from PySide6.QtPrintSupport import QPrinter
+
+    asked: list[str | None] = []
+
+    def printer_for(name: str | None) -> QPrinter:
+        asked.append(name)
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setResolution(150)
+        return printer
+
+    monkeypatch.setattr(
+        "pdfeditor.ui.printing.available_printers", lambda: (["Fake Printer"], "Fake Printer")
+    )
+    monkeypatch.setattr("pdfeditor.ui.printing.printer_for", printer_for)
+    return asked

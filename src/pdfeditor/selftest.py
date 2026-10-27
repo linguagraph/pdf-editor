@@ -295,15 +295,33 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
 
     def printing() -> str:
         from pdfeditor.core.session import DocumentSession as Session
-        from pdfeditor.ui.printing import PrintOptions, pdf_printer, print_pages
+        from pdfeditor.ui.printing import (
+            PrintOptions,
+            pdf_printer,
+            print_pages,
+            render_sheet_image,
+        )
 
         session = Session.open(data_path("selftest.pdf"))
         out = workdir / "printed.pdf"
-        count = print_pages(session, pdf_printer(str(out)), PrintOptions(pages=(0,)))
+        printer = pdf_printer(str(out))
+        count = print_pages(session, printer, PrintOptions(pages=(0,)))
+        sheet = render_sheet_image(session, 0, PrintOptions(pages=(0,)), printer.pageLayout(), 40)
         session.close()
         if count != 1 or not out.exists():
             raise AssertionError("print to PDF produced no output")
-        return f"printed {count} page to PDF"
+        if (
+            len(
+                {
+                    sheet.pixel(x, y)
+                    for x in range(0, sheet.width(), 3)
+                    for y in range(0, sheet.height(), 3)
+                }
+            )
+            < 3
+        ):
+            raise AssertionError("the print preview sheet is blank")
+        return f"printed {count} page to PDF, preview sheet {sheet.width()}x{sheet.height()}"
 
     def ocr() -> str:
         import io

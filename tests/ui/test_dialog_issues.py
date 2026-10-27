@@ -246,12 +246,20 @@ def test_print_dialog_sections_keep_what_is_above_them(qtbot, fixture_pdf) -> No
     qtbot.addWidget(window)
     view = window.open_path(fixture_pdf("report"))
     d = PrintDialog(view, window)
-    check_sections(qtbot, d)
+    d.show()
+    qtbot.waitExposed(d)
+    # the settings scroll beside the preview, so opening a section doesn't resize the dialog
+    column = d.settings_area.widget()
+    assert column is not None
+    preview_box = d.preview.geometry()
+    size = d.size()
+    check_sections(qtbot, d, grows=False)
+    assert d.preview.geometry() == preview_box and d.size() == size
     d.close()
     window.close()
 
 
-def check_sections(qtbot, d: FormDialog) -> None:
+def check_sections(qtbot, d: FormDialog, grows: bool = True) -> None:
     d.show()
     qtbot.waitExposed(d)
     sections = d.findChildren(Section)
@@ -264,7 +272,8 @@ def check_sections(qtbot, d: FormDialog) -> None:
             section.set_expanded(not section.is_expanded())
             qtbot.wait(5)
             assert {w: y_of(w, d) for w in above} == tops, section.header.text()
-            assert (d.height() > height) == section.is_expanded(), section.header.text()
+            if grows:
+                assert (d.height() > height) == section.is_expanded(), section.header.text()
 
 
 # -- #41 OCR language download -----------------------------------------------------------------

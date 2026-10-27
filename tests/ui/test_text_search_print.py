@@ -240,6 +240,7 @@ def test_print_dialog_options(
     dialog.annotations.setChecked(False)
     opts = dialog.options()
     assert opts.pages == (1, 2) and opts.scaling is Scaling.ACTUAL and not opts.annotations
+    assert opts.copies == 1 and opts.auto_rotate
     dialog.range_edit.setText("9")
     with pytest.raises(ValueError):
         dialog.options()

@@ -76,7 +76,7 @@ SHORT_LABELS: dict[str, str] = {
 HELP: dict[str, str] = {
     "open": "Open a PDF from your computer.",
     "save": "Save your changes to this file.",
-    "print": "Print the document or save it as a PDF.",
+    "print": "Print the document or save it as a PDF, with a live preview.",
     "document-properties": "Title, author, fonts, security and other file details.",
     "undo": "Undo the last change.",
     "redo": "Redo the change you just undid.",
