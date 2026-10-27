@@ -6,8 +6,17 @@ from pathlib import Path
 import pikepdf
 import pytest
 from PIL import Image
-from PySide6.QtCore import QMimeData, QUrl
-from PySide6.QtGui import QGuiApplication, QImage
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect, Qt, QUrl
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QGuiApplication,
+    QImage,
+)
+from PySide6.QtWidgets import QApplication
 
 from pdfeditor.model.pages import LabelStyle, PageLabelRule
 from pdfeditor.ui.dialogs.pages import (
@@ -21,7 +30,8 @@ from pdfeditor.ui.dialogs.pages import (
     WatermarkDialog,
 )
 from pdfeditor.ui.main_window import MainWindow
-from pdfeditor.ui.organizer.organizer import MIME_PAGES, drop
+from pdfeditor.ui.organizer.organizer import MIME_PAGES, drop, insertion_slot
+from pdfeditor.ui.theme import current_colors
 
 pytestmark = pytest.mark.gui
 
@@ -305,3 +315,143 @@ def test_bookmark_editing(qtbot, window: MainWindow, copy_pdf) -> None:
     window.act_undo.trigger()
     with view.session.lock:
         assert len(view.session.document.outline()) == 3
+
+
+# -- drop indicator (#78) -----------------------------------------------------------------
+
+
+def pages_mime(view, rows) -> QMimeData:
+    mime = QMimeData()
+    mime.setData(MIME_PAGES, f"{view.session.id}:{','.join(map(str, rows))}".encode())
+    return mime
+
+
+def drag(grid, mime, pos, drop=False):
+    """Send a drag enter+move (and optionally a drop) to the grid; returns the move event."""
+    act = Qt.DropAction.MoveAction
+    btn, mod = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    p = QPointF(pos)
+    QApplication.sendEvent(grid.viewport(), QDragEnterEvent(pos, act, mime, btn, mod))
+    move = QDragMoveEvent(pos, act, mime, btn, mod)
+    QApplication.sendEvent(grid.viewport(), move)
+    if drop and move.isAccepted():
+        QApplication.sendEvent(grid.viewport(), QDropEvent(p, act, mime, btn, mod))
+    return move
+
+
+def organizer_grid(qtbot, window, copy_pdf):
+    view = window.open_path(copy_pdf("text_multipage"))
+    tab = window.current_tab()
+    tab.set_organizing(True)
+    grid = tab.organizer.grid
+    grid.doItemsLayout()
+    qtbot.waitUntil(lambda: grid.visualRect(grid.model().index(4, 0)).isValid())
+    rects = [grid.visualRect(grid.model().index(i, 0)) for i in range(5)]
+    assert rects[0].top() == rects[1].top()
+    return view, tab, grid, rects
+
+
+def gap_pos(rects, slot):
+    """A point in the gap before page ``slot`` (left of it when it starts a line)."""
+    if rects[slot].top() != rects[slot - 1].top():
+        return QPoint(rects[slot].left() - 2, rects[slot].center().y())
+    return QPoint((rects[slot - 1].right() + rects[slot].left()) // 2, rects[slot].center().y())
+
+
+def test_insertion_slot_math() -> None:
+    def cell(i: int) -> QRect:
+        return QRect((i % 3) * 110, (i // 3) * 150, 100, 140)
+
+    def slot(x, y, count=7):
+        return insertion_slot(count, cell, QPoint(x, y), 400, 10)
+
+    assert slot(20, 50)[0] == 0
+    assert slot(80, 50)[0] == 1
+    before, rect = slot(215, 50)
+    assert before == 2 and rect is not None and 209 < rect.center().x() < 220
+    assert slot(390, 50)[0] == 3
+    assert slot(5, 200)[0] == 3
+    assert slot(390, 400)[0] == 7 and slot(10, 900)[0] == 6
+    assert slot(20, -50)[0] == 0
+    assert slot(20, 145)[0] == 0  # vertical gap belongs to the line above
+    assert insertion_slot(0, cell, QPoint(0, 0), 400, 10) == (0, None)
+    assert insertion_slot(1, cell, QPoint(10, 10), 400, 10)[0] == 0
+    assert insertion_slot(1, cell, QPoint(90, 10), 400, 10)[0] == 1
+
+
+def test_drag_shows_insertion_line_between_pages(qtbot, window: MainWindow, copy_pdf) -> None:
+    view, _tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    move = drag(grid, pages_mime(view, [0]), gap_pos(rects, 2))
+    ok, slot_ = move.isAccepted(), grid.drop_slot
+    assert ok and slot_ == 2, (ok, slot_)
+    ind = grid.drop_indicator
+    assert ind is not None and rects[1].right() < ind.center().x() < rects[2].left()
+    grid.repaint()
+    img = grid.viewport().grab().toImage()
+    got = QColor(img.pixel(ind.center().x(), ind.center().y()))
+    want = QColor(current_colors().accent_text)
+    assert abs(got.red() - want.red()) + abs(got.green() - want.green()) < 20
+    QApplication.sendEvent(grid.viewport(), QDragLeaveEvent())
+    assert grid.drop_indicator is None and grid.drop_slot is None
+
+
+def test_drop_in_gap_moves_to_indicated_slot(qtbot, window: MainWindow, copy_pdf) -> None:
+    view, tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    tab.organizer.select_pages([0])
+    drag(grid, pages_mime(view, [0]), gap_pos(rects, 3), drop=True)
+    assert [x.split()[1] for x in first_lines(view)] == ["2", "3", "1", "4", "5"]
+    assert tab.organizer.selected_pages() == [2]
+    assert window.act_undo.text() == "&Undo Move Page"
+    window.act_undo.trigger()
+    assert [x.split()[1] for x in first_lines(view)] == ["1", "2", "3", "4", "5"]
+
+
+def test_drop_before_first_and_after_last_multiselect(qtbot, window: MainWindow, copy_pdf) -> None:
+    view, tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    tab.organizer.select_pages([1, 3])
+    far = QPoint(grid.viewport().width() - 4, rects[4].center().y())
+    drag(grid, pages_mime(view, [1, 3]), far, drop=True)
+    assert [x.split()[1] for x in first_lines(view)] == ["1", "3", "5", "2", "4"]
+    assert tab.organizer.selected_pages() == [3, 4]
+    rects = [grid.visualRect(grid.model().index(i, 0)) for i in range(5)]
+    left = QPoint(max(rects[0].left() - 2, 1), rects[0].center().y())
+    drag(grid, pages_mime(view, [4]), left, drop=True)
+    assert [x.split()[1] for x in first_lines(view)] == ["4", "1", "3", "5", "2"]
+
+
+def test_drop_on_own_position_is_noop(qtbot, window: MainWindow, copy_pdf) -> None:
+    view, tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    tab.organizer.select_pages([1, 2])
+    undo_text = window.act_undo.text()
+    for slot in (1, 2, 3):
+        move = drag(grid, pages_mime(view, [1, 2]), gap_pos(rects, slot), drop=True)
+        assert move.isAccepted()
+    assert [x.split()[1] for x in first_lines(view)] == ["1", "2", "3", "4", "5"]
+    assert window.act_undo.text() == undo_text
+
+
+def test_drag_rejects_foreign_pages_and_unknown_data(qtbot, window: MainWindow, copy_pdf) -> None:
+    view, _tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    foreign = QMimeData()
+    foreign.setData(MIME_PAGES, b"99999:0")
+    text = QMimeData()
+    text.setText("hello")
+    for mime in (foreign, text):
+        move = drag(grid, mime, gap_pos(rects, 2), drop=True)
+        assert not move.isAccepted() and grid.drop_indicator is None
+    assert [x.split()[1] for x in first_lines(view)] == ["1", "2", "3", "4", "5"]
+
+
+def test_file_drop_inserts_at_indicated_slot(
+    qtbot, window: MainWindow, copy_pdf, tmp_path: Path
+) -> None:
+    view, tab, grid, rects = organizer_grid(qtbot, window, copy_pdf)
+    png = tmp_path / "pic.png"
+    Image.new("RGB", (100, 100), (255, 0, 0)).save(png)
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(str(png))])
+    move = drag(grid, files, gap_pos(rects, 1), drop=True)
+    assert move.isAccepted() and grid.drop_slot is None
+    assert view.page_count == 6
+    assert first_lines(view)[1] == "" and first_lines(view)[0].startswith("Page 1")
+    assert tab.organizer.selected_pages() == [1]
