@@ -149,7 +149,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 ### Phase 6: Page organization and document assembly (L)
 - [x] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert _(#78: an accent insertion line shows where dragged pages or dropped files will land; drops work in the gaps between pages and before the first or after the last page)_
 - [x] Insert blank / from file / from clipboard image; delete; duplicate; rotate; replace pages; extract to new file
-- [x] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (dialog with order and ranges, bookmarks merged)
+- [x] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (Combine Files panel in the main area: file cards with first-page previews, drag-and-drop from Explorer and drag to reorder with an insertion marker, keyboard reorder, page ranges, password unlock, bookmarks merged; #76)
 - [x] Crop (CropBox) with apply-to-range via the Crop dialog (margins), and remove white margins automatically (interactive drag-to-crop tool deferred to Phase 16)
 - [x] Page labels editor; bookmarks editing (add from current view or selection, rename, nest by drag, delete, set destination)
 - [x] Header/footer, Bates numbering, text/image watermark, and background (tokens: page, total, date, file name; position, font, opacity, page ranges) _(each is added as a marked `/Artifact` with its settings in the page's `/PieceInfo`, so Header & Footer, Bates, Watermark and Background each have Add / Update (pre-filled, replaces) / Remove; adding again asks whether to replace; Acrobat's own marks are recognised (#39, #40))_

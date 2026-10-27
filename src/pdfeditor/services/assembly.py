@@ -10,10 +10,23 @@ from enum import Enum
 from pathlib import Path
 
 from pdfeditor.core.jobs import CancelToken, ProgressFn, no_progress
-from pdfeditor.engine.base import Document, Engine, PasswordCallback
+from pdfeditor.engine.base import (
+    Document,
+    Engine,
+    EngineError,
+    PasswordCallback,
+    PasswordRequired,
+    RenderResult,
+)
 from pdfeditor.model.outline import Destination, OutlineItem
+from pdfeditor.services.thumbnails import render_fitted
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".jxr"}
+SUPPORTED_SUFFIXES = {".pdf", *IMAGE_SUFFIXES}  # what Combine accepts
+
+
+def is_image(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_SUFFIXES
 
 
 @dataclass
@@ -21,6 +34,58 @@ class MergeSource:
     path: Path
     pages: list[int] | None = None  # None = all
     password: str | PasswordCallback | None = None
+
+
+@dataclass(frozen=True)
+class SourceInfo:
+    """What the Combine panel shows about one input file."""
+
+    page_count: int = 0
+    locked: bool = False  # needs a (different) password
+    error: str = ""  # why it can't be combined; empty when it can
+    preview: RenderResult | None = None
+
+
+def describe_source(
+    engine: Engine,
+    path: Path,
+    max_width: int,
+    max_height: int,
+    password: str | None = None,
+) -> SourceInfo:
+    """Page count and a first-page preview of a combine input, never raising for bad files.
+
+    The caller holds the engine lock. Documents are opened and closed inside the call.
+    """
+    if not path.is_file():
+        return SourceInfo(error="file not found")
+    if is_image(path):
+        doc = engine.new_document()
+        try:
+            doc.insert_image_page(0, path.read_bytes())
+            preview = render_fitted(doc.page(0), max_width, max_height)
+        except (EngineError, OSError, ValueError):
+            return SourceInfo(error="this image can't be read")
+        finally:
+            doc.close()
+        return SourceInfo(page_count=1, preview=preview)
+    try:
+        pdf = engine.open(path, password)
+    except PasswordRequired:
+        return SourceInfo(locked=True)
+    except (EngineError, OSError) as exc:
+        return SourceInfo(error=str(exc))
+    try:
+        count = pdf.page_count
+        if count == 0:
+            return SourceInfo(error="the document has no pages")
+        try:
+            preview = render_fitted(pdf.page(0), max_width, max_height)
+        except EngineError:
+            preview = None
+        return SourceInfo(page_count=count, preview=preview)
+    finally:
+        pdf.close()
 
 
 def _shift(items: list[OutlineItem], offset: int, keep: dict[int, int]) -> list[OutlineItem]:
@@ -63,7 +128,7 @@ def merge(
             if token is not None:
                 token.check()
             start = out.page_count
-            if source.path.suffix.lower() in IMAGE_SUFFIXES:
+            if is_image(source.path):
                 out.insert_image_page(start, source.path.read_bytes())
                 if bookmarks:
                     outline.append(OutlineItem(source.path.stem, dest=Destination(start)))

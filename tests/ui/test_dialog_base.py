@@ -256,7 +256,6 @@ def migrated(window: MainWindow, view) -> dict[str, Callable[[], FormDialog]]:
         "insert": lambda: pages.InsertPagesDialog(n, 0, window),
         "extract": lambda: pages.ExtractDialog(n, 0, [0], window),
         "split": lambda: pages.SplitDialog("x", Path.home(), window),
-        "combine": lambda: pages.CombineDialog([path], window),
         "crop": lambda: pages.CropDialog(n, 0, [0], parent=window),
         "labels": lambda: pages.PageLabelsDialog([], n, window),
         "header": lambda: pages.HeaderFooterDialog(n, 0, [0], bates=True, parent=window),

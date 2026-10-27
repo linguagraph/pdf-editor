@@ -49,3 +49,14 @@ def format_page_ranges(indices: list[int]) -> str:
 
 def _fmt(run: list[int]) -> str:
     return str(run[0] + 1) if len(run) == 1 else f"{run[0] + 1}-{run[-1] + 1}"
+
+
+def move_order(count: int, rows: list[int], before: int) -> tuple[list[int], list[int]]:
+    """Move ``rows`` (kept in their order) so they sit before index ``before`` of the original
+    numbering. Returns the new order (old indices, new position -> old index) and the moved
+    rows' new positions."""
+    moving = sorted(set(rows))
+    rest = [i for i in range(count) if i not in moving]
+    insert_at = sum(1 for i in rest if i < before)
+    order = rest[:insert_at] + moving + rest[insert_at:]
+    return order, list(range(insert_at, insert_at + len(moving)))

@@ -21,7 +21,6 @@ from PySide6.QtWidgets import QApplication
 from pdfeditor.model.pages import LabelStyle, PageLabelRule
 from pdfeditor.ui.dialogs.pages import (
     BackgroundDialog,
-    CombineDialog,
     CropDialog,
     ExtractDialog,
     HeaderFooterDialog,
@@ -220,7 +219,7 @@ def test_replace_pages(window: MainWindow, copy_pdf) -> None:
     )
 
 
-def test_split_and_combine(window: MainWindow, copy_pdf, tmp_path: Path) -> None:
+def test_split(window: MainWindow, copy_pdf, tmp_path: Path) -> None:
     window.open_path(copy_pdf("outline"))
     d = SplitDialog("book", tmp_path / "parts", window)
     d.by_bookmarks.setChecked(True)
@@ -230,17 +229,6 @@ def test_split_and_combine(window: MainWindow, copy_pdf, tmp_path: Path) -> None
     d.by_ranges.setChecked(True)
     d.ranges.setText("1; 2-4")
     assert len(window.organize.split_document(accepted(d))) == 2
-
-    png = tmp_path / "cover.png"
-    Image.new("RGB", (120, 160), (0, 0, 200)).save(png)
-    c = CombineDialog([png, written[0], written[2]], window)
-    c.list.item(2).setData(256, (str(written[2]), "2"))  # only page 2 of chapter 3
-    session = window.organize.combine(accepted(c))
-    assert session is not None and session.page_count == 1 + 2 + 1
-    titles = [i.title for i in session.document.outline()]
-    assert titles == ["cover", "book_Chapter 1", "book_Chapter 3"]
-    index = window.tabs.currentIndex()
-    assert window.tabs.tabText(index) == "Combined.pdf" and window.tabs.is_dirty(index)
 
 
 def test_crop_and_trim(window: MainWindow, copy_pdf) -> None:

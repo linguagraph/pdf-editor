@@ -11,16 +11,14 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox, QToolButton
 
 from pdfeditor.core.commands import SetPageLabelsCommand
-from pdfeditor.core.jobs import Cancelled
 from pdfeditor.core.session import DocumentSession
-from pdfeditor.engine.base import Document, EngineError, OpenError, PasswordRequired
+from pdfeditor.engine.base import Document, EngineError
 from pdfeditor.model.pages import MarkKind
 from pdfeditor.services import stamping
 from pdfeditor.services.assembly import (
     IMAGE_SUFFIXES,
     SplitMode,
     extract,
-    merge,
     plan_split,
     subset_size,
     write_split,
@@ -39,7 +37,6 @@ from pdfeditor.services.stamping import (
 from pdfeditor.ui import page_ops
 from pdfeditor.ui.dialogs.pages import (
     BackgroundDialog,
-    CombineDialog,
     CropDialog,
     ExtractDialog,
     HeaderFooterDialog,
@@ -139,7 +136,7 @@ class OrganizeController:
             self.mark_actions[kind] = (add, update, remove)
         self.act_combine = act(
             "&Combine Files into PDF…",
-            self.combine,
+            lambda: self.w.combine.open_panel(),
             "combine",
             needs_doc=False,
         )
@@ -366,47 +363,6 @@ class OrganizeController:
             folder_action(written[0]) if written else None,
         )
         return written
-
-    def combine(self, dialog: CombineDialog | None = None) -> DocumentSession | None:
-        dialog = dialog or CombineDialog(parent=self.w)
-        if not dialog.result() and not dialog.exec():
-            return None
-        engine = self.w.engine()
-        counts: dict[str, int] = {}
-        passwords: dict[str, str | None] = {}
-        try:
-            for s in dialog.sources():
-                if s.path.suffix.lower() in IMAGE_SUFFIXES:
-                    continue
-                used: list[str] = []
-                prompt = password_prompt(self.w, s.path.name)
-
-                def remember(
-                    attempt: int,
-                    prompt: Callable[[int], str | None] = prompt,
-                    used: list[str] = used,
-                ) -> str | None:
-                    value = prompt(attempt)
-                    if value is not None:
-                        used.append(value)
-                    return value
-
-                probe = engine.open(s.path, remember)
-                counts[str(s.path)] = probe.page_count
-                probe.close()
-                passwords[str(s.path)] = used[-1] if used else None
-            sources = dialog.sources(counts)
-            for s in sources:
-                s.password = passwords.get(str(s.path))
-            doc = merge(engine, sources, bookmarks=dialog.bookmarks.isChecked())
-        except PasswordRequired:
-            return None
-        except (OpenError, Cancelled) as exc:
-            raise page_ops.PageOpError(f"Couldn't combine the files: {exc}") from exc
-        if doc.page_count == 0:
-            doc.close()
-            raise page_ops.PageOpError("Nothing to combine.")
-        return self.w.add_document(doc, "Combined.pdf").session
 
     def crop_pages(self, dialog: CropDialog | None = None) -> None:
         tab = self.tab()

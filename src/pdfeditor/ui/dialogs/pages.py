@@ -1,4 +1,4 @@
-"""Dialogs for Organize commands: page ranges, insert, extract, split, combine, crop, labels,
+"""Dialogs for Organize commands: page ranges, insert, extract, split, crop, labels,
 header/footer (+ Bates), watermark and background."""
 
 from __future__ import annotations
@@ -6,7 +6,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -18,15 +17,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QRadioButton,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -34,7 +30,7 @@ from pdfeditor.model.color import Color
 from pdfeditor.model.fonts import FontRef, FontRefKind
 from pdfeditor.model.objects import family_of
 from pdfeditor.model.pages import LabelStyle, PageLabelRule
-from pdfeditor.services.assembly import IMAGE_SUFFIXES, MergeSource, SplitMode
+from pdfeditor.services.assembly import SplitMode
 from pdfeditor.services.pages import format_page_ranges, parse_page_ranges
 from pdfeditor.services.stamping import TOKENS_HELP, HeaderFooter, Slot, Watermark
 from pdfeditor.ui.color_picker import ColorButton
@@ -297,95 +293,6 @@ class SplitDialog(FormDialog):
             for part in self.ranges.text().split(";")
             if part.strip()
         ]
-
-
-# -- combine ------------------------------------------------------------------------------------
-class CombineDialog(FormDialog):
-    """Pick and order files (PDFs and images) to combine into a new document."""
-
-    def __init__(self, initial: list[Path] | None = None, parent: QWidget | None = None) -> None:
-        super().__init__(
-            "Combine Files",
-            "Drag to reorder. Double-click a PDF to choose its pages.",
-            parent,
-            primary="Combine",
-        )
-        self.resize(600, 440)
-        self.list = QListWidget(self)
-        self.list.setAccessibleName("Files to combine")
-        self.list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-        self.list.setToolTip("Drag to reorder. Double-click a PDF to choose its pages.")
-        self.list.itemDoubleClicked.connect(self._edit_range)
-        add = QPushButton("Add Files…")
-        add.clicked.connect(self._add)
-        remove = QPushButton("Remove")
-        remove.clicked.connect(
-            lambda: [self.list.takeItem(self.list.row(i)) for i in self.list.selectedItems()]
-        )
-        up = QPushButton("Up")
-        up.clicked.connect(lambda: self._move(-1))
-        down = QPushButton("Down")
-        down.clicked.connect(lambda: self._move(1))
-        self.bookmarks = QCheckBox("Add a bookmark for each file")
-        self.bookmarks.setChecked(True)
-        side = QVBoxLayout()
-        for b in (add, remove, up, down):
-            side.addWidget(b)
-        side.addStretch()
-        top = QHBoxLayout()
-        top.addWidget(self.list, 1)
-        top.addLayout(side)
-        self.content.addLayout(top, 1)
-        self.add_widget(self.bookmarks)
-        for path in initial or []:
-            self.add_path(path)
-
-    def add_path(self, path: Path, pages: str = "") -> None:
-        item = QListWidgetItem(self._label(path, pages))
-        item.setData(Qt.ItemDataRole.UserRole, (str(path), pages))
-        self.list.addItem(item)
-
-    @staticmethod
-    def _label(path: Path, pages: str) -> str:
-        return f"{path.name}  —  {'pages ' + pages if pages else 'all pages'}"
-
-    def _add(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add Files", "", PDF_OR_IMAGES)
-        for p in paths:
-            self.add_path(Path(p))
-
-    def _move(self, delta: int) -> None:
-        row = self.list.currentRow()
-        target = row + delta
-        if row < 0 or not 0 <= target < self.list.count():
-            return
-        item = self.list.takeItem(row)
-        self.list.insertItem(target, item)
-        self.list.setCurrentRow(target)
-
-    def _edit_range(self, item: QListWidgetItem) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
-        path, pages = item.data(Qt.ItemDataRole.UserRole)
-        if Path(path).suffix.lower() in IMAGE_SUFFIXES:
-            return
-        text, ok = QInputDialog.getText(
-            self, "Pages", "Pages to include (empty = all):", text=pages
-        )
-        if ok:
-            item.setData(Qt.ItemDataRole.UserRole, (path, text.strip()))
-            item.setText(self._label(Path(path), text.strip()))
-
-    def sources(self, page_counts: dict[str, int] | None = None) -> list[MergeSource]:
-        """Raises ValueError for a malformed page range (needs each PDF's page count)."""
-        out = []
-        for i in range(self.list.count()):
-            path, pages = self.list.item(i).data(Qt.ItemDataRole.UserRole)
-            chosen = None
-            if pages and page_counts is not None and path in page_counts:
-                chosen = parse_page_ranges(pages, page_counts[path])
-            out.append(MergeSource(Path(path), chosen))
-        return out
 
 
 # -- crop ---------------------------------------------------------------------------------------
