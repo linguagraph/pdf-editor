@@ -249,6 +249,23 @@ DocumentTabBar::tab:selected {{
 DocumentTabBar QToolButton {{ padding: 2px; border-radius: {m.radius_small}px; }}
 QToolButton#DocumentTabsMenu::menu-indicator {{ image: none; width: 0; }}
 
+/* combine files panel (#76) */
+CombinePanel {{ background: {c.window}; }}
+QFrame#CombineToolbar {{
+    background: {c.window}; border: none; border-bottom: 1px solid {c.border};
+}}
+QLabel#CombineTitle {{ font-size: {pt(1.22)}; font-weight: 600; color: {c.text}; }}
+QPushButton#CombineButton {{
+    background: {c.accent}; color: {c.on_accent}; border: 1px solid {c.accent};
+    border-radius: {m.radius}px; font-weight: 600; padding: {m.space(1) + 2}px {m.space(5)}px;
+}}
+QPushButton#CombineButton:hover {{ border: 2px solid {c.accent_text}; }}
+QPushButton#CombineButton:focus {{ border: 2px solid {c.on_accent}; }}
+QPushButton#CombineButton:disabled {{
+    background: {c.surface_alt}; color: {c.text_disabled}; border: 1px solid {c.border};
+}}
+QListView#CombineGrid {{ background: transparent; border: none; }}
+
 /* start page (U6) */
 StartPage {{ background: {c.window}; }}
 QScrollArea#StartScroll, QWidget#StartScrollViewport, QWidget#StartInner {{
@@ -263,13 +280,15 @@ QPushButton#StartOpenButton {{
 }}
 QPushButton#StartOpenButton:hover {{ border: 2px solid {c.accent_text}; }}
 QPushButton#StartOpenButton:focus {{ border: 2px solid {c.on_accent}; }}
-QFrame#DropZone {{
+QFrame#DropZone, QFrame#CombineDropZone {{
     background: {c.surface}; border: 2px dashed {c.border_strong};
     border-radius: {m.radius_large}px;
 }}
 QFrame#DropZone:hover {{ border-color: {c.text_muted}; }}
-QFrame#DropZone[dragging="true"] {{ background: {c.accent_subtle}; border-color: {c.accent_text}; }}
-QFrame#DropZone QLabel {{ background: transparent; }}
+QFrame#DropZone[dragging="true"], QFrame#CombineDropZone[dragging="true"] {{
+    background: {c.accent_subtle}; border-color: {c.accent_text};
+}}
+QFrame#DropZone QLabel, QFrame#CombineDropZone QLabel {{ background: transparent; }}
 QToolButton#QuickAction {{
     background: {c.surface}; border: 1px solid {c.border};
     border-radius: {m.radius_large}px; padding: {m.space(2)}px {m.space(3)}px;

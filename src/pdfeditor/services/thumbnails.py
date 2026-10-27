@@ -10,10 +10,29 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pdfeditor.engine.base import ColorMode, Engine, EngineError, RenderRequest, RenderResult
+from pdfeditor.engine.base import (
+    ColorMode,
+    Engine,
+    EngineError,
+    Page,
+    RenderRequest,
+    RenderResult,
+)
 from pdfeditor.model.geometry import Matrix
 
 log = logging.getLogger(__name__)
+
+
+def render_fitted(page: Page, max_width: int, max_height: int) -> RenderResult | None:
+    """``page`` scaled to fit ``max_width`` x ``max_height`` pixels (None for an empty page).
+
+    The caller holds the engine lock.
+    """
+    rect = page.rect
+    if rect.width <= 0 or rect.height <= 0:
+        return None
+    scale = min(max_width / rect.width, max_height / rect.height)
+    return page.render(RenderRequest(matrix=Matrix.scale(scale), color=ColorMode.RGB))
 
 
 def first_page_thumbnail(
@@ -32,12 +51,7 @@ def first_page_thumbnail(
     try:
         if doc.page_count == 0:
             return None
-        page = doc.page(0)
-        rect = page.rect
-        if rect.width <= 0 or rect.height <= 0:
-            return None
-        scale = min(max_width / rect.width, max_height / rect.height)
-        return page.render(RenderRequest(matrix=Matrix.scale(scale), color=ColorMode.RGB))
+        return render_fitted(doc.page(0), max_width, max_height)
     except EngineError as exc:
         log.debug("thumbnail of %s failed: %s", path, exc)
         return None

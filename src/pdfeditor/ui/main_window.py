@@ -69,8 +69,10 @@ from pdfeditor.model.annotations import (
 from pdfeditor.model.geometry import Matrix
 from pdfeditor.model.objects import ObjectType
 from pdfeditor.model.outline import Link, LinkKind
+from pdfeditor.services.assembly import SUPPORTED_SUFFIXES
 from pdfeditor.services.fonts import same_font_family
 from pdfeditor.ui.action_help import apply_short_labels, refresh_tooltips
+from pdfeditor.ui.combine_controller import CombineController
 from pdfeditor.ui.command_search import CommandSearch
 from pdfeditor.ui.compare_controller import CompareController
 from pdfeditor.ui.contextual import ContextualToolbars
@@ -256,6 +258,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         layout.addWidget(self.tabs, 1)
         layout.addWidget(self.welcome, 1)
+        self._central_layout = layout
         self.setCentralWidget(central)
 
         self.search_panel = SearchPanel()
@@ -320,6 +323,8 @@ class MainWindow(QMainWindow):
         self.mode_banner.done.connect(lambda: self.set_tool("select"))
 
         self._create_actions()
+        self.combine = CombineController(self)  # before Organize: its action opens the panel
+        self._central_layout.addWidget(self.combine.panel, 1)
         self.organize = OrganizeController(self)
         self.edit = EditController(self, self.tool_group, self.tool_actions)
         self.protect = ProtectController(self, self.tool_group, self.tool_actions)
@@ -842,6 +847,7 @@ class MainWindow(QMainWindow):
 
     def open_path(self, path: Path) -> DocumentView | None:
         path = path.resolve()
+        self.combine.hide_panel()
         for i, view in enumerate(self.views()):
             if view.session.path == path:
                 self.tabs.setCurrentIndex(i)
@@ -878,6 +884,7 @@ class MainWindow(QMainWindow):
         return self.toasts.show(text, kind, action, timeout_ms)
 
     def _add_session(self, session: DocumentSession) -> DocumentView:
+        self.combine.hide_panel()  # a new document takes the page area; the files stay listed
         session.undo_stack.max_disk_bytes = self.prefs.undo_disk_mb * 1024 * 1024
         view = DocumentView(session, self.renderer)
         view.setAccessibleName(f"Pages of {session.display_name}")
@@ -1075,6 +1082,8 @@ class MainWindow(QMainWindow):
 
     def _page_target(self) -> QWidget | None:
         """The page area's keyboard stop: the page view (or organizer), or the start page."""
+        if self.combine.active:
+            return self.combine.panel.focus_target()
         tab = self.current_tab()
         if tab is not None:
             return tab.organizer.grid if tab.organizing and tab.organizer else tab.view
@@ -1109,7 +1118,11 @@ class MainWindow(QMainWindow):
             [
                 Region("ribbon", top, lambda: self.ribbon.bar if self.ribbon.isVisible() else None),
                 Region("left panels", lambda: [self.nav_dock], lambda: side(self.nav_dock)),
-                Region("page", lambda: [self.tabs, self.start_page], self._page_target),
+                Region(
+                    "page",
+                    lambda: [self.tabs, self.start_page, self.combine.panel],
+                    self._page_target,
+                ),
                 Region(
                     "right panels", lambda: [self.inspector_dock], lambda: side(self.inspector_dock)
                 ),
@@ -1168,10 +1181,13 @@ class MainWindow(QMainWindow):
         self._update_ui()
 
     def _update_ui(self) -> None:
-        view = self.current_view()
+        combining = self.combine.active
+        real = self.current_view()
+        view = None if combining else real  # document actions are off while Combine is open
         has_doc = view is not None
-        self.tabs.setVisible(has_doc)
-        self.welcome.setVisible(not has_doc)
+        self.tabs.setVisible(real is not None and not combining)
+        self.welcome.setVisible(real is None and not combining)
+        self.combine.panel.setVisible(combining)
         for action in self.actions() + self.layout_group.actions():
             if action.property("needs_doc"):
                 action.setEnabled(has_doc)
@@ -1203,6 +1219,8 @@ class MainWindow(QMainWindow):
             self.act_find_prev.setEnabled(bool(self.search_panel.hits))
             self.act_prev.setEnabled(view.current_page > 0)
             self.act_next.setEnabled(view.current_page < view.page_count - 1)
+        elif combining:
+            self.setWindowTitle("Combine Files — pdfeditor")
         else:
             self.setWindowTitle("pdfeditor")
         self._sync_read_only(view)
@@ -1740,6 +1758,13 @@ class MainWindow(QMainWindow):
             fit_docks(self, [self.nav_dock, self.inspector_dock], force=True)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self.combine.active:
+            if any(
+                u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in SUPPORTED_SUFFIXES
+                for u in event.mimeData().urls()
+            ):
+                event.acceptProposedAction()
+            return
         if any(
             u.isLocalFile() and u.toLocalFile().lower().endswith(".pdf")
             for u in event.mimeData().urls()
@@ -1747,6 +1772,12 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if self.combine.active:  # files dropped on the window go to the list, not to tabs
+            self.combine.panel.add_paths(
+                Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()
+            )
+            event.acceptProposedAction()
+            return
         for url in event.mimeData().urls():
             if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf"):
                 self.open_path(Path(url.toLocalFile()))
@@ -1766,6 +1797,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.jobs.cancel_all()  # and wait, before the documents they read are closed
+        self.combine.shutdown()  # restores the docks before their layout is saved
         self.toasts.clear()
         for side in (self.nav_panels, self.inspector_panels):
             side.remember_width()
