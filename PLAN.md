@@ -147,7 +147,7 @@ Sizes: S ≈ days, M ≈ 1–2 weeks, L ≈ 3–4 weeks, XL ≈ 5+ weeks, for on
 - [x] Round-trip tests: create → save → reopen (and check it opens in pdfium via `pypdfium2` in tests) → compare models
 
 ### Phase 6: Page organization and document assembly (L)
-- [x] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert
+- [x] Organizer view: thumbnail grid, multi-select, drag-and-drop reorder, drop other PDFs or images in to insert _(#78: an accent insertion line shows where dragged pages or dropped files will land; drops work in the gaps between pages and before the first or after the last page)_
 - [x] Insert blank / from file / from clipboard image; delete; duplicate; rotate; replace pages; extract to new file
 - [x] Split by page count, page ranges, bookmarks (top level), or file size; merge multiple files (dialog with order and ranges, bookmarks merged)
 - [x] Crop (CropBox) with apply-to-range via the Crop dialog (margins), and remove white margins automatically (interactive drag-to-crop tool deferred to Phase 16)
