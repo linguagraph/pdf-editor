@@ -4,7 +4,6 @@
 import re
 from pathlib import Path
 
-from PIL import Image
 from PyInstaller.utils.hooks import collect_data_files
 
 ROOT = Path(SPECPATH).parent
@@ -19,11 +18,9 @@ while len(numbers) < 4:
     numbers.append(0)
 VERSION_TUPLE = tuple(numbers[:4])
 
-# Windows icon (multi-size) from the bundled PNG.
-ICON = GENERATED / "pdfeditor.ico"
-Image.open(ROOT / "src" / "pdfeditor" / "data" / "icon.png").save(
-    ICON, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-)
+# The approved Elanero icon (16-256 px), used as shipped: no conversion.
+BRAND = ROOT / "src" / "pdfeditor" / "data" / "branding" / "elanero"
+ICON = BRAND / "icons" / "platform" / "elanero.ico"
 
 # Windows version resource.
 VERSION_FILE = GENERATED / "version_info.txt"
@@ -33,12 +30,12 @@ VERSION_FILE.write_text(
   kids=[
     StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', 'pdfeditor'),
-      StringStruct('FileDescription', 'pdfeditor PDF editor'),
+      StringStruct('FileDescription', 'Elanero - PDF Editor'),
       StringStruct('FileVersion', '{VERSION}'),
       StringStruct('InternalName', 'pdfeditor'),
       StringStruct('LegalCopyright', 'AGPL-3.0-or-later'),
       StringStruct('OriginalFilename', 'pdfeditor.exe'),
-      StringStruct('ProductName', 'pdfeditor'),
+      StringStruct('ProductName', 'Elanero - PDF Editor'),
       StringStruct('ProductVersion', '{VERSION}')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
@@ -71,7 +68,17 @@ DEV_EXCLUDES = [
 a = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT / "src")],
-    datas=collect_data_files("pdfeditor", includes=["data/*", "data/icons/*", "data/tessdata/*"])
+    # Of the branding pack only what the app loads: window icon PNGs, the .ico (file
+    # associations), the splash PNGs and the wordmark. The SVG/ICNS sources stay in the repo.
+    datas=collect_data_files(
+        "pdfeditor",
+        includes=[
+            "data/*", "data/icons/*", "data/tessdata/*",
+            "data/branding/elanero/icons/png/*", "data/branding/elanero/icons/platform/elanero.ico",
+            "data/branding/elanero/splash/png/*", "data/branding/elanero/branding/*",
+            "data/branding/elanero/README.txt",
+        ],
+    )
     # license texts written by scripts/build_exe.py (AGPL notice + third-party notices)
     + [(str(GENERATED / "THIRD_PARTY_NOTICES.txt"), "pdfeditor/data"),
        (str(ROOT / "LICENSE"), "pdfeditor/data")],

@@ -69,7 +69,7 @@ def _core_props(title: str) -> str:
         'metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" '
         'xmlns:dcterms="http://purl.org/dc/terms/" '
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        f"<dc:title>{_text(title)}</dc:title><dc:creator>PDF Editor</dc:creator>"
+        f"<dc:title>{_text(title)}</dc:title><dc:creator>Elanero - PDF Editor</dc:creator>"
         f'<dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created>'
         "</cp:coreProperties>"
     )

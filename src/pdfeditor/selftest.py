@@ -481,6 +481,28 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"notices don't mention {missing}")
         return f"third-party notices ({len(text) // 1024} KB) and AGPL text bundled"
 
+    def branding() -> str:
+        """The Elanero icon, splash screens and wordmark are bundled and decode."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QApplication
+
+        from pdfeditor.ui import branding as brand
+
+        QApplication.instance() or QApplication(sys.argv[:1])
+        icon = brand.app_icon()
+        missing = [s for s in brand.ICON_SIZES if icon.actualSize(QSize(s, s)).width() != s]
+        if missing:
+            raise AssertionError(f"app icon sizes missing: {missing}")
+        for scheme in ("light", "dark"):
+            pixmap = brand.splash_pixmap(scheme)
+            if pixmap.isNull():
+                raise AssertionError(f"{scheme} splash screen didn't load")
+        if brand.wordmark(72).isNull():
+            raise AssertionError("wordmark didn't load")
+        if brand.windows_icon().read_bytes()[:4] != b"\0\0\1\0":
+            raise AssertionError("elanero.ico isn't an icon file")
+        return f"{len(brand.ICON_SIZES)} icon sizes, light and dark splash, wordmark"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -503,6 +525,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("security", security),
         ("PDF/A", pdfa),
         ("licenses", licenses),
+        ("branding", branding),
     ]
 
 

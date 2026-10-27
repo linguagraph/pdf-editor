@@ -100,7 +100,6 @@ def run(argv: list[str]) -> int:
 
     from PySide6.QtWidgets import QApplication
 
-    from pdfeditor.ui.main_window import MainWindow
     from pdfeditor.ui.single_instance import InstanceServer, send_to_running_instance
 
     new_instance = "--new-instance" in argv
@@ -110,26 +109,35 @@ def run(argv: list[str]) -> int:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(APP_NAME)
     app.setApplicationVersion(__version__)
-    from PySide6.QtGui import QIcon
+    from pdfeditor.ui.branding import app_icon, show_splash
 
-    from pdfeditor.bundle import data_path
-
-    app.setWindowIcon(QIcon(str(data_path("icon.png"))))
+    app.setWindowIcon(app_icon())
     from pdfeditor.ui.i18n import install_translators
     from pdfeditor.ui.settings import AppSettings
 
-    translators = install_translators(app, AppSettings().language)  # noqa: F841 - keep alive
+    settings = AppSettings()
+    translators = install_translators(app, settings.language)  # noqa: F841 - keep alive
 
     if not new_instance and send_to_running_instance(files):
         log.info("handed %d file(s) to the running instance", len(files))
         return 0
 
-    window = MainWindow()
-    server = InstanceServer(parent=window)
-    if not new_instance:
-        server.listen()
-    server.files_received.connect(window.open_forwarded)
-    window.show()
+    # The splash covers the real startup work (importing the UI, building the main window)
+    # and goes away as soon as the window is up; it never delays startup by itself.
+    splash = show_splash(settings.theme)
+    try:
+        from pdfeditor.ui.main_window import MainWindow
+
+        window = MainWindow()
+        server = InstanceServer(parent=window)
+        if not new_instance:
+            server.listen()
+        server.files_received.connect(window.open_forwarded)
+        window.show()
+    except BaseException:
+        splash.close()  # never leave the splash up over the crash dialog
+        raise
+    splash.finish(window)
     window.offer_recovery()
     for path in files:
         window.open_path(Path(path))

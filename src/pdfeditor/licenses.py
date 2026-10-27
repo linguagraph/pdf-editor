@@ -11,7 +11,7 @@ import importlib.metadata as md
 import re
 from typing import Any
 
-from pdfeditor import SOURCE_URL, __version__
+from pdfeditor import APP_DISPLAY_NAME, SOURCE_URL, __version__
 from pdfeditor.bundle import data_path
 
 NOTICES_FILE = "THIRD_PARTY_NOTICES.txt"
@@ -35,10 +35,17 @@ _BUNDLED_DATA = (
 )  # fmt: skip
 
 
+# The branding pack came without license or attribution terms; say so rather than invent any.
+BRANDING_NOTE = (
+    "Elanero name, icons and splash screens (data/branding/elanero) — the project's own "
+    "branding; license/attribution not supplied in source pack"
+)
+
+
 def about_text() -> str:
     return (
-        f"pdfeditor {__version__}\n"
-        "Copyright the pdfeditor authors.\n\n"
+        f"{APP_DISPLAY_NAME} {__version__}\n"
+        "Copyright the Elanero - PDF Editor authors.\n\n"
         "This program is free software: you can redistribute it and/or modify it under the "
         "terms of the GNU Affero General Public License as published by the Free Software "
         "Foundation, either version 3 of the License, or (at your option) any later version. "
@@ -99,7 +106,7 @@ def _license_texts(dist: md.Distribution) -> list[str]:
 
 def build_notices() -> str:
     """The notices text from the installed distributions (source checkout / build time)."""
-    lines = [f"pdfeditor {__version__} — third-party components", "=" * 60, ""]
+    lines = [f"{APP_DISPLAY_NAME} {__version__} — third-party components", "=" * 60, ""]
     for dist in _runtime_distributions():
         meta: Any = dist.metadata
         lines.append(f"{meta['Name']} {dist.version} — {_license_of(dist)}")
@@ -115,6 +122,7 @@ def build_notices() -> str:
     lines += ["", "Bundled data:"]
     for name, license_, url, _file in _BUNDLED_DATA:
         lines.append(f"{name} — {license_}  {url}")
+    lines.append(BRANDING_NOTE)
     lines += ["", "", "License texts", "=" * 60]
     for dist in _runtime_distributions():
         for text in _license_texts(dist):

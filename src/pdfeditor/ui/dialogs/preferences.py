@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -18,8 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.services import file_association
 from pdfeditor.ui.color_picker import pick_color
-from pdfeditor.ui.dialogs.base import FormDialog, add_row, form_layout
+from pdfeditor.ui.dialogs.base import FormDialog, add_row, caption, form_layout
 from pdfeditor.ui.i18n import available_languages
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.style.tokens import ACCENT_PRESETS, METRICS
@@ -71,6 +74,28 @@ class PreferencesDialog(FormDialog):
             self.autosave,
             "Unsaved changes can be recovered if the app closes unexpectedly.",
         )
+
+        # PDF file association (Windows): applied at once, like the shortcut editor
+        self.pdf_status = caption("")
+        self.register_button = QPushButton()
+        self.register_button.clicked.connect(self.toggle_registration)
+        self.default_button = QPushButton("Choose Default App…")
+        self.default_button.setToolTip("Opens Windows Settings ▸ Default apps")
+        self.default_button.clicked.connect(self.open_default_apps)
+        row = QHBoxLayout()
+        row.addWidget(self.register_button)
+        row.addWidget(self.default_button)
+        row.addStretch()
+        self.association_row = QWidget()
+        column = QVBoxLayout(self.association_row)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addLayout(row)
+        column.addWidget(self.pdf_status)
+        add_row(form, "PDF files:", self.association_row)
+        if file_association.is_supported():
+            self._sync_association()
+        else:
+            form.setRowVisible(self.association_row, False)
 
         # -- Appearance
         form = self.page_forms["Appearance"]
@@ -214,6 +239,39 @@ class PreferencesDialog(FormDialog):
         manager = self._shortcut_manager()
         if isinstance(manager, ShortcutManager):
             ShortcutsDialog(manager, self).exec()
+
+    def _sync_association(self) -> None:
+        registered = file_association.is_registered()
+        self.register_button.setText(
+            "Remove PDF Registration" if registered else "Register as PDF Editor"
+        )
+        self.default_button.setEnabled(registered)
+        if not registered:
+            text = (
+                "Add Elanero to Explorer's “Open with” list and to Windows' default apps "
+                "for PDF files."
+            )
+        elif file_association.is_default():
+            text = "Elanero opens PDF files, and Explorer shows them with its icon."
+        else:
+            text = (
+                "Registered. To open PDF files with Elanero (and show them with its icon), "
+                "choose it as the default app in Windows Settings."
+            )
+        self.pdf_status.setText(text)
+
+    def toggle_registration(self) -> None:
+        try:
+            if file_association.is_registered():
+                file_association.unregister()
+            else:
+                file_association.register()
+        except OSError as exc:
+            QMessageBox.warning(self, "PDF Files", f"Couldn't change the registration: {exc}")
+        self._sync_association()
+
+    def open_default_apps(self) -> None:
+        QDesktopServices.openUrl(QUrl(file_association.default_apps_uri()))
 
     def _select_accent(self, color: str) -> None:
         index = self.accent.findData(color)

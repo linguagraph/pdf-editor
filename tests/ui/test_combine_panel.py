@@ -105,12 +105,12 @@ def test_action_opens_and_closes_the_panel(qtbot, window: MainWindow) -> None:
     window.organize.act_combine.trigger()
     assert panel.isVisible() and window.combine.active
     assert not window.start_page.isVisible() and not window.tabs.isVisible()
-    assert window.windowTitle() == "Combine Files — pdfeditor"
+    assert window.windowTitle() == "Combine Files — Elanero - PDF Editor"
     assert panel.drop_zone.isVisible() and not panel.grid.isVisible()
     assert not panel.combine_button.isEnabled()
     qtbot.keyClick(panel.focus_target(), Qt.Key.Key_Escape)
     assert not panel.isVisible() and window.start_page.isVisible()
-    assert window.windowTitle() == "pdfeditor"
+    assert window.windowTitle() == "Elanero - PDF Editor"
 
 
 def test_panel_over_a_document_hides_docks_and_document_actions(

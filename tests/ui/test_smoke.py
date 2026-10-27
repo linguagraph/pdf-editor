@@ -12,4 +12,4 @@ def test_main_window_shows(qtbot) -> None:
     qtbot.addWidget(window)
     window.show()
     assert window.isVisible()
-    assert window.windowTitle() == "pdfeditor"
+    assert window.windowTitle() == "Elanero - PDF Editor"
