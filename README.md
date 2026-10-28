@@ -16,9 +16,9 @@ auto-tagging · keyboard shortcuts and a command palette (Ctrl+Shift+P).
 
 ## Download
 
-pdfeditor is a single self-contained `pdfeditor.exe`: no Python or other installation needed.
+Elanero is a single self-contained `Elanero.exe`: no Python or other installation needed.
 Every CI build of a pull request or of `main` uploads it as the `pdfeditor-exe-<commit>`
-workflow artifact. Run `pdfeditor.exe --self-test --self-test-report report.txt` to check an
+workflow artifact. Run `Elanero.exe --self-test --self-test-report report.txt` to check an
 installation.
 
 ## Setup (development)
@@ -35,7 +35,7 @@ uv run python -m pdfeditor [file.pdf]
 
 ```sh
 uv pip install -e ".[build]"
-uv run python scripts/build_exe.py --test   # -> dist/pdfeditor.exe, then runs its self-test
+uv run python scripts/build_exe.py --test   # -> dist/Elanero.exe, then runs its self-test
 uv run python scripts/build_exe.py --skip-build --clean-env  # self-test + launch with no Python
 uv run python scripts/build_exe.py --installer              # + setup.exe (needs Inno Setup 6)
 uv run python scripts/build_exe.py --sign                   # Authenticode (see the script)

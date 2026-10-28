@@ -1,13 +1,16 @@
-; Inno Setup 6 script for an optional installer around the portable pdfeditor.exe.
+; Inno Setup 6 script for an optional installer around the portable Elanero.exe.
 ; scripts/build_exe.py --installer fills in the @...@ values and runs ISCC.
 ; The portable exe stays the primary deliverable: the installer only copies it, adds Start
 ; menu entries, optionally registers .pdf, and uninstalls cleanly.
 
 #define AppName "Elanero - PDF Editor"
 ; Identifiers stay "pdfeditor" (install folder, ProgID, setup file name) so upgrades keep working.
+; The exe used to be called pdfeditor.exe: [InstallDelete] and the deletekey entry below
+; remove that copy and its "Open with" key on upgrade.
 #define AppId "pdfeditor"
 #define AppVersion "@VERSION@"
-#define AppExe "pdfeditor.exe"
+#define AppExe "Elanero.exe"
+#define OldAppExe "pdfeditor.exe"
 
 [Setup]
 AppId={{5E7B7D0A-6B4E-4B8B-9F1C-2B8E3C1D4A77}
@@ -40,12 +43,16 @@ Name: "pdfassoc"; Description: "Open PDF files with Elanero"; GroupDescription: 
 [Files]
 Source: "@EXE@"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion
 
+[InstallDelete]
+Type: files; Name: "{app}\{#OldAppExe}"
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
+Root: HKA; Subkey: "Software\Classes\Applications\{#OldAppExe}"; ValueType: none; Flags: deletekey
 ; Offered in "Open with" always; made the default handler only with the pdfassoc task.
 Root: HKA; Subkey: "Software\Classes\pdfeditor.pdf"; ValueType: string; ValueName: ""; ValueData: "PDF document"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\pdfeditor.pdf\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"

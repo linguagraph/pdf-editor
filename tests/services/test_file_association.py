@@ -14,7 +14,7 @@ from pdfeditor.services import file_association as fa
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
 
-LAUNCHER = fa.Launcher(r'"C:\Apps\pdfeditor.exe" "%1"', r"C:\Apps\pdfeditor.exe,0", "pdfeditor.exe")
+LAUNCHER = fa.Launcher(r'"C:\Apps\Elanero.exe" "%1"', r"C:\Apps\Elanero.exe,0", "Elanero.exe")
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_register_round_trip(base: str) -> None:
         APP_DISPLAY_NAME
     )
     assert read(base, rf"{classes}\.pdf\OpenWithProgids", "pdfeditor.pdf") == ""
-    app = rf"{classes}\Applications\pdfeditor.exe"
+    app = rf"{classes}\Applications\Elanero.exe"
     assert read(base, app, "FriendlyAppName") == APP_DISPLAY_NAME
     assert read(base, rf"{app}\SupportedTypes", ".pdf") == ""
     # listed in Settings > Default apps
@@ -74,7 +74,7 @@ def test_register_round_trip(base: str) -> None:
     assert read(base, fa.CAPABILITIES, "ApplicationIcon") == LAUNCHER.icon
 
     # another copy of the exe isn't "this copy"
-    other = fa.Launcher(r'"D:\Other\pdfeditor.exe" "%1"', "x", "pdfeditor.exe")
+    other = fa.Launcher(r'"D:\Other\Elanero.exe" "%1"', "x", "Elanero.exe")
     assert not fa.is_registered(other, base=base)
 
     fa.unregister(LAUNCHER, base=base, notify=False)
@@ -114,7 +114,7 @@ def test_is_default_reads_the_user_choice(base: str) -> None:
     assert not fa.is_default(LAUNCHER, base=base)
     write(base, choice, "ProgId", "pdfeditor.pdf")
     assert fa.is_default(LAUNCHER, base=base)
-    write(base, choice, "ProgId", r"Applications\pdfeditor.exe")
+    write(base, choice, "ProgId", r"Applications\Elanero.exe")
     assert fa.is_default(LAUNCHER, base=base)
 
 
