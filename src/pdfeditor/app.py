@@ -122,17 +122,25 @@ def run(argv: list[str]) -> int:
         log.info("handed %d file(s) to the running instance", len(files))
         return 0
 
-    # The splash covers the real startup work (importing the UI, building the main window)
-    # and goes away as soon as the window is up; it never delays startup by itself.
+    # The splash covers the real startup work (loading the engine, importing the UI, building
+    # the main window), its bar advancing after each stage, then stays up for its minimum time
+    # while the bar fills; the window appears once it's gone.
     splash = show_splash(settings.theme)
     try:
+        import pdfeditor.core.session
+        import pdfeditor.engine.registry  # noqa: F401 - preload, so the bar tracks the engine
+
+        splash.set_progress(0.2)
         from pdfeditor.ui.main_window import MainWindow
 
+        splash.set_progress(0.6)
         window = MainWindow()
         server = InstanceServer(parent=window)
         if not new_instance:
             server.listen()
         server.files_received.connect(window.open_forwarded)
+        splash.set_progress(0.9)
+        splash.complete()
         window.show()
     except BaseException:
         splash.close()  # never leave the splash up over the crash dialog
