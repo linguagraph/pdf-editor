@@ -74,6 +74,15 @@ class PreferencesDialog(FormDialog):
             self.autosave,
             "Unsaved changes can be recovered if the app closes unexpectedly.",
         )
+        self.single_window = QCheckBox("Open files in the window that's already running")
+        self.single_window.setChecked(settings.single_window)
+        add_row(
+            form,
+            "Windows:",
+            self.single_window,
+            "Off: every file you open from Explorer gets its own window. Applies to windows "
+            "opened after the change.",
+        )
 
         # PDF file association (Windows): applied at once, like the shortcut editor
         self.pdf_status = caption("")
@@ -320,6 +329,7 @@ class PreferencesDialog(FormDialog):
         accent = self.accent.currentData()
         s.accent = accent if isinstance(accent, str) and accent != CUSTOM else ""
         s.autosave_minutes = self.autosave.value()
+        s.single_window = self.single_window.isChecked()
         s.undo_disk_mb = self.undo_disk.value()
         s.cache_mb = self.cache.value()
         super().accept()

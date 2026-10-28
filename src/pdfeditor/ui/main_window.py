@@ -110,6 +110,7 @@ from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
 from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
+from pdfeditor.ui.single_instance import start_new_window
 from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.start_page import StartPage
 from pdfeditor.ui.theme import Theme, apply_theme
@@ -209,6 +210,8 @@ SETTINGS_STATE = "window/state"
 # Bump when the frame changes so old dock layouts aren't restored into it (U2: ribbon moved,
 # U3: icon-rail docks).
 STATE_VERSION = 3
+# Each further running copy opens this many pixels right of and below the previous one.
+CASCADE_STEP = 32
 PDF_FILTER = "PDF documents (*.pdf);;All files (*)"
 
 
@@ -218,6 +221,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1280, 860)
         self.setAcceptDrops(True)
+        self._cascade_index = 0
         self.settings = QSettings()
         self.prefs = AppSettings(self.settings)
         cache = RenderCache[QImage](self.prefs.cache_mb * 1024 * 1024)
@@ -394,6 +398,10 @@ class MainWindow(QMainWindow):
         self.act_open = a(
             "&Open…", self.open_dialog, QKeySequence.StandardKey.Open, "folder-open", False
         )
+        self.act_new_window = a(
+            "&New Window", self.new_window, QKeySequence.StandardKey.New, None, False
+        )
+        self.act_new_window.setObjectName("new-window")
         self.act_close = a("&Close", self.close_current, QKeySequence.StandardKey.Close, "x")
         self.act_properties = a("Document &Properties…", self.show_properties, "Ctrl+D", "info")
         self.act_save = a("&Save", self.save, QKeySequence.StandardKey.Save, "save")
@@ -586,6 +594,7 @@ class MainWindow(QMainWindow):
     def _create_menus(self) -> None:
         mb = self.menu_bar
         file_menu = mb.addMenu("&File")
+        file_menu.addAction(self.act_new_window)
         file_menu.addAction(self.act_open)
         file_menu.addAction(self.organize.act_combine)
         file_menu.addAction(self.export.act_from_office)
@@ -1751,6 +1760,25 @@ class MainWindow(QMainWindow):
             self._state_restored = bool(self.restoreState(state, STATE_VERSION))
         self.set_theme(Theme(self.prefs.theme))
 
+    def cascade(self, index: int) -> None:
+        """Open as the ``index``-th running copy (``InstanceSlot``): offset from the saved
+        position so the windows don't hide each other, wrapping around before leaving the
+        screen. Only the first copy remembers its position on close, so the offset doesn't
+        creep into the next start."""
+        self._cascade_index = index
+        if index <= 0 or self.isMaximized() or self.isFullScreen():
+            return
+        screen = self.screen().availableGeometry()
+        frame = self.frameGeometry()
+        room = min(screen.right() - frame.right(), screen.bottom() - frame.bottom())
+        steps = max(room, 0) // CASCADE_STEP + 1
+        offset = (index % steps) * CASCADE_STEP
+        self.move(self.pos() + QPoint(offset, offset))
+
+    def new_window(self) -> None:
+        if not start_new_window():
+            self.notify("Couldn't open a new window.", "error")
+
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         if not self._docks_sized:
@@ -1786,7 +1814,7 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def open_forwarded(self, paths: list[str]) -> None:
-        """Files handed over by a second launch (single-instance mode)."""
+        """Files handed over by a later launch ("open files in the running window")."""
         for p in paths:
             self.open_path(Path(p))
         self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
@@ -1804,7 +1832,8 @@ class MainWindow(QMainWindow):
         for side in (self.nav_panels, self.inspector_panels):
             side.remember_width()
             side.save()
-        self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
+        if self._cascade_index == 0:
+            self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
         self.settings.setValue(SETTINGS_STATE, self.saveState(STATE_VERSION))
         self.autosave_timer.stop()
         self.start_page.shutdown()

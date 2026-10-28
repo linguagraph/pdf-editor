@@ -100,9 +100,13 @@ def run(argv: list[str]) -> int:
 
     from PySide6.QtWidgets import QApplication
 
-    from pdfeditor.ui.single_instance import InstanceServer, send_to_running_instance
+    from pdfeditor.ui.single_instance import (
+        NEW_INSTANCE_FLAG,
+        InstanceServer,
+        InstanceSlot,
+        send_to_running_instance,
+    )
 
-    new_instance = "--new-instance" in argv
     files = [str(Path(a).resolve()) for a in argv[1:] if not a.startswith("--")]
 
     app = QApplication(argv)
@@ -118,9 +122,13 @@ def run(argv: list[str]) -> int:
     settings = AppSettings()
     translators = install_translators(app, settings.language)  # noqa: F841 - keep alive
 
-    if not new_instance and send_to_running_instance(files):
+    # Every launch gets its own window, unless the user prefers files to go to the running
+    # one (File > New Window always starts a separate copy).
+    forward = settings.single_window and NEW_INSTANCE_FLAG not in argv
+    if forward and send_to_running_instance(files):
         log.info("handed %d file(s) to the running instance", len(files))
         return 0
+    slot = InstanceSlot()
 
     # The splash covers the real startup work (loading the engine, importing the UI, building
     # the main window), its bar advancing after each stage, then stays up for its minimum time
@@ -135,8 +143,9 @@ def run(argv: list[str]) -> int:
 
         splash.set_progress(0.6)
         window = MainWindow()
+        window.cascade(slot.index)
         server = InstanceServer(parent=window)
-        if not new_instance:
+        if forward:
             server.listen()
         server.files_received.connect(window.open_forwarded)
         splash.set_progress(0.9)
@@ -149,4 +158,6 @@ def run(argv: list[str]) -> int:
     window.offer_recovery()
     for path in files:
         window.open_path(Path(path))
-    return app.exec()
+    code = app.exec()
+    slot.release()
+    return code

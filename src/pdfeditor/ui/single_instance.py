@@ -1,14 +1,29 @@
-"""Single-instance support: a second launch forwards its files to the running window."""
+"""Running several copies of the app side by side.
+
+By default every launch opens its own window. With the "open files in the running window"
+preference, a launch instead forwards its files to the window that's already running
+(:func:`send_to_running_instance` / :class:`InstanceServer`). :class:`InstanceSlot` numbers the
+running copies so each new window opens a little offset from the others.
+"""
 
 from __future__ import annotations
 
 import getpass
 import logging
+import sys
+from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QLockFile, QObject, QProcess, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from pdfeditor.bundle import is_frozen
+from pdfeditor.core.paths import data_dir
+
 log = logging.getLogger(__name__)
+
+NEW_INSTANCE_FLAG = "--new-instance"
+# More copies than this share the last slot (and its window offset).
+MAX_SLOTS = 32
 
 
 def server_name(app_id: str = "pdfeditor") -> str:
@@ -81,3 +96,51 @@ class InstanceServer(QObject):
         socket.disconnectFromServer()
         socket.deleteLater()
         self.files_received.emit([line for line in text.splitlines() if line.strip()])
+
+
+def new_window_command() -> tuple[str, list[str]]:
+    """How to start another, independent copy: the frozen exe, or ``pythonw -m pdfeditor``
+    from a source checkout. It never forwards to this one, whatever the preference says."""
+    exe = Path(sys.executable)
+    if is_frozen():
+        return str(exe), [NEW_INSTANCE_FLAG]
+    windowed = exe.with_name("pythonw.exe")
+    return str(windowed if windowed.exists() else exe), ["-m", "pdfeditor", NEW_INSTANCE_FLAG]
+
+
+def start_new_window() -> bool:
+    """Start another copy of the app in its own window; False if it couldn't be started."""
+    program, args = new_window_command()
+    process = QProcess()
+    process.setProgram(program)
+    process.setArguments(args)
+    ok = bool(process.startDetached())
+    if not ok:
+        log.warning("couldn't start a new window: %s %s", program, args)
+    return ok
+
+
+class InstanceSlot:
+    """A number unique among the running copies: 0 for the first, then the lowest free one.
+
+    Each slot is a lock file, so a copy that crashes frees its slot (Qt treats a lock whose
+    process is gone as stale). The window uses it to open offset from the others.
+    """
+
+    def __init__(self, root: Path | None = None) -> None:
+        root = root or data_dir() / "instances"
+        root.mkdir(parents=True, exist_ok=True)
+        self.index = MAX_SLOTS - 1
+        self._lock: QLockFile | None = None
+        for index in range(MAX_SLOTS):
+            lock = QLockFile(str(root / f"{index}.lock"))
+            lock.setStaleLockTime(0)  # stale only when its process is gone, never by age
+            if lock.tryLock(0):
+                self.index, self._lock = index, lock
+                return
+        log.warning("all %d instance slots are taken", MAX_SLOTS)
+
+    def release(self) -> None:
+        if self._lock is not None:
+            self._lock.unlock()
+            self._lock = None
