@@ -62,8 +62,9 @@ def test_installer_script(tmp_path: Path, monkeypatch) -> None:
     assert f'#define AppVersion "{__version__}"' in script
     assert r'Source: "C:\out\Elanero.exe"' in script or 'Source: "C:/out/Elanero.exe"' in script
     assert '#define AppExe "Elanero.exe"' in script
-    # Upgrades from the pdfeditor.exe era drop the old exe and its "Open with" entry.
-    assert r'Name: "{app}\{#OldAppExe}"' in script and "deletekey" in script
+    # Upgrades from the pdfeditor.exe era drop the old exe and repoint its "Open with" key.
+    assert r'Name: "{app}\{#OldAppExe}"' in script and "OldExeKeyExists" in script
+    assert "[Code]" in script and "Flags: deletekey" not in script
     for section in ("[Setup]", "[Files]", "[Icons]", "[Registry]", "[Tasks]"):
         assert section in script
     assert "pdfassoc" in script and "uninsdeletekey" in script

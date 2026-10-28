@@ -135,9 +135,10 @@ def run(argv: list[str]) -> int:
     # while the bar fills; the window appears once it's gone.
     splash = show_splash(settings.theme)
     try:
-        import pdfeditor.core.session
-        import pdfeditor.engine.registry  # noqa: F401 - preload, so the bar tracks the engine
+        import pdfeditor.core.session  # noqa: F401 - preloaded, so the bar tracks it
+        from pdfeditor.engine.registry import get_engine
 
+        get_engine()  # imports the backend (PyMuPDF), the slowest single step
         splash.set_progress(0.2)
         from pdfeditor.ui.main_window import MainWindow
 
@@ -145,9 +146,16 @@ def run(argv: list[str]) -> int:
         window = MainWindow()
         window.cascade(slot.index)
         server = InstanceServer(parent=window)
+        # Files handed over while the splash is still up wait for the window: opening them
+        # now would put password prompts and errors behind the splash.
+        held: list[str] = []
+
+        def hold(paths: list[str]) -> None:
+            held.extend(paths)
+
+        server.files_received.connect(hold)
         if forward:
             server.listen()
-        server.files_received.connect(window.open_forwarded)
         splash.set_progress(0.9)
         splash.complete()
         window.show()
@@ -155,9 +163,13 @@ def run(argv: list[str]) -> int:
         splash.close()  # never leave the splash up over the crash dialog
         raise
     splash.finish(window)
+    server.files_received.disconnect(hold)
+    server.files_received.connect(window.open_forwarded)
     window.offer_recovery()
     for path in files:
         window.open_path(Path(path))
+    if held:
+        window.open_forwarded(held)
     code = app.exec()
     slot.release()
     return code

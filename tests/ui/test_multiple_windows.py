@@ -9,11 +9,17 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QPoint, QSettings
 
+from pdfeditor import bundle
 from pdfeditor.ui import single_instance
 from pdfeditor.ui.dialogs.preferences import PreferencesDialog
 from pdfeditor.ui.main_window import CASCADE_STEP, SETTINGS_GEOMETRY, MainWindow
 from pdfeditor.ui.settings import AppSettings
-from pdfeditor.ui.single_instance import NEW_INSTANCE_FLAG, InstanceSlot, new_window_command
+from pdfeditor.ui.single_instance import (
+    NEW_INSTANCE_FLAG,
+    RESET_ENVIRONMENT,
+    InstanceSlot,
+    new_window_command,
+)
 
 
 def test_slots_number_the_running_copies(tmp_path: Path) -> None:
@@ -41,15 +47,29 @@ def test_a_crashed_copy_frees_its_slot(tmp_path: Path) -> None:
 
 
 def test_new_window_command_from_source() -> None:
-    program, args = new_window_command()
+    program, args, env = new_window_command()
     assert Path(program).parent == Path(sys.executable).parent
-    assert args == ["-m", "pdfeditor", NEW_INSTANCE_FLAG]
+    assert args == ["-m", "pdfeditor", NEW_INSTANCE_FLAG] and env == {}
 
 
 def test_new_window_command_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(single_instance, "is_frozen", lambda: True)
+    monkeypatch.setattr(bundle, "is_frozen", lambda: True)
     monkeypatch.setattr(sys, "executable", r"C:\Apps\Elanero.exe")
-    assert new_window_command() == (r"C:\Apps\Elanero.exe", [NEW_INSTANCE_FLAG])
+    # The exe started by itself must unpack afresh, not share (and lose) the parent's folder.
+    assert new_window_command() == (
+        r"C:\Apps\Elanero.exe",
+        [NEW_INSTANCE_FLAG],
+        {RESET_ENVIRONMENT: "1"},
+    )
+
+
+def test_unwritable_data_folder_still_starts(tmp_path: Path) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("not a folder", encoding="utf-8")
+    slot = InstanceSlot(blocker / "instances")  # mkdir fails: a file is in the way
+    assert slot.index == 0
+    slot.release()
 
 
 @pytest.mark.gui
@@ -72,6 +92,7 @@ def test_later_copies_open_offset_and_keep_the_saved_position(qtbot) -> None:
     qtbot.addWidget(window)
     window.resize(600, 400)
     window.move(50, 50)
+    window._geometry_restored = True  # as if opened at a saved position
     saved = window.pos()
     window.cascade(0)
     assert window.pos() == saved
@@ -79,8 +100,32 @@ def test_later_copies_open_offset_and_keep_the_saved_position(qtbot) -> None:
     assert window.pos() == saved + QPoint(2 * CASCADE_STEP, 2 * CASCADE_STEP)
     QSettings().remove(SETTINGS_GEOMETRY)
     window.close()
-    # Only the first copy saves its position, so the offset doesn't stick.
+    # Left where the offset put it: not saved, so the offset doesn't stick.
     assert QSettings().value(SETTINGS_GEOMETRY) is None
+
+
+@pytest.mark.gui
+def test_a_later_copy_saves_a_position_the_user_chose(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(600, 400)
+    window._geometry_restored = True
+    window.cascade(1)
+    window.resize(700, 450)  # the user resized it
+    QSettings().remove(SETTINGS_GEOMETRY)
+    window.close()
+    assert QSettings().value(SETTINGS_GEOMETRY) is not None
+
+
+@pytest.mark.gui
+def test_a_later_copy_without_a_saved_position_starts_centered(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.resize(600, 400)
+    window.cascade(1)
+    screen = window.screen().availableGeometry()
+    center = window.frameGeometry().center() - QPoint(CASCADE_STEP, CASCADE_STEP)
+    assert (center - screen.center()).manhattanLength() <= 4
 
 
 @pytest.mark.gui

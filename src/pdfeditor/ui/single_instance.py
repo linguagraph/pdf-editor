@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import getpass
 import logging
-import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, QObject, QProcess, Signal
+from PySide6.QtCore import QLockFile, QObject, QProcess, QProcessEnvironment, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
-from pdfeditor.bundle import is_frozen
+from pdfeditor.bundle import app_command, is_frozen
 from pdfeditor.core.paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -24,6 +23,10 @@ log = logging.getLogger(__name__)
 NEW_INSTANCE_FLAG = "--new-instance"
 # More copies than this share the last slot (and its window offset).
 MAX_SLOTS = 32
+# PyInstaller (6.10+) treats the one-file exe started by itself as a helper of the same run:
+# it reuses the parent's unpacked _MEI folder, which the parent deletes when it exits. This
+# makes the bootloader unpack afresh, so the new window is a fully independent copy.
+RESET_ENVIRONMENT = "PYINSTALLER_RESET_ENVIRONMENT"
 
 
 def server_name(app_id: str = "pdfeditor") -> str:
@@ -98,22 +101,24 @@ class InstanceServer(QObject):
         self.files_received.emit([line for line in text.splitlines() if line.strip()])
 
 
-def new_window_command() -> tuple[str, list[str]]:
-    """How to start another, independent copy: the frozen exe, or ``pythonw -m pdfeditor``
-    from a source checkout. It never forwards to this one, whatever the preference says."""
-    exe = Path(sys.executable)
-    if is_frozen():
-        return str(exe), [NEW_INSTANCE_FLAG]
-    windowed = exe.with_name("pythonw.exe")
-    return str(windowed if windowed.exists() else exe), ["-m", "pdfeditor", NEW_INSTANCE_FLAG]
+def new_window_command() -> tuple[str, list[str], dict[str, str]]:
+    """Program, arguments and extra environment that start another, independent copy. It
+    never forwards to this one, whatever the preference says."""
+    program, *args = app_command()
+    env = {RESET_ENVIRONMENT: "1"} if is_frozen() else {}
+    return program, [*args, NEW_INSTANCE_FLAG], env
 
 
 def start_new_window() -> bool:
     """Start another copy of the app in its own window; False if it couldn't be started."""
-    program, args = new_window_command()
+    program, args, extra = new_window_command()
+    env = QProcessEnvironment.systemEnvironment()
+    for name, value in extra.items():
+        env.insert(name, value)
     process = QProcess()
     process.setProgram(program)
     process.setArguments(args)
+    process.setProcessEnvironment(env)
     ok = bool(process.startDetached())
     if not ok:
         log.warning("couldn't start a new window: %s %s", program, args)
@@ -128,10 +133,15 @@ class InstanceSlot:
     """
 
     def __init__(self, root: Path | None = None) -> None:
-        root = root or data_dir() / "instances"
-        root.mkdir(parents=True, exist_ok=True)
-        self.index = MAX_SLOTS - 1
+        self.index = 0
         self._lock: QLockFile | None = None
+        try:
+            root = root or data_dir() / "instances"
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:  # only the window offset depends on it: never block startup
+            log.warning("no instance slot (%s); opening at the saved position", exc)
+            return
+        self.index = MAX_SLOTS - 1
         for index in range(MAX_SLOTS):
             lock = QLockFile(str(root / f"{index}.lock"))
             lock.setStaleLockTime(0)  # stale only when its process is gone, never by age

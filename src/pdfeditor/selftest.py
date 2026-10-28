@@ -503,6 +503,27 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError("elanero.ico isn't an icon file")
         return f"{len(brand.ICON_SIZES)} icon sizes, light and dark splash, wordmark"
 
+    def instances() -> str:
+        """Another copy can be started (the exe itself, unpacking afresh) and numbered."""
+        from pdfeditor.ui.single_instance import (
+            RESET_ENVIRONMENT,
+            InstanceSlot,
+            new_window_command,
+        )
+
+        program, args, env = new_window_command()
+        if not Path(program).is_file():
+            raise AssertionError(f"New Window would start a missing program: {program}")
+        if is_frozen() and (Path(program) != Path(sys.executable) or RESET_ENVIRONMENT not in env):
+            raise AssertionError("New Window wouldn't start an independent copy of the exe")
+        slots = [InstanceSlot(workdir / "instances") for _ in range(2)]
+        indexes = [slot.index for slot in slots]
+        for slot in slots:
+            slot.release()
+        if indexes != [0, 1]:
+            raise AssertionError(f"instance slots {indexes}, expected [0, 1]")
+        return f"New Window runs {Path(program).name} {' '.join(args)}; slots {indexes}"
+
     return [
         ("engine", engine),
         ("open bundled sample", open_sample),
@@ -526,6 +547,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("PDF/A", pdfa),
         ("licenses", licenses),
         ("branding", branding),
+        ("instances", instances),
     ]
 
 

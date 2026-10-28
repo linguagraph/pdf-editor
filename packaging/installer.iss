@@ -5,8 +5,8 @@
 
 #define AppName "Elanero - PDF Editor"
 ; Identifiers stay "pdfeditor" (install folder, ProgID, setup file name) so upgrades keep working.
-; The exe used to be called pdfeditor.exe: [InstallDelete] and the deletekey entry below
-; remove that copy and its "Open with" key on upgrade.
+; The exe used to be called pdfeditor.exe: [InstallDelete] removes that copy on upgrade, and
+; an existing Applications\pdfeditor.exe key is pointed at the new exe (see [Registry]).
 #define AppId "pdfeditor"
 #define AppVersion "@VERSION@"
 #define AppExe "Elanero.exe"
@@ -52,7 +52,11 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-Root: HKA; Subkey: "Software\Classes\Applications\{#OldAppExe}"; ValueType: none; Flags: deletekey
+; A user may have chosen the old exe in "Open with > Always use this app"; Windows keeps that
+; choice by key name, so point the old key at the new exe instead of deleting it.
+Root: HKA; Subkey: "Software\Classes\Applications\{#OldAppExe}"; ValueType: none; Flags: uninsdeletekey; Check: OldExeKeyExists
+Root: HKA; Subkey: "Software\Classes\Applications\{#OldAppExe}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Check: OldExeKeyExists
+Root: HKA; Subkey: "Software\Classes\Applications\{#OldAppExe}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Check: OldExeKeyExists
 ; Offered in "Open with" always; made the default handler only with the pdfassoc task.
 Root: HKA; Subkey: "Software\Classes\pdfeditor.pdf"; ValueType: string; ValueName: ""; ValueData: "PDF document"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\pdfeditor.pdf\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"
@@ -73,3 +77,9 @@ Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueNa
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function OldExeKeyExists: Boolean;
+begin
+  Result := RegKeyExists(HKA, 'Software\Classes\Applications\{#OldAppExe}');
+end;

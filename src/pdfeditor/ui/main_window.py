@@ -12,6 +12,7 @@ from PySide6.QtCore import (
     QEvent,
     QObject,
     QPoint,
+    QRect,
     QSettings,
     Qt,
     QTimer,
@@ -222,6 +223,8 @@ class MainWindow(QMainWindow):
         self.resize(1280, 860)
         self.setAcceptDrops(True)
         self._cascade_index = 0
+        self._cascaded_geometry = QRect()
+        self._geometry_restored = False
         self.settings = QSettings()
         self.prefs = AppSettings(self.settings)
         cache = RenderCache[QImage](self.prefs.cache_mb * 1024 * 1024)
@@ -1754,7 +1757,7 @@ class MainWindow(QMainWindow):
     def _restore_settings(self) -> None:
         geometry = self.settings.value(SETTINGS_GEOMETRY)
         if geometry is not None:
-            self.restoreGeometry(geometry)
+            self._geometry_restored = bool(self.restoreGeometry(geometry))
         state = self.settings.value(SETTINGS_STATE)
         if state is not None:
             self._state_restored = bool(self.restoreState(state, STATE_VERSION))
@@ -1763,17 +1766,22 @@ class MainWindow(QMainWindow):
     def cascade(self, index: int) -> None:
         """Open as the ``index``-th running copy (``InstanceSlot``): offset from the saved
         position so the windows don't hide each other, wrapping around before leaving the
-        screen. Only the first copy remembers its position on close, so the offset doesn't
-        creep into the next start."""
+        screen. A later copy saves its position on close only if the user moved or resized
+        it, so the offset alone doesn't creep into the next start."""
         self._cascade_index = index
-        if index <= 0 or self.isMaximized() or self.isFullScreen():
-            return
-        screen = self.screen().availableGeometry()
-        frame = self.frameGeometry()
-        room = min(screen.right() - frame.right(), screen.bottom() - frame.bottom())
-        steps = max(room, 0) // CASCADE_STEP + 1
-        offset = (index % steps) * CASCADE_STEP
-        self.move(self.pos() + QPoint(offset, offset))
+        if index > 0 and not (self.isMaximized() or self.isFullScreen()):
+            self.winId()  # creates the native window, so the frame includes the title bar
+            screen = self.screen().availableGeometry()
+            if not self._geometry_restored:  # Qt would center it on show: start from there
+                frame = self.frameGeometry()
+                frame.moveCenter(screen.center())
+                self.move(frame.topLeft())
+            frame = self.frameGeometry()
+            room = min(screen.right() - frame.right(), screen.bottom() - frame.bottom())
+            steps = max(room, 0) // CASCADE_STEP + 1
+            offset = (index % steps) * CASCADE_STEP
+            self.move(self.pos() + QPoint(offset, offset))
+        self._cascaded_geometry = self.geometry()
 
     def new_window(self) -> None:
         if not start_new_window():
@@ -1832,7 +1840,7 @@ class MainWindow(QMainWindow):
         for side in (self.nav_panels, self.inspector_panels):
             side.remember_width()
             side.save()
-        if self._cascade_index == 0:
+        if self._cascade_index == 0 or self.geometry() != self._cascaded_geometry:
             self.settings.setValue(SETTINGS_GEOMETRY, self.saveGeometry())
         self.settings.setValue(SETTINGS_STATE, self.saveState(STATE_VERSION))
         self.autosave_timer.stop()

@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from pdfeditor import APP_DISPLAY_NAME
-from pdfeditor.bundle import data_path, is_frozen
+from pdfeditor.bundle import app_command, data_path, is_frozen
 
 log = logging.getLogger(__name__)
 
@@ -46,14 +46,13 @@ class Launcher:
 
 def current_launcher() -> Launcher:
     """This copy: the frozen exe, or ``pythonw -m pdfeditor`` from a source checkout."""
+    program, *args = app_command()
+    command = " ".join([f'"{program}"', *args, '"%1"'])
     if is_frozen():
-        exe = Path(sys.executable)
-        return Launcher(f'"{exe}" "%1"', f"{exe},0", exe.name)
-    python = Path(sys.executable)
-    windowed = python.with_name("pythonw.exe")
-    python = windowed if windowed.exists() else python
+        exe = Path(program)
+        return Launcher(command, f"{exe},0", exe.name)
     icon = data_path("branding", "elanero", "icons", "platform", "elanero.ico")
-    return Launcher(f'"{python}" -m pdfeditor "%1"', str(icon), None)
+    return Launcher(command, str(icon), None)
 
 
 def is_supported() -> bool:
