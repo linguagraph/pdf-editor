@@ -280,9 +280,16 @@ Run the built `dist/Elanero.exe` on Windows 11 with a real mouse, keyboard and t
 ### Phase 18: Microsoft Store release (M)
 Goal: publish the app in the Microsoft Store as a free MSIX package. The portable exe and the Inno Setup installer stay as alternative channels.
 
-Approach: package the app as **MSIX**, a full-trust desktop app (`runFullTrust`). Microsoft signs Store MSIX packages itself, so the Store channel needs no paid code-signing certificate (see the open Phase 17 item). The Store also installs, updates and cleanly uninstalls the app. The alternative is submitting a Win32 EXE/MSI installer: it needs a CA-signed installer hosted on our own HTTPS URL, and it gives no automatic updates, so it's not used. MSIX tools from the Windows SDK (`makeappx`, `signtool`, the App Certification Kit) are build-time only and never shipped. The app gains no new runtime dependencies. Steps marked **(owner)** need an account holder, a decision or a real machine. Fees, review times and policy numbers change, so check them against current Partner Center documentation when doing each step.
+Approach: package the app as **MSIX**, a full-trust desktop app (`runFullTrust`). Microsoft signs Store MSIX packages itself, so the Store channel needs no paid code-signing certificate (see the open Phase 17 item). The Store also installs, updates and cleanly uninstalls the app.
 
-- [ ] **S1 Decisions and accounts (owner).**
+**Signing decision (#88).** The owner would prefer an MSI/EXE, but the Store accepts an MSI/EXE only if we sign it ourselves:
+- **Certificate:** the installer and every PE file in it must carry an Authenticode signature chaining to a CA in the Microsoft Trusted Root Program. Self-signed certificates are rejected, and the Store doesn't re-sign MSI/EXE submissions.
+- **Hosting:** the installer must be downloadable from our own versioned HTTPS URL, and it must install silently.
+- **Updates:** the Store doesn't update MSI/EXE apps; we'd need our own update mechanism.
+
+With no certificate, **MSIX is the only way into the Store**, so it's the primary path (S1–S9). The Inno Setup `.exe` stays our own direct-download installer. An MSI/EXE Store listing is the optional S10, only if a certificate is bought later. MSIX tools from the Windows SDK (`makeappx`, `signtool`, the App Certification Kit) are build-time only and never shipped. The app gains no new runtime dependencies. Steps marked **(owner)** need an account holder, a decision or a real machine. Fees, review times and policy numbers change, so check them against current Partner Center documentation when doing each step.
+
+- [ ] **S1 Decisions and accounts (owner).** _(partial: the Partner Center developer account exists; name reservation and identity pending)_
   - Pick the public product name _(chosen: "Elanero - PDF Editor", #83; still check trademarks before reserving it)_. Don't use "Acrobat" or "Adobe" in the name or listing.
   - Open a Partner Center developer account: individual (the listing shows your name) or company (it shows the company, after business verification).
   - Reserve the name in Partner Center. Record the package identity it assigns (`Package/Identity/Name`, `Publisher` CN, `PublisherDisplayName`) in `packaging/msix/identity.json`; these values aren't secret.
@@ -290,7 +297,7 @@ Approach: package the app as **MSIX**, a full-trust desktop app (`runFullTrust`)
 - [ ] **S2 One-folder build for packaging.** `build_exe.py --onedir` builds the same app as a folder (PyInstaller `COLLECT`) from the same spec, reusing its excludes, hidden imports and data.
   - **Why:** the one-file exe unpacks about 70 MB to `%TEMP%` on every launch, which slows startup, can leave files behind and attracts antivirus scans. MSIX already compresses the folder.
   - **Checks:** the self-test, the clean-environment test and the size budget run against the folder build too. The portable one-file exe stays unchanged.
-- [ ] **S3 MSIX package.** A `packaging/msix/AppxManifest.xml` template, filled from `identity.json` and the version, plus `build_exe.py --msix`, which builds the onedir layout and packs it with `makeappx pack` into `dist/pdfeditor-<version>-x64.msix`. The manifest declares:
+- [ ] **S3 MSIX package.** A `packaging/msix/AppxManifest.xml` template, filled from `identity.json` and the version, plus `build_exe.py --msix`, which builds the onedir layout and packs it with `makeappx pack` into `dist/Elanero-<version>-x64.msix`. The manifest declares:
   - `TargetDeviceFamily Windows.Desktop` with MinVersion `10.0.17763.0`;
   - `EntryPoint="Windows.FullTrustApplication"` and the `runFullTrust` capability;
   - a `.pdf` `uap:FileTypeAssociation` (appears in "Open with" and Default apps; Windows doesn't let apps set themselves as the default);
@@ -343,6 +350,13 @@ Approach: package the app as **MSIX**, a full-trust desktop app (`runFullTrust`)
   - **Version bump:** `scripts/bump_version.py` updates `pyproject.toml`, the exe version resource, the manifest and `CHANGELOG.md` together.
   - **Optional publishing:** submit updates with the Microsoft Store Developer CLI (`msstore publish`), using Partner Center API credentials (an Entra ID app) stored as GitHub secrets. Until that's set up, upload manually.
   - **Release checklist:** document every step in `RELEASING.md`.
+
+- [ ] **S10 Optional: signed EXE in the Store (only if a certificate is bought).**
+  - **Certificate (owner):** Azure Artifact Signing (formerly Trusted Signing; about $9.99/month, open to organizations in the US, Canada, EU and UK and to individuals in the US and Canada) or an OV certificate (about $150–300/year). Confirm the option is eligible for Store MSI/EXE submissions before buying.
+  - **Signing:** sign `Elanero.exe` and the Inno Setup installer with `build_exe.py --sign` (already supported), with a timestamp.
+  - **Hosting:** a versioned HTTPS download URL per release (GitHub Releases), and the installer's silent switch (`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`).
+  - **Updates:** the app needs its own update check, because the Store doesn't update MSI/EXE apps.
+  - **Phase 17:** signing also closes its code-signing item and stops SmartScreen warning on direct downloads.
 
 Done when the app is listed publicly in the Store, installs and updates through it, passes the self-test through its execution alias, opens PDFs from Explorer, and every Store release matches a public source tag.
 
