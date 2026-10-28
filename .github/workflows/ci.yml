@@ -51,3 +51,43 @@ jobs:
           name: pdfeditor-exe-${{ github.sha }}
           path: dist/Elanero.exe
           retention-days: 14
+
+  build-msix:
+    # The Microsoft Store package (PLAN.md Phase 18): build it from the one-folder app with the
+    # test identity (the real one is git-ignored), then install the .msix itself and run the
+    # self-test through its execution alias, as a Store user would get it.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv venv && uv pip install -e ".[build]"
+      - run: uv run python scripts/build_exe.py --msix --sign-test --test --clean-env --no-window-check
+      - name: Install the package, self-test it, uninstall it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msix = Get-ChildItem dist\Elanero-*-x64.msix | Select-Object -First 1
+          # Trust the test certificate the build signed with (the runner is an administrator).
+          $pfx = Get-PfxData -FilePath build\msix\test-signing.pfx `
+              -Password (ConvertTo-SecureString 'elanero-test-only' -AsPlainText -Force)
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPeople', 'LocalMachine')
+          $store.Open('ReadWrite'); $store.Add($pfx.EndEntityCertificates[0]); $store.Close()
+          Add-AppxPackage -Path $msix.FullName
+          $pkg = Get-AppxPackage -Name 'LinguaGraph.ElaneroPDFEditor'
+          if (-not $pkg) { throw 'package not installed' }
+          $report = "$env:RUNNER_TEMP\msix-selftest.txt"
+          $alias = "$env:LOCALAPPDATA\Microsoft\WindowsApps\Elanero.exe"
+          $p = Start-Process -FilePath $alias -ArgumentList '--self-test','--self-test-report',$report -Wait -PassThru
+          Get-Content $report
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+          if (-not (Select-String -Path $report -Pattern 'channel: Microsoft Store' -Quiet)) { throw 'not detected as packaged' }
+          Remove-AppxPackage -Package $pkg.PackageFullName
+          if (Get-AppxPackage -Name 'LinguaGraph.ElaneroPDFEditor') { throw 'package still installed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elanero-msix-test-${{ github.sha }}
+          path: dist/Elanero-*-x64.msix
+          retention-days: 14

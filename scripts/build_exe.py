@@ -6,13 +6,16 @@
                                                        #   no Python/PATH and an empty profile
     uv run python scripts/build_exe.py --sign          # + Authenticode signature (see below)
     uv run python scripts/build_exe.py --installer     # + dist/pdfeditor-<ver>-setup.exe (Inno)
+    uv run python scripts/build_exe.py --onedir        # the app as a folder: dist/Elanero/
+    uv run python scripts/build_exe.py --msix          # + dist/Elanero-<ver>-x64.msix (Store)
+    uv run python scripts/build_exe.py --msix --sign-test  # ... signed for a test machine
 
 Signing uses signtool from the Windows SDK and either
   PDFEDITOR_SIGN_PFX (+ PDFEDITOR_SIGN_PASSWORD)  a .pfx file, or
   PDFEDITOR_SIGN_THUMBPRINT                        a certificate in the user's store;
 PDFEDITOR_SIGN_TIMESTAMP overrides the RFC 3161 timestamp server.
 
-Fails if the executable exceeds the size budget.
+Fails if the executable (or the folder) exceeds the size budget.
 """
 
 from __future__ import annotations
@@ -34,7 +37,8 @@ BRAND = ROOT / "src" / "pdfeditor" / "data" / "branding" / "elanero"
 ICON = BRAND / "icons" / "platform" / "elanero.ico"  # exe and installer icon
 DIST = ROOT / "dist"
 GENERATED = ROOT / "build" / "generated"
-SIZE_BUDGET_MB = 150
+SIZE_BUDGET_MB = 150  # the one-file exe and the MSIX (both compressed)
+ONEDIR_BUDGET_MB = 300  # the unpacked folder build
 DEFAULT_TIMESTAMP = "http://timestamp.digicert.com"
 SIGNTOOL_GLOB = "Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe"
 ISCC_GLOB = "Program Files (x86)/Inno Setup 6/ISCC.exe"
@@ -47,8 +51,18 @@ def version() -> str:
     return match.group(1)
 
 
-def exe_path() -> Path:
-    return DIST / ("Elanero.exe" if sys.platform == "win32" else "Elanero")
+def exe_path(onedir: bool = False) -> Path:
+    name = "Elanero.exe" if sys.platform == "win32" else "Elanero"
+    return DIST / "Elanero" / name if onedir else DIST / name
+
+
+def msix_path() -> Path:
+    return DIST / f"Elanero-{version()}-x64.msix"
+
+
+def build_size_mb(exe: Path, onedir: bool) -> float:
+    files = (f for f in exe.parent.rglob("*") if f.is_file()) if onedir else iter([exe])
+    return sum(f.stat().st_size for f in files) / 1024 / 1024
 
 
 def write_notices() -> Path:
@@ -62,23 +76,26 @@ def write_notices() -> Path:
     return out
 
 
-def build() -> Path:
+def build(onedir: bool = False) -> Path:
     subprocess.run(  # bundle English OCR data (not committed)
         [sys.executable, str(ROOT / "scripts" / "fetch_tessdata.py"), "eng"], cwd=ROOT, check=True
     )
     write_notices()
     shutil.rmtree(ROOT / "build" / "pdfeditor", ignore_errors=True)
     start = time.perf_counter()
+    env = dict(os.environ, PDFEDITOR_ONEDIR="1" if onedir else "0")  # read by the spec
     subprocess.run(
         [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)],
         cwd=ROOT,
         check=True,
+        env=env,
     )
-    exe = exe_path()
-    size_mb = exe.stat().st_size / 1024 / 1024
+    exe = exe_path(onedir)
+    size_mb = build_size_mb(exe, onedir)
     print(f"built {exe} ({size_mb:.1f} MB) in {time.perf_counter() - start:.0f}s")
-    if size_mb > SIZE_BUDGET_MB:
-        raise SystemExit(f"executable is {size_mb:.1f} MB, over the {SIZE_BUDGET_MB} MB budget")
+    budget = ONEDIR_BUDGET_MB if onedir else SIZE_BUDGET_MB
+    if size_mb > budget:
+        raise SystemExit(f"the build is {size_mb:.1f} MB, over the {budget} MB budget")
     return exe
 
 
@@ -156,12 +173,15 @@ def _remove(folder: Path) -> None:
     shutil.rmtree(folder, ignore_errors=True)
 
 
-def clean_env_smoke(exe: Path, window_check: bool = True) -> int:
+def clean_env_smoke(exe: Path, window_check: bool = True, onedir: bool = False) -> int:
     base = Path(tempfile.mkdtemp(prefix="pdfeditor-clean-"))
     try:
         copy = base / "app" / exe.name  # run from an unrelated folder, like a download
-        copy.parent.mkdir()
-        shutil.copy2(exe, copy)
+        if onedir:
+            shutil.copytree(exe.parent, copy.parent)
+        else:
+            copy.parent.mkdir()
+            shutil.copy2(exe, copy)
         env = clean_env(base / "profile")
         code = self_test(copy, env)
         if code != 0 or sys.platform != "win32" or not window_check:
@@ -242,15 +262,35 @@ def main() -> int:
     )
     parser.add_argument("--sign", action="store_true", help="Authenticode-sign the outputs")
     parser.add_argument("--installer", action="store_true", help="also build the installer")
+    parser.add_argument("--onedir", action="store_true", help="build the app as a folder")
+    parser.add_argument(
+        "--msix", action="store_true", help="also build the Store MSIX package (implies --onedir)"
+    )
+    parser.add_argument(
+        "--sign-test",
+        action="store_true",
+        help="with --msix: sign the package with a self-signed test certificate",
+    )
     args = parser.parse_args()
-    exe = exe_path() if args.skip_build else build()
+    onedir = args.onedir or args.msix
+    if args.installer and onedir:
+        parser.error("the installer wraps the one-file exe: build it without --onedir/--msix")
+    exe = exe_path(onedir) if args.skip_build else build(onedir)
     if args.sign:
         sign(exe)
     code = 0
     if args.test or (args.skip_build and not args.clean_env):
         code = self_test(exe)
     if code == 0 and args.clean_env:
-        code = clean_env_smoke(exe, window_check=not args.no_window_check)
+        code = clean_env_smoke(exe, window_check=not args.no_window_check, onedir=onedir)
+    if code == 0 and args.msix:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from msix_package import build_msix
+
+        package = build_msix(exe.parent, msix_path(), version(), sign=args.sign_test)
+        size_mb = package.stat().st_size / 1024 / 1024
+        if size_mb > SIZE_BUDGET_MB:
+            raise SystemExit(f"the MSIX is {size_mb:.1f} MB, over the {SIZE_BUDGET_MB} MB budget")
     if code == 0 and args.installer:
         setup = build_installer(exe)
         if args.sign:

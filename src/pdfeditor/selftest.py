@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from pdfeditor import __version__
-from pdfeditor.bundle import data_path, is_frozen
+from pdfeditor.bundle import channel, data_path, is_frozen
 
 Check = Callable[[], str]
 
@@ -567,7 +567,8 @@ def run_self_test(report_path: Path | None = None) -> int:
     install_manual_gc()
     lines = [
         f"pdfeditor {__version__} self-test",
-        f"frozen: {is_frozen()}  python: {platform.python_version()}  os: {platform.platform()}",
+        f"frozen: {is_frozen()}  channel: {channel()}  python: {platform.python_version()}  "
+        f"os: {platform.platform()}",
     ]
     failures = 0
     with tempfile.TemporaryDirectory(prefix="pdfeditor-selftest-") as tmp:

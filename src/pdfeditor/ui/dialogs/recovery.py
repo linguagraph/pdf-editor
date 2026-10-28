@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor.bundle import is_packaged
 from pdfeditor.core.autosave import RecoveryEntry
-from pdfeditor.ui.dialogs.base import FormDialog
+from pdfeditor.ui.dialogs.base import FormDialog, caption
 
 
 class RecoveryDialog(FormDialog):
@@ -33,6 +34,12 @@ class RecoveryDialog(FormDialog):
         self.selected: list[RecoveryEntry] = []
         self.discard_rest = False
 
+        if is_packaged():
+            self.uninstall_note = caption(
+                "Recover or save these before uninstalling Elanero: uninstalling the "
+                "Microsoft Store app deletes its recovery copies."
+            )
+            self.add_widget(self.uninstall_note)
         self.list = QListWidget(self)
         self.list.setAccessibleName("Recovered documents")
         for entry in entries:

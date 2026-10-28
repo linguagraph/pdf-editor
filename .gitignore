@@ -22,3 +22,6 @@ src/pdfeditor/data/tessdata/
 .claude/
 # local-only real-world sample (third-party manual page; not redistributable)
 tests/fixtures/real/scanned_dryer_manual.pdf
+
+# The Store package identity from Partner Center (copy of msix/identity.example.json)
+packaging/msix/identity.json

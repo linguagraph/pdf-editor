@@ -17,6 +17,45 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _package_name(function: str) -> str | None:
+    """``GetCurrentPackageFullName``/``FamilyName`` for this process, or None when it isn't
+    running from an MSIX package (or not on Windows)."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    try:
+        get = getattr(ctypes.windll.kernel32, function)
+    except AttributeError:  # Windows 7: no packages
+        return None
+    length = ctypes.c_uint32(0)
+    if get(ctypes.byref(length), None) != 122:  # ERROR_INSUFFICIENT_BUFFER: there is one
+        return None  # APPMODEL_ERROR_NO_PACKAGE
+    buffer = ctypes.create_unicode_buffer(length.value)
+    if get(ctypes.byref(length), buffer) != 0:
+        return None
+    return buffer.value
+
+
+def is_packaged() -> bool:
+    """True when running from the Microsoft Store (MSIX) package."""
+    return _package_name("GetCurrentPackageFullName") is not None
+
+
+def package_family_name() -> str | None:
+    return _package_name("GetCurrentPackageFamilyName")
+
+
+def channel() -> str:
+    """Where this copy came from, for Help > About and support requests."""
+    if is_packaged():
+        return "Microsoft Store"
+    if not is_frozen():
+        return "Source"
+    # The Inno Setup installer leaves its uninstaller next to the exe.
+    return "Installer" if (Path(sys.executable).parent / "unins000.exe").exists() else "Portable"
+
+
 def app_command() -> list[str]:
     """The command that starts this copy of the app: the frozen exe, or ``pythonw -m
     pdfeditor`` from a source checkout (``python`` when there's no ``pythonw``)."""
