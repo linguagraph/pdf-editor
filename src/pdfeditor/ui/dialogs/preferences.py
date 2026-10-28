@@ -277,7 +277,21 @@ class PreferencesDialog(FormDialog):
     def _fit_width(self) -> None:
         """Widen the dialog to its fields' minimum (the PDF file buttons need the most).
 
-        FormDialog sets an explicit minimum width, so Qt won't grow the window by itself."""
+        FormDialog sets an explicit minimum width, so Qt won't grow the window by itself. A
+        button's new minimum (a longer label) only reaches the dialog's layout level by level
+        through queued layout events, and measuring before then let the buttons overlap; so
+        bring every layout from the buttons' row up to the dialog up to date first."""
+        widget: QWidget | None = self.association_row
+        while widget is not None:
+            # activate() recomputes nested layouts too (invalidate() alone doesn't reach them);
+            # updateGeometry() drops the parent layout's cached copy of this widget's size.
+            if (layout := widget.layout()) is not None:
+                layout.invalidate()
+                layout.activate()
+            if widget is self:
+                break
+            widget.updateGeometry()
+            widget = widget.parentWidget()
         needed = self.minimumSizeHint().width()
         if self.width() < needed:
             self.resize(needed, self.height())

@@ -361,9 +361,18 @@ def test_preferences_registers_as_pdf_editor(qtbot, settings: AppSettings, monke
 
     def unclipped() -> bool:  # the style sheet's min-width once let the layout cut the text
         buttons = (d.register_button, d.default_button)
-        return all(b.width() >= b.sizeHint().width() for b in buttons)
+        fits = all(b.width() >= b.sizeHint().width() for b in buttons)
+        # ...and a longer label once pushed the buttons over each other, the row too narrow
+        apart = not d.register_button.geometry().intersects(d.default_button.geometry())
+        return (
+            fits
+            and apart
+            and d.association_row.width() >= d.association_row.minimumSizeHint().width()
+        )
 
     assert unclipped()
+    d.resize(d.minimumSizeHint())  # no spare width: the longer label must widen the dialog
+    qtbot.waitUntil(lambda: d.width() == d.minimumSizeHint().width())
     d.register_button.click()  # applies at once, without OK
     assert state["registered"] and d.register_button.text() == "Remove PDF Registration"
     qtbot.waitUntil(unclipped)  # the longer label still fits
@@ -375,6 +384,29 @@ def test_preferences_registers_as_pdf_editor(qtbot, settings: AppSettings, monke
     assert "its icon" in d.pdf_status.text()
     d.register_button.click()
     assert not state["registered"] and d.register_button.text() == "Register as PDF Editor"
+
+
+def test_preferences_grows_when_a_page_needs_more_width(
+    qtbot, settings: AppSettings, monkeypatch
+) -> None:
+    """A page inside the stacked widget asking for more width widens the open dialog
+    (QStackedWidget doesn't pass that on by itself, which let the PDF file buttons overlap)."""
+    from pdfeditor.services import file_association as fa
+
+    monkeypatch.setattr(fa, "is_supported", lambda: True)
+    monkeypatch.setattr(fa, "is_registered", lambda: False)
+    d = PreferencesDialog(settings)
+    qtbot.addWidget(d)
+    d.show()
+    d.resize(d.minimumSizeHint())
+    qtbot.waitUntil(lambda: d.width() == d.minimumSizeHint().width())
+    before = d.width()
+    d.default_button.setText("Choose Default App… " * 4)  # far wider than the rest needs
+    d._sync_association()
+    qtbot.waitUntil(lambda: d.width() > before)
+    row = d.association_row
+    assert row.width() >= row.minimumSizeHint().width()
+    assert not d.register_button.geometry().intersects(d.default_button.geometry())
 
 
 def test_preferences_hides_pdf_registration_off_windows(
