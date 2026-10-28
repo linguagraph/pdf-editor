@@ -250,28 +250,36 @@ class PreferencesDialog(FormDialog):
             ShortcutsDialog(manager, self).exec()
 
     def _sync_association(self) -> None:
-        registered = file_association.is_registered()
-        self.register_button.setText(
-            "Remove PDF Registration" if registered else "Register as PDF Editor"
-        )
-        self.default_button.setEnabled(registered)
+        if not file_association.can_register():  # the Store package registers itself
+            self.register_button.hide()
+            self.default_button.setEnabled(True)
+            text = (
+                "Elanero is in Explorer's “Open with” list. To open PDF files with it by "
+                "default, choose it as the default app in Windows Settings."
+            )
+        else:
+            registered = file_association.is_registered()
+            self.register_button.setText(
+                "Remove PDF Registration" if registered else "Register as PDF Editor"
+            )
+            self.default_button.setEnabled(registered)
+            if not registered:
+                text = (
+                    "Add Elanero to Explorer's “Open with” list and to Windows' default apps "
+                    "for PDF files."
+                )
+            elif file_association.is_default():
+                text = "Elanero opens PDF files, and Explorer shows them with its icon."
+            else:
+                text = (
+                    "Registered. To open PDF files with Elanero (and show them with its "
+                    "icon), choose it as the default app in Windows Settings."
+                )
         for button in (self.register_button, self.default_button):
             # The style sheet's min-width would otherwise let the layout clip the text.
             button.ensurePolished()
             button.setMinimumWidth(button.sizeHint().width())
         self._fit_width()
-        if not registered:
-            text = (
-                "Add Elanero to Explorer's “Open with” list and to Windows' default apps "
-                "for PDF files."
-            )
-        elif file_association.is_default():
-            text = "Elanero opens PDF files, and Explorer shows them with its icon."
-        else:
-            text = (
-                "Registered. To open PDF files with Elanero (and show them with its icon), "
-                "choose it as the default app in Windows Settings."
-            )
         self.pdf_status.setText(text)
 
     def _fit_width(self) -> None:

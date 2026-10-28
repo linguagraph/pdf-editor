@@ -1,6 +1,7 @@
 # PyInstaller spec for the self-contained one-file pdfeditor executable.
 # Build with:  uv run python scripts/build_exe.py   (wraps: pyinstaller packaging/pdfeditor.spec)
 # ruff: noqa
+import os
 import re
 from pathlib import Path
 
@@ -103,10 +104,20 @@ DROP_FILES = {
 }
 
 
+# Of the branding pack, only what the app loads (the pattern list above also lets through the
+# pack's own documents and sources, and the folder build picks up whole directories).
+BRANDING_KEEP = (
+    "/icons/png/", "/icons/platform/elanero.ico", "/splash/png/", "/elanero/branding/",
+    "/elanero/readme.txt",
+)
+
+
 def _keep(entry):
     name = entry[0].replace("\\", "/").lower()
     base = name.rsplit("/", 1)[-1]
     if base in DROP_FILES:
+        return False
+    if "/branding/elanero/" in name and not any(k in name for k in BRANDING_KEEP):
         return False
     # Qt's own UI strings: keep qtbase/qt catalogues, drop Qt Help/Designer/etc.
     if "/translations/" in name and not base.startswith(("qtbase_", "qt_")) or "qt_help_" in base:
@@ -117,12 +128,16 @@ def _keep(entry):
 a.binaries = [e for e in a.binaries if _keep(e)]
 a.datas = [e for e in a.datas if _keep(e)]
 pyz = PYZ(a.pure)
+# PDFEDITOR_ONEDIR=1 (build_exe.py --onedir / --msix) builds the same app as a folder,
+# dist/Elanero/Elanero.exe + _internal/, for the MSIX package: it starts without unpacking
+# 70 MB to %TEMP% first. The default is the portable one-file dist/Elanero.exe.
+ONEDIR = os.environ.get("PDFEDITOR_ONEDIR") == "1"
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    *([] if ONEDIR else [a.binaries, a.datas]),
     [],
+    exclude_binaries=ONEDIR,
     name="Elanero",
     icon=str(ICON),
     version=str(VERSION_FILE),
@@ -130,3 +145,5 @@ exe = EXE(
     upx=False,  # UPX-packed Qt DLLs trigger antivirus false positives and slow startup
     runtime_tmpdir=None,
 )
+if ONEDIR:
+    coll = COLLECT(exe, a.binaries, a.datas, name="Elanero", upx=False)

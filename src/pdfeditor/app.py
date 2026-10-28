@@ -11,7 +11,7 @@ from pathlib import Path
 from types import TracebackType
 
 from pdfeditor import __version__
-from pdfeditor.core.paths import APP_NAME, data_dir
+from pdfeditor.core.paths import APP_NAME, data_dir, visible_path
 
 log = logging.getLogger(APP_NAME)
 
@@ -63,7 +63,8 @@ def _excepthook(
             QMessageBox.critical(
                 None,
                 "Unexpected error",
-                f"{exc_type.__name__}: {exc}\n\nA crash report was saved to:\n{report}",
+                f"{exc_type.__name__}: {exc}\n\nA crash report was saved to:\n"
+                f"{visible_path(report)}",
             )
     except Exception:  # never let the hook itself raise
         log.exception("Failed to show crash dialog")

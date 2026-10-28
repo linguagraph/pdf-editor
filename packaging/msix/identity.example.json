@@ -1,0 +1,7 @@
+{
+  "note": "Test identity for local and CI builds. Copy this file to identity.json (git-ignored) and fill in the values from Partner Center (Product management > Product identity), with reserved: true, to build the package for the Store.",
+  "reserved": false,
+  "name": "LinguaGraph.ElaneroPDFEditor",
+  "publisher": "CN=Elanero Test Publisher",
+  "publisher_display_name": "LinguaGraph"
+}

@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from pdfeditor import APP_DISPLAY_NAME
-from pdfeditor.bundle import app_command, data_path, is_frozen
+from pdfeditor.bundle import app_command, data_path, is_frozen, is_packaged, package_family_name
 
 log = logging.getLogger(__name__)
 
@@ -55,8 +55,18 @@ def current_launcher() -> Launcher:
     return Launcher(command, str(icon), None)
 
 
+# The Application Id in packaging/msix/AppxManifest.xml.
+PACKAGE_APP_ID = "Elanero"
+
+
 def is_supported() -> bool:
     return sys.platform == "win32"
+
+
+def can_register() -> bool:
+    """Can this copy register itself? Not from the Store package: its manifest declares the
+    association, and registry writes from inside it land in the package's private hive."""
+    return is_supported() and not is_packaged()
 
 
 def _key(base: str, path: str) -> str:
@@ -195,7 +205,13 @@ def is_default(launcher: Launcher | None = None, *, base: str = "") -> bool:
 
 
 def default_apps_uri() -> str:
-    """Windows Settings ▸ Default apps, on Elanero's page where Windows supports it."""
+    """Windows Settings ▸ Default apps, on Elanero's page where Windows supports it.
+
+    A registered copy is found by its RegisteredApplications name; the Store package by its
+    app user model ID, ``<package family name>!<application id>``."""
+    family = package_family_name()
+    if family:
+        return "ms-settings:defaultapps?registeredAUMID=" + quote(f"{family}!{PACKAGE_APP_ID}")
     return "ms-settings:defaultapps?registeredAppUser=" + quote(APP_DISPLAY_NAME)
 
 

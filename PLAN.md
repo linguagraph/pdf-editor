@@ -289,15 +289,15 @@ Approach: package the app as **MSIX**, a full-trust desktop app (`runFullTrust`)
 
 With no certificate, **MSIX is the only way into the Store**, so it's the primary path (S1–S9). The Inno Setup `.exe` stays our own direct-download installer. An MSI/EXE Store listing is the optional S10, only if a certificate is bought later. MSIX tools from the Windows SDK (`makeappx`, `signtool`, the App Certification Kit) are build-time only and never shipped. The app gains no new runtime dependencies. Steps marked **(owner)** need an account holder, a decision or a real machine. Fees, review times and policy numbers change, so check them against current Partner Center documentation when doing each step.
 
-- [ ] **S1 Decisions and accounts (owner).** _(partial: the Partner Center developer account exists; name reservation and identity pending)_
+- [ ] **S1 Decisions and accounts (owner).** _(partial: the Partner Center account exists, the name is reserved and the identity (`SGNSolutions.Elanero-PDFEditor`, publisher display name "SGN Solutions") is in `packaging/msix/identity.json`, which the owner keeps out of git (`identity.example.json` holds test values for CI); pending: trademark check, and confirming free / all markets)_
   - Pick the public product name _(chosen: "Elanero - PDF Editor", #83; still check trademarks before reserving it)_. Don't use "Acrobat" or "Adobe" in the name or listing.
   - Open a Partner Center developer account: individual (the listing shows your name) or company (it shows the company, after business verification).
-  - Reserve the name in Partner Center. Record the package identity it assigns (`Package/Identity/Name`, `Publisher` CN, `PublisherDisplayName`) in `packaging/msix/identity.json`; these values aren't secret.
+  - Reserve the name in Partner Center. Record the package identity it assigns (`Package/Identity/Name`, `Publisher` CN, `PublisherDisplayName`) in `packaging/msix/identity.json`, which is git-ignored at the owner's request.
   - Confirm: free app, all markets, Windows 10 1809+ x64 only.
-- [ ] **S2 One-folder build for packaging.** `build_exe.py --onedir` builds the same app as a folder (PyInstaller `COLLECT`) from the same spec, reusing its excludes, hidden imports and data.
+- [x] **S2 One-folder build for packaging.** _(PDFEDITOR_ONEDIR in the spec, `build_exe.py --onedir`; the folder has its own 300 MB budget (about 145 MB), the MSIX the 150 MB one; in a clean profile it opened its window in about 8 s, against 11–15 s for the one-file exe. The spec now bundles only the branding files the app loads, which also took two pack documents out of the one-file exe.)_ `build_exe.py --onedir` builds the same app as a folder (PyInstaller `COLLECT`) from the same spec, reusing its excludes, hidden imports and data.
   - **Why:** the one-file exe unpacks about 70 MB to `%TEMP%` on every launch, which slows startup, can leave files behind and attracts antivirus scans. MSIX already compresses the folder.
   - **Checks:** the self-test, the clean-environment test and the size budget run against the folder build too. The portable one-file exe stays unchanged.
-- [ ] **S3 MSIX package.** A `packaging/msix/AppxManifest.xml` template, filled from `identity.json` and the version, plus `build_exe.py --msix`, which builds the onedir layout and packs it with `makeappx pack` into `dist/Elanero-<version>-x64.msix`. The manifest declares:
+- [x] **S3 MSIX package.** _(`scripts/msix_package.py`, called by `build_exe.py --msix [--sign-test]`. makepri builds one `resources.pri` with every scale (the default split into `resources.scale-*.pri` made registration fail). makeappx sometimes reports success while skipping freshly copied DLLs, so the build checks every file made it into the package, retrying with a growing pause, and fails rather than ship a short package. With the real identity the package (about 70 MB) installed, passed the self-test through the `elanero` alias and opened a PDF.)_ A `packaging/msix/AppxManifest.xml` template, filled from `identity.json` and the version, plus `build_exe.py --msix`, which builds the onedir layout and packs it with `makeappx pack` into `dist/Elanero-<version>-x64.msix`. The manifest declares:
   - `TargetDeviceFamily Windows.Desktop` with MinVersion `10.0.17763.0`;
   - `EntryPoint="Windows.FullTrustApplication"` and the `runFullTrust` capability;
   - a `.pdf` `uap:FileTypeAssociation` (appears in "Open with" and Default apps; Windows doesn't let apps set themselves as the default);
@@ -309,7 +309,7 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
   - `Square150x150Logo`, `Wide310x150Logo` and `StoreLogo`, at scale 100/125/150/200/400.
 
   For local testing, `--msix --sign-test` signs with a self-signed test certificate whose subject matches the Publisher CN (`New-SelfSignedCertificate`; the private key is never committed). Unit tests check that the generated manifest is valid XML, has the expected identity, version and capabilities, and that every referenced asset exists.
-- [ ] **S4 Behaviour when packaged.**
+- [ ] **S4 Behaviour when packaged.** _(partial: `bundle.is_packaged()`, `package_family_name()` and `channel()` (Microsoft Store / Installer / Portable / Source, also in the self-test report); `core.paths.visible_path()` for the crash-report path; Preferences hides "Register as PDF Editor" when packaged (the manifest declares the association); the recovery dialog warns that uninstalling deletes recovery copies; About shows the channel. Checked live in the installed package: the self-test (`channel: Microsoft Store`) and opening a PDF through the alias. Pending: checking in the package several windows and the hand-off, OCR downloads, external tools, printing and drag and drop; the optional import of portable settings.)_
   - **Detection:** `bundle.is_packaged()` (via `GetCurrentPackageFullName`) tells the app it's running from an MSIX package.
   - **Data folders:** MSIX redirects writes to `%LOCALAPPDATA%` and `HKCU` into the package's private store. The app reads and writes them transparently. But paths shown to the user or handed to Explorer would point at the un-redirected folder: "Show in folder" for logs and recovery copies, and the crash-report path. In packaged mode, resolve them to `%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Local\...`.
   - **Check still work packaged:**
@@ -321,19 +321,19 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
   - **Other channels:** the Store and portable versions keep separate settings. Optional: the first packaged run offers to import the portable version's settings and recent files.
   - **Updates and About:** the Store handles updates, so the app adds no update checker. Help ▸ About shows the channel ("Microsoft Store" / "Portable" / "Installer") and the version.
   - **Tests:** cover the packaged path logic by faking `is_packaged()`.
-- [ ] **S5 Licensing, privacy and policy.**
+- [ ] **S5 Licensing, privacy and policy.** _(partial: `PRIVACY.md` (linked from Help ▸ About as `PRIVACY_URL`), `RELEASING.md` with the AGPL steps, and the `runFullTrust` justification in `packaging/store/listing-en.md`; pending (owner): the age-rating and export questionnaires)_
   - **AGPL:** each Store release is built from a Git tag `vX.Y.Z` pushed to the public repository. The Store description and Help ▸ About link to the source and the license. The package contains `LICENSE` and the third-party notices (already bundled). Document the AGPL obligations in `RELEASING.md`. If the AGPL ever becomes a problem, Artifex sells a commercial PyMuPDF license; that's not needed now.
   - **Privacy:** `PRIVACY.md` says the app collects no telemetry or personal data and works offline, and that the only network access is OCR language downloads from GitHub, started by the user. Publish it at a stable URL (GitHub Pages or the repository) and link it from About and the listing.
   - **Capability justification:** write the text for the restricted `runFullTrust` capability ("a full desktop PDF editor that opens and saves files anywhere the user chooses, prints, and optionally starts LibreOffice for Office conversion").
   - **Questionnaires (owner):** the age rating (IARC; expected rating: everyone) and any cryptography or export questions (the app uses standard PDF password encryption: AES-256 and RC4 through MuPDF).
-- [ ] **S6 Store listing.**
+- [ ] **S6 Store listing.** _(partial: all text in `packaging/store/listing-en.md`; pending: the screenshots script and the logo/poster images)_
   - **Text, in `packaging/store/listing-en.md`:** name, short description, full description, up to 20 feature bullets, keywords, release notes, and category (Productivity).
   - **Support details:** support contact and URL (GitHub Issues), privacy URL.
   - **System requirements:** x64, Windows 10 1809+, about 250 MB disk.
   - **Screenshots:** at least 4 desktop screenshots at 1920×1080, light and dark, from a script that reuses the U11 golden scenes with a realistic sample document: start page, editing, comments with the mini toolbar, organizer, a dialog.
   - **Store images:** a 1:1 logo (300×300 or larger) and a 2:3 poster (720×1080), generated from the icon.
   - **Accessibility claim:** claim it in the listing only after U11's Narrator and keyboard hands-on pass.
-- [ ] **S7 Certification test locally.**
+- [ ] **S7 Certification test locally.** _(partial: the `build-msix` CI job builds the package with the test identity, trusts the test certificate, installs the `.msix`, runs the self-test through the alias, checks `channel: Microsoft Store` and uninstalls; pending: the App Certification Kit (needs an elevated prompt, see `RELEASING.md`; owner), the upgrade test, the file-association check on CI, and the clean Windows 11 machine (owner))_
   - **App Certification Kit:** `appcert.exe test -appxpackagepath … -reportoutputpath …` passes on the MSIX.
   - **Install round trip on CI:** on the Windows CI runner, import the test certificate into `TrustedPeople`, run `Add-AppxPackage`, then:
     - `pdfeditor --self-test` through the execution alias (must report `RESULT: OK`);
@@ -345,7 +345,7 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
   - **Private testers first:** upload the MSIX to a new submission with a private audience (or a package flight), fill in the listing, age rating, pricing (free) and markets, then submit for certification.
   - **Certification report:** fix any findings, then make the listing public.
   - **Record the outcome:** the Store ID and listing URL go in `RELEASING.md` and the README ("Get it from Microsoft" badge).
-- [ ] **S9 Release automation.**
+- [ ] **S9 Release automation.** _(partial: `RELEASING.md` documents every step; pending: the tag workflow, `bump_version.py` and `msstore publish`)_
   - **Build on release tags:** a CI workflow builds and tests the MSIX on `v*` tags and attaches it to the GitHub release, next to the portable exe and the Inno Setup installer.
   - **Version bump:** `scripts/bump_version.py` updates `pyproject.toml`, the exe version resource, the manifest and `CHANGELOG.md` together.
   - **Optional publishing:** submit updates with the Microsoft Store Developer CLI (`msstore publish`), using Partner Center API credentials (an Entra ID app) stored as GitHub secrets. Until that's set up, upload manually.

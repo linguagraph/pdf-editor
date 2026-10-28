@@ -1,6 +1,6 @@
 # Elanero - PDF Editor
 
-Elanero (internal name and executable: `pdfeditor`) is an Acrobat-style desktop PDF editor written in Python (PySide6 UI, PyMuPDF engine behind an
+Elanero (internal name `pdfeditor`, executable `Elanero.exe`) is an Acrobat-style desktop PDF editor written in Python (PySide6 UI, PyMuPDF engine behind an
 abstract engine layer). See [PLAN.md](PLAN.md) for the roadmap and progress, and
 [AGENTS.md](AGENTS.md) for contributor/agent conventions.
 

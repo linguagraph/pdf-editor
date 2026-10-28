@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pdfeditor import APP_DISPLAY_NAME, SOURCE_URL, __version__
+from pdfeditor import APP_DISPLAY_NAME, PRIVACY_URL, SOURCE_URL, __version__
+from pdfeditor.bundle import channel
 from pdfeditor.licenses import about_text, license_text, notices
 from pdfeditor.ui.branding import app_icon, wordmark
 from pdfeditor.ui.dialogs.base import FormDialog
@@ -32,7 +33,7 @@ class AboutDialog(FormDialog):
     def __init__(self, engine_version: str = "", parent: QWidget | None = None) -> None:
         super().__init__(
             APP_DISPLAY_NAME,
-            f"Version {__version__}. An open-source PDF editor."
+            f"Version {__version__} ({channel()}). An open-source PDF editor."
             + (f" {engine_version}" if engine_version else ""),
             parent,
             window_title="About Elanero",
@@ -54,7 +55,11 @@ class AboutDialog(FormDialog):
         outer = self.layout()
         assert isinstance(outer, QBoxLayout)
         outer.insertWidget(0, self.brand)
-        head = QLabel(f'Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>', self)
+        head = QLabel(
+            f'Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a><br>'
+            f'<a href="{PRIVACY_URL}">Privacy policy</a>: no data collected; works offline.',
+            self,
+        )
         head.setOpenExternalLinks(True)
         head.setWordWrap(True)
         self.tabs = QTabWidget(self)
