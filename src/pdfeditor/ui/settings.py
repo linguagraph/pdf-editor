@@ -153,6 +153,16 @@ class AppSettings:
         return value if isinstance(value, bool) else str(value).lower() == "true"
 
     @property
+    def single_window(self) -> bool:
+        """Files opened from Explorer go to the running window as tabs (off: every launch
+        opens its own window)."""
+        return self._bool("prefs/single_window", False)
+
+    @single_window.setter
+    def single_window(self, value: bool) -> None:
+        self.qs.setValue("prefs/single_window", "true" if value else "false")
+
+    @property
     def show_menu_bar(self) -> bool:
         """Classic menu bar always visible (off: behind the ☰ button and the Alt key)."""
         return self._bool("prefs/show_menu_bar", False)

@@ -121,3 +121,65 @@ def test_about_shows_the_brand(qtbot, theme: str) -> None:
         assert APP_DISPLAY_NAME in d.tabs.widget(0).toPlainText()
     finally:
         apply_theme(app, Theme.SYSTEM)
+
+
+def _bar_pixel(splash: branding.LoadingSplash, fraction: float):
+    """The rendered splash's color at ``fraction`` along the bar's middle line."""
+    image = splash.grab().toImage()
+    bar = splash.bar_rect()
+    ratio = image.devicePixelRatio()
+    x = (bar.left() + bar.width() * fraction) * ratio
+    return image.pixelColor(round(x), round(bar.center().y() * ratio))
+
+
+def _close(a, b, tol: int = 24) -> bool:
+    return all(abs(x - y) <= tol for x, y in zip(a.getRgb()[:3], b.getRgb()[:3], strict=True))
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_splash_bar_shows_real_progress(qtbot, scheme: str) -> None:
+    splash = branding.show_splash(scheme)
+    qtbot.addWidget(splash)
+    track, fill = splash._track, splash._fill
+    assert not _close(track, fill)
+    # Nothing done yet: the artwork's half-filled example bar is gone.
+    assert _close(_bar_pixel(splash, 0.3), track)
+    splash.set_progress(0.5)
+    assert _close(_bar_pixel(splash, 0.3), fill)
+    assert _close(_bar_pixel(splash, 0.7), track)
+    splash.set_progress(0.2)  # never moves backwards
+    assert splash.progress() == 0.5
+    splash.set_progress(1.0)
+    assert _close(_bar_pixel(splash, 0.95), fill)
+    splash.close()
+
+
+@pytest.mark.gui
+def test_splash_complete_holds_for_its_minimum_time(qtbot) -> None:
+    import time
+
+    splash = branding.show_splash("light")
+    qtbot.addWidget(splash)
+    splash.set_progress(0.4)
+    start = time.monotonic()
+    splash.complete(min_seconds=0.3)
+    assert splash.progress() == 1.0
+    assert time.monotonic() - start >= 0.15
+    # Once the minimum has passed, completing doesn't wait.
+    start = time.monotonic()
+    splash.complete(min_seconds=0.3)
+    assert time.monotonic() - start < 0.1
+    splash.close()
+
+
+@pytest.mark.gui
+def test_dismissed_splash_completes_at_once(qtbot) -> None:
+    import time
+
+    splash = branding.show_splash("light")
+    qtbot.addWidget(splash)
+    splash.hide()  # what clicking the splash does
+    start = time.monotonic()
+    splash.complete(min_seconds=5)
+    assert time.monotonic() - start < 0.1 and splash.progress() == 1.0

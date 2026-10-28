@@ -1,6 +1,6 @@
-"""Build the self-contained pdfeditor executable, and optionally test, sign and package it.
+"""Build the self-contained Elanero executable, and optionally test, sign and package it.
 
-    uv run python scripts/build_exe.py                 # build dist/pdfeditor.exe
+    uv run python scripts/build_exe.py                 # build dist/Elanero.exe
     uv run python scripts/build_exe.py --test          # + run --self-test on the result
     uv run python scripts/build_exe.py --clean-env     # + self-test and a windowed launch with
                                                        #   no Python/PATH and an empty profile
@@ -48,7 +48,7 @@ def version() -> str:
 
 
 def exe_path() -> Path:
-    return DIST / ("pdfeditor.exe" if sys.platform == "win32" else "pdfeditor")
+    return DIST / ("Elanero.exe" if sys.platform == "win32" else "Elanero")
 
 
 def write_notices() -> Path:
@@ -127,14 +127,14 @@ def launch_check(exe: Path, env: dict[str, str], sample: Path, timeout: float = 
     try:
         while time.perf_counter() - start < timeout:
             out = subprocess.run(
-                ["tasklist", "/v", "/fo", "csv", "/fi", "imagename eq pdfeditor.exe"],
+                ["tasklist", "/v", "/fo", "csv", "/fi", f"imagename eq {exe.name}"],
                 capture_output=True,
                 text=True,
                 errors="replace",
             ).stdout
             if sample.name in out:
                 return time.perf_counter() - start
-            if proc.poll() is not None and "pdfeditor.exe" not in out:
+            if proc.poll() is not None and exe.name not in out:
                 raise SystemExit(f"the app exited ({proc.returncode}) before showing a window")
             time.sleep(0.2)
         raise SystemExit(f"no window showing {sample.name} within {timeout:.0f}s")

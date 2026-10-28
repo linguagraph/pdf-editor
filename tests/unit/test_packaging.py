@@ -39,7 +39,7 @@ def test_notices_and_agpl() -> None:
 
 def test_sign_command() -> None:
     b = build_script()
-    tool, target = Path("signtool.exe"), Path("dist/pdfeditor.exe")
+    tool, target = Path("signtool.exe"), Path("dist/Elanero.exe")
     cmd = b.sign_command(
         tool, target, {"PDFEDITOR_SIGN_PFX": "c.pfx", "PDFEDITOR_SIGN_PASSWORD": "pw"}
     )
@@ -57,10 +57,14 @@ def test_sign_command() -> None:
 def test_installer_script(tmp_path: Path, monkeypatch) -> None:
     b = build_script()
     monkeypatch.setattr(b, "GENERATED", tmp_path)
-    script = b.installer_script(Path("C:/out/pdfeditor.exe"), Path("C:/out")).read_text("utf-8")
+    script = b.installer_script(Path("C:/out/Elanero.exe"), Path("C:/out")).read_text("utf-8")
     assert not re.search(r"@[A-Z]+@", script)  # every placeholder filled
     assert f'#define AppVersion "{__version__}"' in script
-    assert r'Source: "C:\out\pdfeditor.exe"' in script or 'Source: "C:/out/pdfeditor.exe"' in script
+    assert r'Source: "C:\out\Elanero.exe"' in script or 'Source: "C:/out/Elanero.exe"' in script
+    assert '#define AppExe "Elanero.exe"' in script
+    # Upgrades from the pdfeditor.exe era drop the old exe and repoint its "Open with" key.
+    assert r'Name: "{app}\{#OldAppExe}"' in script and "OldExeKeyExists" in script
+    assert "[Code]" in script and "Flags: deletekey" not in script
     for section in ("[Setup]", "[Files]", "[Icons]", "[Registry]", "[Tasks]"):
         assert section in script
     assert "pdfassoc" in script and "uninsdeletekey" in script

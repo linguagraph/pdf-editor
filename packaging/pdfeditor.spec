@@ -34,7 +34,7 @@ VERSION_FILE.write_text(
       StringStruct('FileVersion', '{VERSION}'),
       StringStruct('InternalName', 'pdfeditor'),
       StringStruct('LegalCopyright', 'AGPL-3.0-or-later'),
-      StringStruct('OriginalFilename', 'pdfeditor.exe'),
+      StringStruct('OriginalFilename', 'Elanero.exe'),
       StringStruct('ProductName', 'Elanero - PDF Editor'),
       StringStruct('ProductVersion', '{VERSION}')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
@@ -123,7 +123,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="pdfeditor",
+    name="Elanero",
     icon=str(ICON),
     version=str(VERSION_FILE),
     console=False,

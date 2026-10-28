@@ -31,7 +31,7 @@ uv run lint-imports                    # architecture contracts
 uv run mypy
 uv run python -m pdfeditor [file.pdf]  # launch the app
 uv run python -m pdfeditor --self-test # end-to-end smoke test (no window)
-uv pip install -e ".[build]" && uv run python scripts/build_exe.py --test  # dist/pdfeditor.exe
+uv pip install -e ".[build]" && uv run python scripts/build_exe.py --test  # dist/Elanero.exe
 ```
 
 Before calling a task done, run: `ruff check`, `ruff format --check`, `lint-imports`, `mypy`,
@@ -74,7 +74,7 @@ pdfeditor.model     pure-Python dataclasses: geometry, text, annotations, outlin
 
 ## Self-contained executable (required)
 
-The product ships as one `pdfeditor.exe` (PyInstaller one-file, `packaging/pdfeditor.spec`).
+The product ships as one `Elanero.exe` (PyInstaller one-file, `packaging/pdfeditor.spec`).
 No feature may need Python, an installer or an external tool at runtime.
 
 - Bundled files go in `src/pdfeditor/data/` and are read only through
@@ -131,7 +131,7 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
   (squash) and delete the branch. Commit messages and PR bodies follow the repo's attribution
   settings.
 - After each phase is merged, build the executable from the updated `main`:
-  `uv run python scripts/build_exe.py --test` (writes `dist/pdfeditor.exe`, must end with
+  `uv run python scripts/build_exe.py --test` (writes `dist/Elanero.exe`, must end with
   `RESULT: OK`), and report the size and self-test result.
 - If a pre-commit hook modifies files and aborts the commit, `git add` and run the same
   `git commit` again. Never use `--amend` for this: it amends the previous (possibly merged)

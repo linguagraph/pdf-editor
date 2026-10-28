@@ -74,6 +74,15 @@ class PreferencesDialog(FormDialog):
             self.autosave,
             "Unsaved changes can be recovered if the app closes unexpectedly.",
         )
+        self.single_window = QCheckBox("Open files in the window that's already running")
+        self.single_window.setChecked(settings.single_window)
+        add_row(
+            form,
+            "Windows:",
+            self.single_window,
+            "Off: every file you open from Explorer gets its own window. Applies to windows "
+            "opened after the change.",
+        )
 
         # PDF file association (Windows): applied at once, like the shortcut editor
         self.pdf_status = caption("")
@@ -268,7 +277,21 @@ class PreferencesDialog(FormDialog):
     def _fit_width(self) -> None:
         """Widen the dialog to its fields' minimum (the PDF file buttons need the most).
 
-        FormDialog sets an explicit minimum width, so Qt won't grow the window by itself."""
+        FormDialog sets an explicit minimum width, so Qt won't grow the window by itself. A
+        button's new minimum (a longer label) only reaches the dialog's layout level by level
+        through queued layout events, and measuring before then let the buttons overlap; so
+        bring every layout from the buttons' row up to the dialog up to date first."""
+        widget: QWidget | None = self.association_row
+        while widget is not None:
+            # activate() recomputes nested layouts too (invalidate() alone doesn't reach them);
+            # updateGeometry() drops the parent layout's cached copy of this widget's size.
+            if (layout := widget.layout()) is not None:
+                layout.invalidate()
+                layout.activate()
+            if widget is self:
+                break
+            widget.updateGeometry()
+            widget = widget.parentWidget()
         needed = self.minimumSizeHint().width()
         if self.width() < needed:
             self.resize(needed, self.height())
@@ -320,6 +343,7 @@ class PreferencesDialog(FormDialog):
         accent = self.accent.currentData()
         s.accent = accent if isinstance(accent, str) and accent != CUSTOM else ""
         s.autosave_minutes = self.autosave.value()
+        s.single_window = self.single_window.isChecked()
         s.undo_disk_mb = self.undo_disk.value()
         s.cache_mb = self.cache.value()
         super().accept()

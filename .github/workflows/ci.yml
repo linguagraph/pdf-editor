@@ -49,5 +49,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pdfeditor-exe-${{ github.sha }}
-          path: dist/pdfeditor.exe
+          path: dist/Elanero.exe
           retention-days: 14
