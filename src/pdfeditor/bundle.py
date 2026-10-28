@@ -38,12 +38,15 @@ def _package_name(function: str) -> str | None:
 
 
 def is_packaged() -> bool:
-    """True when running from the Microsoft Store (MSIX) package."""
-    return _package_name("GetCurrentPackageFullName") is not None
+    """True when running from the Microsoft Store (MSIX) package.
+
+    Only the frozen app counts: a source run under the Microsoft Store build of Python has
+    Python's package identity, not ours."""
+    return is_frozen() and _package_name("GetCurrentPackageFullName") is not None
 
 
 def package_family_name() -> str | None:
-    return _package_name("GetCurrentPackageFamilyName")
+    return _package_name("GetCurrentPackageFamilyName") if is_frozen() else None
 
 
 def channel() -> str:

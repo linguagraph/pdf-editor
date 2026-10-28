@@ -18,6 +18,7 @@ def packaged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Pretend to run from the package, with ``tmp_path`` as %LOCALAPPDATA%."""
     names = {"GetCurrentPackageFullName": FAMILY + "_x64", "GetCurrentPackageFamilyName": FAMILY}
     monkeypatch.setattr(bundle, "_package_name", names.get)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)  # the packaged app is the exe
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     return tmp_path
 
@@ -25,6 +26,24 @@ def packaged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 def test_not_packaged_from_source() -> None:
     assert not bundle.is_packaged() and bundle.package_family_name() is None
     assert bundle.channel() == "Source"
+
+
+def test_store_python_is_not_the_store_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A source run under the Microsoft Store build of Python has Python's package identity.
+    names = {"GetCurrentPackageFullName": "PythonSoftwareFoundation.Python.3.11_x64"}
+    monkeypatch.setattr(bundle, "_package_name", names.get)
+    assert not bundle.is_packaged() and bundle.package_family_name() is None
+    assert bundle.channel() == "Source"
+
+
+def test_package_registers_pdf_itself(packaged: Path) -> None:
+    from pdfeditor.services import file_association as fa
+
+    assert not fa.can_register()
+    # Settings finds a packaged app by its AUMID, not by the RegisteredApplications name.
+    assert fa.default_apps_uri() == (
+        "ms-settings:defaultapps?registeredAUMID=" + FAMILY + "%21Elanero"
+    )
 
 
 def test_channels(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, packaged: Path) -> None:

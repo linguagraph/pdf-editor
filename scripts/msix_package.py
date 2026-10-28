@@ -17,6 +17,7 @@ The Windows SDK tools (makeappx, makepri, signtool) are needed only here, at bui
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -67,10 +68,13 @@ def load_identity(path: Path | None = None) -> Identity:
 
 
 def msix_version(version: str) -> str:
-    """``1.2.3`` (or ``1.2.3rc1``) as ``1.2.3.0``: the Store requires the fourth part be 0."""
-    numbers = [int(n) for n in re.findall(r"\d+", version)[:3]]
-    numbers += [0] * (3 - len(numbers))
-    return ".".join(str(n) for n in numbers) + ".0"
+    """``1.2.3`` as ``1.2.3.0`` (the Store requires the fourth part be 0; ``1.2`` is
+    ``1.2.0.0``). Pre-releases are refused: ``1.2rc1`` has no Store version that sorts below
+    the final ``1.2``, and the Store only accepts increasing versions."""
+    match = re.fullmatch(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", version)
+    if match is None:
+        raise ValueError(f"Store packages need a final X.Y.Z version, not {version!r}")
+    return ".".join(n or "0" for n in match.groups()) + ".0"
 
 
 def manifest_text(identity: Identity, version: str) -> str:
@@ -97,17 +101,22 @@ class Asset:
     icon: int
 
 
+def _px(size: float) -> int:
+    """Rounded half up, like Windows' asset sizes (50 at 125% is 63, not round()'s 62)."""
+    return math.floor(size + 0.5)
+
+
 def assets() -> list[Asset]:
     out: list[Asset] = []
     for scale in SCALES:
         k = scale / 100
-        side44, side50 = round(44 * k), round(50 * k)
+        side44, side50 = _px(44 * k), _px(50 * k)
         out.append(Asset(f"Square44x44Logo.scale-{scale}.png", (side44, side44), side44))
         out.append(Asset(f"StoreLogo.scale-{scale}.png", (side50, side50), side50))
-        square = round(150 * k)
-        tile = round(square * TILE_ICON_SHARE)
+        square = _px(150 * k)
+        tile = _px(square * TILE_ICON_SHARE)
         out.append(Asset(f"Square150x150Logo.scale-{scale}.png", (square, square), tile))
-        out.append(Asset(f"Wide310x150Logo.scale-{scale}.png", (round(310 * k), square), tile))
+        out.append(Asset(f"Wide310x150Logo.scale-{scale}.png", (_px(310 * k), square), tile))
     for size in TARGET_SIZES:
         for suffix in ("", "_altform-unplated"):
             out.append(Asset(f"Square44x44Logo.targetsize-{size}{suffix}.png", (size, size), size))
@@ -139,6 +148,25 @@ def write_assets(folder: Path) -> list[Path]:
     return written
 
 
+def _output(result: subprocess.CompletedProcess[bytes]) -> str:
+    """A tool's output as text: makepri writes UTF-16, the others the console code page."""
+    raw = result.stdout + result.stderr
+    if raw[1:2] == b"\0":
+        text = raw.decode("utf-16-le", "replace")
+    else:
+        text = raw.decode("mbcs" if os.name == "nt" else "utf-8", "replace")
+    return text.strip()[-2000:]
+
+
+def run_tool(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run an SDK tool quietly, but stop with its own output if it fails."""
+    result = subprocess.run(command, capture_output=True)
+    if result.returncode != 0:
+        name = Path(command[0]).name
+        raise SystemExit(f"{name} failed ({result.returncode}):\n{_output(result)}")
+    return result
+
+
 def find_sdk_tool(tool: str) -> Path:
     found = shutil.which(tool)
     if found:
@@ -165,17 +193,15 @@ def make_layout(app_dir: Path, layout: Path, identity: Identity, version: str) -
     (pri_root / "AppxManifest.xml").write_text(manifest, encoding="utf-8")
     makepri = find_sdk_tool("makepri")
     config = layout.parent / "priconfig.xml"
-    subprocess.run(
-        [str(makepri), "createconfig", "/cf", str(config), "/dq", "en-US", "/pv", "10.0.0", "/o"],
-        check=True,
-        capture_output=True,
+    run_tool(
+        [str(makepri), "createconfig", "/cf", str(config), "/dq", "en-US", "/pv", "10.0.0", "/o"]
     )
     # One resources.pri with every scale: the default config splits scales and languages into
     # resources.scale-*.pri for bundles, and a single package registered that way has no
     # default tile image ("no default or neutral resource").
     text = config.read_text(encoding="utf-8")
     config.write_text(re.sub(r"\s*<packaging>.*?</packaging>", "", text, flags=re.DOTALL))
-    subprocess.run(
+    run_tool(
         [
             str(makepri),
             "new",
@@ -188,9 +214,7 @@ def make_layout(app_dir: Path, layout: Path, identity: Identity, version: str) -
             "/of",
             str(layout / "resources.pri"),
             "/o",
-        ],
-        check=True,
-        capture_output=True,
+        ]
     )
     shutil.copytree(pri_root / "Assets", layout / "Assets")
     return layout
@@ -238,7 +262,7 @@ def pack(layout: Path, out: Path) -> Path:
             capture_output=True,
         )
         if result.returncode != 0:
-            problem = f"exit code {result.returncode}"
+            problem = f"exit code {result.returncode}: {_output(result)}"
             continue
         missing = missing_files(layout, out)
         if not missing:
@@ -253,12 +277,15 @@ def test_certificate(publisher: str, folder: Path = BUILD) -> Path:
     manifest requires), exported as a .pfx. Kept in the user's certificate store and reused."""
     pfx = folder / "test-signing.pfx"
     folder.mkdir(parents=True, exist_ok=True)
+    subject = publisher.replace("'", "''")  # a PowerShell single-quoted string
     script = f"""
 $ErrorActionPreference = 'Stop'
-$cert = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object {{ $_.Subject -eq '{publisher}' }} |
+$cert = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object {{
+    $_.Subject -eq '{subject}' -and $_.NotAfter -gt (Get-Date).AddDays(7) -and
+    $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.3' }} |
     Select-Object -First 1
 if (-not $cert) {{
-    $cert = New-SelfSignedCertificate -Type Custom -Subject '{publisher}' `
+    $cert = New-SelfSignedCertificate -Type Custom -Subject '{subject}' `
         -KeyUsage DigitalSignature -FriendlyName 'Elanero MSIX test signing' `
         -CertStoreLocation Cert:\\CurrentUser\\My `
         -TextExtension @('2.5.29.37={{text}}1.3.6.1.5.5.7.3.3', '2.5.29.19={{text}}')
@@ -269,19 +296,20 @@ Export-PfxCertificate -Cert $cert -FilePath '{pfx}' -Password $password | Out-Nu
     # Started from PowerShell 7, Windows PowerShell inherits its PSModulePath and then can't
     # load its own PKI module; let it find its defaults.
     env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
-    subprocess.run(
+    result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        check=True,
         capture_output=True,
         env=env,
     )
+    if result.returncode != 0:
+        raise SystemExit(f"couldn't make the test certificate:\n{_output(result)}")
     return pfx
 
 
 def sign_test(package: Path, publisher: str) -> Path:
     pfx = test_certificate(publisher)
     signtool = find_sdk_tool("signtool")
-    subprocess.run(
+    run_tool(
         [
             str(signtool),
             "sign",
@@ -292,9 +320,7 @@ def sign_test(package: Path, publisher: str) -> Path:
             "/p",
             TEST_PFX_PASSWORD,
             str(package),
-        ],
-        check=True,
-        capture_output=True,
+        ]
     )
     return pfx
 

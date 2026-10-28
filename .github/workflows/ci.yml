@@ -71,8 +71,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $msix = Get-ChildItem dist\Elanero-*-x64.msix | Select-Object -First 1
           # Trust the test certificate the build signed with (the runner is an administrator).
+          $password = uv run python -c "import sys; sys.path.insert(0, 'scripts'); import msix_package; print(msix_package.TEST_PFX_PASSWORD)"
           $pfx = Get-PfxData -FilePath build\msix\test-signing.pfx `
-              -Password (ConvertTo-SecureString 'elanero-test-only' -AsPlainText -Force)
+              -Password (ConvertTo-SecureString $password -AsPlainText -Force)
           $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPeople', 'LocalMachine')
           $store.Open('ReadWrite'); $store.Add($pfx.EndEntityCertificates[0]); $store.Close()
           Add-AppxPackage -Path $msix.FullName

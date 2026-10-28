@@ -40,7 +40,6 @@ GENERATED = ROOT / "build" / "generated"
 SIZE_BUDGET_MB = 150  # the one-file exe and the MSIX (both compressed)
 ONEDIR_BUDGET_MB = 300  # the unpacked folder build
 DEFAULT_TIMESTAMP = "http://timestamp.digicert.com"
-SIGNTOOL_GLOB = "Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe"
 ISCC_GLOB = "Program Files (x86)/Inno Setup 6/ISCC.exe"
 
 
@@ -221,9 +220,10 @@ def sign_command(signtool: Path, target: Path, env: dict[str, str]) -> list[str]
 
 
 def sign(target: Path) -> None:
-    signtool = find_tool("signtool", SIGNTOOL_GLOB)
-    if signtool is None:
-        raise SystemExit("signtool not found: install the Windows SDK")
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from msix_package import find_sdk_tool
+
+    signtool = find_sdk_tool("signtool")
     subprocess.run(sign_command(signtool, target, dict(os.environ)), check=True)
     print(f"signed {target}")
 

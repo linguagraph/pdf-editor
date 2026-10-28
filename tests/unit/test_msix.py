@@ -39,10 +39,24 @@ def msix():
 
 @pytest.mark.parametrize(
     ("version", "expected"),
-    [("0.1.0", "0.1.0.0"), ("1.2", "1.2.0.0"), ("2.10.3rc1", "2.10.3.0"), ("3", "3.0.0.0")],
+    [("0.1.0", "0.1.0.0"), ("1.2", "1.2.0.0"), ("2.10.3", "2.10.3.0"), ("3", "3.0.0.0")],
 )
 def test_store_version_has_a_zero_fourth_part(msix, version: str, expected: str) -> None:
     assert msix.msix_version(version) == expected
+
+
+@pytest.mark.parametrize("version", ["1.2rc1", "2.0b3", "1.2.3.dev0", "1.2.3.4", "v1.2"])
+def test_pre_releases_are_refused(msix, version: str) -> None:
+    # 1.2rc1 would become 1.2.1.0, above the final 1.2.0.0: the Store needs rising versions.
+    with pytest.raises(ValueError, match=r"final X.Y.Z"):
+        msix.msix_version(version)
+
+
+def test_asset_sizes_round_half_up(msix) -> None:
+    sizes = {a.name: a.canvas for a in msix.assets()}
+    assert sizes["StoreLogo.scale-125.png"] == (63, 63)  # 62.5, not round()'s 62
+    assert sizes["Square150x150Logo.scale-125.png"] == (188, 188)
+    assert sizes["Wide310x150Logo.scale-125.png"] == (388, 188)
 
 
 def test_manifest_is_valid_and_complete(msix) -> None:
