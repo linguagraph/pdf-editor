@@ -45,6 +45,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv venv && uv pip install -e ".[build]"
+      # Our own launcher: the prebuilt one is flagged by antivirus (#90). MSVC is on the image.
+      - run: uv run python scripts/build_bootloader.py
       - run: uv run python scripts/build_exe.py --test --clean-env --no-window-check
       - uses: actions/upload-artifact@v4
         with:
@@ -64,6 +66,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv venv && uv pip install -e ".[build]"
+      # Our own launcher: the prebuilt one is flagged by antivirus (#90). MSVC is on the image.
+      - run: uv run python scripts/build_bootloader.py
       - run: uv run python scripts/build_exe.py --msix --sign-test --test --clean-env --no-window-check
       - name: Install the package, self-test it, uninstall it
         shell: pwsh

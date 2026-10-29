@@ -113,8 +113,32 @@ files anywhere the user chooses, prints, starts additional windows of itself, an
 starts LibreOffice, if installed, to convert Office files. It doesn't need an account or test
 credentials. To try it, open any PDF from File ▸ Open, or from Explorer with "Open with".
 
-## Images (to be made in S6)
+## Restricted capability justification [Packages ▸ runFullTrust]
 
-- Screenshots: at least 4, 1920×1080, light and dark (start page, editing, comments,
-  organizer, a dialog)
-- Store logo 1:1, at least 300×300, and poster 2:3, 720×1080, generated from the icon
+Elanero is a traditional Win32 desktop application (Python and Qt) packaged as MSIX with the
+Desktop Bridge, so it needs runFullTrust to run at all. It's a full PDF editor. Users open,
+edit and save PDF files in any folder they choose, including network drives and removable
+media. It prints through the standard Windows print dialog, opens .pdf files from Explorer
+through its file type association, and can start more windows of itself (File ▸ New Window).
+As an optional extra, it converts Office documents to PDF by starting LibreOffice, only if the
+user has installed it. It runs as a standard user: it doesn't need administrator rights,
+install drivers or services, or change system settings. It collects no data. The only network
+access is downloading OCR language files from GitHub when the user asks for one. Source code:
+https://github.com/linguagraph/pdf-editor
+
+## Images
+
+Generate them with `uv run python scripts/make_store_images.py`. It writes to `dist/store/`:
+
+- **Screenshots** (Store listings ▸ Screenshots ▸ Desktop), 1920×1080, upload in this order:
+  `screenshot-01-start-light`, `02-editing-light`, `03-comments-dark`, `04-organize-light`,
+  `05-dialog-dark`, `06-comments-light`, `07-start-dark`. Suggested captions: "Pick up where
+  you left off", "Edit text and images in place", "Highlight, comment and review",
+  "Reorder, rotate and combine pages", "Headers, footers and page numbers", "Comments panel
+  with authors and replies", "Light and dark themes".
+- **Store logos ▸ 1:1 app icon:** `store-logo-300.png` (300×300).
+- **Store logos ▸ 1:1 box art:** `box-art-1x1-2160.png` (2160×2160) or `box-art-1x1-1080.png`
+  (1080×1080).
+- **Store logos ▸ 2:3 poster art:** `poster-2x3-1440x2160.png` (or the 720×1080 copy).
+
+The sample documents in the screenshots are fictional and made by the script.

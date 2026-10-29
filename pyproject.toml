@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdfeditor"
-version = "0.1.0"
+version = "0.1.1"
 description = "Acrobat-style desktop PDF editor built on an abstract engine layer (PyMuPDF backend) and PySide6."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1,5 +1,8 @@
 # Releasing Elanero
 
+For a detailed, click-by-click walkthrough of building the package and submitting it in
+Partner Center, see [docs/microsoft-store-submission.md](docs/microsoft-store-submission.md).
+
 Every release ships three ways from the same source tag:
 
 - **Microsoft Store:** `Elanero-<version>-x64.msix`. Microsoft signs it and updates users.
@@ -13,6 +16,18 @@ The portable exe and the installer are unsigned until we have a code-signing cer
 
 - **Windows SDK:** provides `makeappx`, `makepri`, `signtool` and the App Certification Kit
   (`appcert`), used only at build time.
+- **Visual Studio Build Tools** with the "Desktop development with C++" workload, then, in the
+  repository's environment:
+
+  ```sh
+  uv run python scripts/build_bootloader.py
+  ```
+
+  This compiles PyInstaller's launcher locally (issue #90). The prebuilt one in PyInstaller's
+  wheel matches malware packed with PyInstaller, and the Store's security scan rejected a
+  package built with it. MSIX builds stop if the local launcher is missing; run the script
+  again after reinstalling or upgrading PyInstaller (`--check` reports which launcher is in
+  use).
 - **Store identity:** copy `packaging/msix/identity.example.json` to
   `packaging/msix/identity.json` and fill in the values from Partner Center ▸ Elanero ▸
   Product management ▸ Product identity:
@@ -63,13 +78,13 @@ The portable exe and the installer are unsigned until we have a code-signing cer
    elevation):
 
    ```powershell
-   & "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" reset
-   & "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" test `
-       -appxpackagepath dist\Elanero-X.Y.Z-x64.msix -reportoutputpath build\msix\wack.xml
+   $kit = "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe"; & $kit reset; & $kit test -appxpackagepath "$PWD\dist\Elanero-X.Y.Z-x64.msix" -reportoutputpath "$PWD\build\msix\wack.xml"
    ```
 
-   Fix any failed test before uploading. Warnings about the Python runtime's DLLs are expected
-   to be informational; check each one.
+   Fix any failed test before uploading. Two results are expected and don't block
+   submission: the optional "Blocked executables" test fails on text such as `cmd` and `reg`
+   inside the Python, Qt and MuPDF libraries, and "High-DPI support" warns because Qt sets
+   PerMonitorV2 at run time rather than in the exe's manifest.
 7. **Upload.** In Partner Center ▸ Elanero, start a submission:
    - **Packages:** upload the unsigned `.msix` from step 4 (build without `--sign-test`).
    - **Store listings:** paste from `packaging/store/listing-en.md`, and add the screenshots
