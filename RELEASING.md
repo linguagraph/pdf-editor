@@ -43,6 +43,22 @@ The portable exe and the installer are unsigned until we have a code-signing cer
 
 ## Making a release
 
+Pushing the tag (step 3) starts `.github/workflows/release.yml`:
+
+- **GitHub release:** builds and self-tests `Elanero.exe` and the installer and attaches them
+  to a release for the tag (step 8).
+- **Microsoft Store:** waits for your approval in Actions (the `microsoft-store` environment),
+  then builds the MSIX with the Partner Center identity and uploads it as a **draft**
+  submission. Review the draft in Partner Center and submit it; don't edit an API-created
+  draft and then rerun the job. This only works for updates: the API can't create the first
+  submission, and it fails while another submission is in certification.
+
+Its secrets live only in that environment: `MSIX_IDENTITY_JSON` (the content of
+`identity.json`) and the Partner Center API credentials `MSSTORE_TENANT_ID`,
+`MSSTORE_CLIENT_ID`, `MSSTORE_CLIENT_SECRET`, `MSSTORE_SELLER_ID` and `MSSTORE_PRODUCT_ID`
+(issue #88). Renew the client secret in Entra ID before it expires and update
+`MSSTORE_CLIENT_SECRET`. The manual steps below still apply when the workflow can't be used.
+
 1. **Version.** Set `__version__` in `src/pdfeditor/__init__.py` (and `pyproject.toml`). The
    Store version is `X.Y.Z.0`, and each upload must be higher than the last.
 2. **Checks.** `ruff check`, `ruff format --check`, `lint-imports`, `mypy` and `pytest` all

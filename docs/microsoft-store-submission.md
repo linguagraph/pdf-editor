@@ -321,8 +321,10 @@ Editor** ▸ **Start your submission**. The submission page lists sections; each
    - Leave everything else unless it changed, then **Submit to the Store**.
 4. Users get the update automatically from the Store, usually within a day of publishing.
 
-Once the GitHub Action secrets from the checklist on issue #88 are set up, steps 2–3 can run
-from a tag automatically (PLAN.md S9).
+Pushing the tag also runs the Release workflow (RELEASING.md). After you approve the
+`microsoft-store` deployment in GitHub ▸ Actions, it builds the package and uploads it as a
+draft submission, so step 2 and the package upload in step 3 are done for you. Open the draft
+in Partner Center, update **What's new**, and submit.
 
 ---
 

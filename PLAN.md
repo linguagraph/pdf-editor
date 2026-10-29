@@ -345,7 +345,7 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
   - **Private testers first:** upload the MSIX to a new submission with a private audience (or a package flight), fill in the listing, age rating, pricing (free) and markets, then submit for certification.
   - **Certification report:** fix any findings, then make the listing public.
   - **Record the outcome:** the Store ID and listing URL go in `RELEASING.md` and the README ("Get it from Microsoft" badge).
-- [ ] **S9 Release automation.** _(partial: `RELEASING.md` documents every step; pending: the tag workflow, `bump_version.py` and `msstore publish`)_
+- [ ] **S9 Release automation.** _(partial: `RELEASING.md` documents every step; `release.yml` builds `v*` tags into a GitHub release and uploads the MSIX as a draft Store submission after approval, secrets set; pending: a first real run on a tag, `bump_version.py`)_
   - **Build on release tags:** a CI workflow builds and tests the MSIX on `v*` tags and attaches it to the GitHub release, next to the portable exe and the Inno Setup installer.
   - **Version bump:** `scripts/bump_version.py` updates `pyproject.toml`, the exe version resource, the manifest and `CHANGELOG.md` together.
   - **Optional publishing:** submit updates with the Microsoft Store Developer CLI (`msstore publish`), using Partner Center API credentials (an Entra ID app) stored as GitHub secrets. Until that's set up, upload manually.
