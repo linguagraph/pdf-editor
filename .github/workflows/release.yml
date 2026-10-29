@@ -1,0 +1,91 @@
+name: Release
+
+# A pushed tag vX.Y.Z (RELEASING.md) builds the release from that commit:
+# - github-release: the portable exe and the Inno Setup installer, attached to a GitHub release.
+# - microsoft-store: the MSIX with the Partner Center identity, uploaded as a *draft* Store
+#   submission. It runs in the protected `microsoft-store` environment, so it waits for the
+#   owner's approval, and its secrets (identity and API credentials) exist only there.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  github-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Tag matches the app version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src\pdfeditor\__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but __version__ is $version" }
+      - run: uv venv && uv pip install -e ".[build]"
+      # Our own launcher: the prebuilt one is flagged by antivirus (#90). MSVC is on the image.
+      - run: uv run python scripts/build_bootloader.py
+      - name: Install Inno Setup if the image lacks it
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - run: uv run python scripts/build_exe.py --installer --test --clean-env --no-window-check
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\pdfeditor-*-setup.exe | Select-Object -First 1
+          gh release create "${{ github.ref_name }}" dist\Elanero.exe $setup.FullName `
+              --verify-tag --generate-notes --title "Elanero ${{ github.ref_name }}"
+
+  microsoft-store:
+    needs: github-release
+    runs-on: windows-latest
+    environment: microsoft-store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv venv && uv pip install -e ".[build]"
+      - run: uv run python scripts/build_bootloader.py
+      - name: Store identity (git-ignored; only on this runner)
+        env:
+          MSIX_IDENTITY_JSON: ${{ secrets.MSIX_IDENTITY_JSON }}
+        shell: pwsh
+        run: |
+          Set-Content -Path packaging\msix\identity.json -Value $env:MSIX_IDENTITY_JSON -Encoding utf8NoBOM
+          uv run python -c "import sys; sys.path.insert(0, 'scripts'); import msix_package; sys.exit(0 if msix_package.load_identity().reserved else 'identity.json is not the reserved Store identity')"
+      # Unsigned: the Store signs the package. The build fails rather than pack the stock launcher.
+      - run: uv run python scripts/build_exe.py --msix --test --clean-env --no-window-check
+      - uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Upload as a draft Store submission
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          MSSTORE_PRODUCT_ID: ${{ secrets.MSSTORE_PRODUCT_ID }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID `
+              --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
+          if ($LASTEXITCODE -ne 0) { throw 'msstore reconfigure failed' }
+          $msix = Get-ChildItem dist\Elanero-*-x64.msix | Select-Object -First 1
+          # --noCommit leaves the submission as a draft: review it in Partner Center and submit.
+          msstore publish $msix.FullName --inputFile $msix.FullName --appId $env:MSSTORE_PRODUCT_ID --noCommit
+          if ($LASTEXITCODE -ne 0) { throw 'msstore publish failed' }
+      - name: Remove the identity from the runner
+        if: always()
+        shell: pwsh
+        run: Remove-Item packaging\msix\identity.json -ErrorAction SilentlyContinue
