@@ -326,7 +326,7 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
   - **Privacy:** `PRIVACY.md` says the app collects no telemetry or personal data and works offline, and that the only network access is OCR language downloads from GitHub, started by the user. Publish it at a stable URL (GitHub Pages or the repository) and link it from About and the listing.
   - **Capability justification:** write the text for the restricted `runFullTrust` capability ("a full desktop PDF editor that opens and saves files anywhere the user chooses, prints, and optionally starts LibreOffice for Office conversion").
   - **Questionnaires (owner):** the age rating (IARC; expected rating: everyone) and any cryptography or export questions (the app uses standard PDF password encryption: AES-256 and RC4 through MuPDF).
-- [ ] **S6 Store listing.** _(partial: all text in `packaging/store/listing-en.md`; pending: the screenshots script and the logo/poster images)_
+- [ ] **S6 Store listing.** _(partial: all text in `packaging/store/listing-en.md`; screenshots, logo, box art and poster from `scripts/make_store_images.py` into `dist/store/`; pending: the accessibility claim after U11's Narrator and keyboard hands-on)_
   - **Text, in `packaging/store/listing-en.md`:** name, short description, full description, up to 20 feature bullets, keywords, release notes, and category (Productivity).
   - **Support details:** support contact and URL (GitHub Issues), privacy URL.
   - **System requirements:** x64, Windows 10 1809+, about 250 MB disk.
@@ -341,7 +341,7 @@ With no certificate, **MSIX is the only way into the Store**, so it's the primar
     - upgrade from the previous version's package and check settings are kept;
     - `Remove-AppxPackage` and check nothing is left behind outside the package store.
   - **Clean Windows 11 machine (owner):** install the sideloaded package and go through U11's hands-on checklist. This also covers Phase 17's clean-VM item for this channel.
-- [ ] **S8 First submission (owner).**
+- [ ] **S8 First submission (owner).** _(partial: 0.1.0 submitted and rejected by the Store's security scan, a false positive on PyInstaller's prebuilt launcher; false-positive report to Microsoft pending; 0.1.1 is built with a locally compiled launcher, #90)_
   - **Private testers first:** upload the MSIX to a new submission with a private audience (or a package flight), fill in the listing, age rating, pricing (free) and markets, then submit for certification.
   - **Certification report:** fix any findings, then make the listing public.
   - **Record the outcome:** the Store ID and listing URL go in `RELEASING.md` and the README ("Get it from Microsoft" badge).

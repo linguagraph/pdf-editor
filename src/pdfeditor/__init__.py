@@ -1,6 +1,6 @@
 """Elanero - PDF Editor: an Acrobat-style desktop PDF editor."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 # The product name users see (window titles, About, the exe's version resource, the installer,
 # Explorer's "Open with"; the exe itself is Elanero.exe). Internal identifiers keep "pdfeditor"
 # (``core.paths.APP_NAME``, the settings and data folders, the .pdf ProgID): renaming those

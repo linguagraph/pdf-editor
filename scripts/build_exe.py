@@ -10,6 +10,9 @@
     uv run python scripts/build_exe.py --msix          # + dist/Elanero-<ver>-x64.msix (Store)
     uv run python scripts/build_exe.py --msix --sign-test  # ... signed for a test machine
 
+Run scripts/build_bootloader.py once per environment first: it compiles PyInstaller's launcher
+locally, which MSIX builds require and other builds warn about (issue #90).
+
 Signing uses signtool from the Windows SDK and either
   PDFEDITOR_SIGN_PFX (+ PDFEDITOR_SIGN_PASSWORD)  a .pfx file, or
   PDFEDITOR_SIGN_THUMBPRINT                        a certificate in the user's store;
@@ -75,7 +78,28 @@ def write_notices() -> Path:
     return out
 
 
-def build(onedir: bool = False) -> Path:
+def check_launcher(require: bool) -> None:
+    """Stop (``require``) or warn when PyInstaller's prebuilt launcher would be used.
+
+    The prebuilt launcher matches malware packed with PyInstaller, so the Store's scan rejects
+    it (issue #90); ``scripts/build_bootloader.py`` compiles our own.
+    """
+    if sys.platform != "win32":
+        return
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from build_bootloader import installed_dir, local_build_problem, pyinstaller_version
+
+    problem = local_build_problem(installed_dir(), pyinstaller_version())
+    if problem is None:
+        return
+    advice = "run: uv run python scripts/build_bootloader.py"
+    if require:
+        raise SystemExit(f"{problem}; the Store rejects that launcher. {advice}")
+    print(f"warning: {problem}; antivirus may flag the exe. {advice}", file=sys.stderr)
+
+
+def build(onedir: bool = False, require_local_launcher: bool = False) -> Path:
+    check_launcher(require_local_launcher)
     subprocess.run(  # bundle English OCR data (not committed)
         [sys.executable, str(ROOT / "scripts" / "fetch_tessdata.py"), "eng"], cwd=ROOT, check=True
     )
@@ -275,7 +299,7 @@ def main() -> int:
     onedir = args.onedir or args.msix
     if args.installer and onedir:
         parser.error("the installer wraps the one-file exe: build it without --onedir/--msix")
-    exe = exe_path(onedir) if args.skip_build else build(onedir)
+    exe = exe_path(onedir) if args.skip_build else build(onedir, args.msix)
     if args.sign:
         sign(exe)
     code = 0
