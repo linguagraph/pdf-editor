@@ -6,11 +6,13 @@ second to load, which must not be paid at application start.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import http.client
 import io
 import logging
 import math
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterator
@@ -56,7 +58,7 @@ from pdfeditor.model.signing import (
     SignResult,
     WindowsStoreKey,
 )
-from pdfeditor.services.signing.certificates import describe, require_usable
+from pdfeditor.services.signing.certificates import describe, digest_for, require_usable
 from pdfeditor.services.signing.errors import (
     SigningError,
     SigningRefused,
@@ -67,7 +69,9 @@ from pdfeditor.services.signing.errors import (
 log = logging.getLogger(__name__)
 
 StatusFn = Callable[[str], None]
-TSA_TIMEOUT_SECONDS = 30
+TSA_TIMEOUT_SECONDS = 30  # for each network step
+TSA_DEADLINE_SECONDS = 60  # for one whole request
+TSA_MAX_RESPONSE = 4 * 1024 * 1024  # a timestamp is a few kilobytes
 FIELD_PREFIX = "ElaneroSignature"
 # ISO 32000 lets a certified document be signed, but strict validators (pyHanko's default among
 # them) don't accept a new visible field after certification, so its signature would look broken.
@@ -153,9 +157,16 @@ def _check_not_locked(reader: PdfFileReader) -> None:
     data = read_certification_data(reader)
     if data is not None and data.permission == MDPPerm.NO_CHANGES:
         raise SigningRefused(message)
+    new_field = _new_field_name(reader)
     for signature in reader.embedded_signatures:
         if signature.docmdp_level == MDPPerm.NO_CHANGES:
             raise SigningRefused(message)
+        locks = signature.fieldmdp
+        if locks is not None and locks.is_locked(new_field):
+            raise SigningRefused(
+                f"The signature “{signature.field_name}” locks this document's form fields, "
+                "which rules out adding a new signature: it would invalidate that signature."
+            )
 
 
 def preflight(source: Path, password: str | None = None) -> Preflight:
@@ -356,6 +367,20 @@ def pfx_certificate(key: PfxKey) -> CertificateInfo:
     return describe(cert.dump())
 
 
+def _certificate_der(key: KeyRef) -> bytes:
+    """The signing certificate, known without touching the key or logging in to a token."""
+    if isinstance(key, PfxKey):
+        cert = _pfx_signer(key).signing_cert
+        assert cert is not None
+        return bytes(cert.dump())
+    if isinstance(key, WindowsStoreKey):
+        from pdfeditor.services.signing import windows_store
+
+        with windows_store.open_certificate(key.thumbprint, key.parent_window) as store_key:
+            return bytes(store_key.der)
+    return key.certificate
+
+
 @contextmanager
 def _signer_for(key: KeyRef) -> Iterator[Signer]:
     if isinstance(key, PfxKey):
@@ -394,9 +419,18 @@ class HttpTimeStamper(TimeStamper):
 
     def __init__(self, url: str) -> None:
         super().__init__()
-        parts = urllib.parse.urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.netloc:
-            raise TimestampFailed(f"“{url}” isn't a web address of a timestamp server.")
+        problem = f"“{url}” isn't a web address of a timestamp server."
+        try:
+            parts = urllib.parse.urlsplit(url)
+            _port = parts.port  # raises for a bad one
+        except ValueError as exc:
+            raise TimestampFailed(problem) from exc
+        if (
+            parts.scheme not in ("http", "https")
+            or not parts.hostname
+            or any(c.isspace() for c in url)
+        ):
+            raise TimestampFailed(problem)
         self.url = url
 
     async def async_request_tsa_response(self, req: tsp.TimeStampReq) -> tsp.TimeStampResp:
@@ -407,8 +441,7 @@ class HttpTimeStamper(TimeStamper):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=TSA_TIMEOUT_SECONDS) as response:
-                body = response.read()
+            body = self._read(request)
         except (OSError, http.client.HTTPException) as exc:
             raise TimestampFailed(
                 f"Couldn't reach the timestamp server {self.url}: {exc}. The document wasn't "
@@ -416,12 +449,40 @@ class HttpTimeStamper(TimeStamper):
             ) from exc
         try:
             parsed = tsp.TimeStampResp.load(body)
-            parsed["status"]["status"].native  # noqa: B018 - parse it now, while errors are clear
-        except ValueError as exc:
+            if parsed["status"]["status"].native == "granted":
+                self._check_answers(req, parsed)
+        except (ValueError, KeyError, TypeError) as exc:
             raise TimestampFailed(
                 f"The server {self.url} didn't answer with a timestamp. Check its address."
             ) from exc
         return parsed
+
+    def _read(self, request: urllib.request.Request) -> bytes:
+        """The answer, within a size limit and a deadline: this runs while the user waits, and
+        the socket timeout alone lets a server trickle forever."""
+        deadline = time.monotonic() + TSA_DEADLINE_SECONDS
+        body = bytearray()
+        with urllib.request.urlopen(request, timeout=TSA_TIMEOUT_SECONDS) as response:
+            while chunk := response.read1(65536):
+                body += chunk
+                if len(body) > TSA_MAX_RESPONSE:
+                    raise OSError(f"it sent more than {TSA_MAX_RESPONSE // (1024 * 1024)} MB")
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"no complete answer in {TSA_DEADLINE_SECONDS} seconds")
+        return bytes(body)
+
+    def _check_answers(self, req: tsp.TimeStampReq, response: tsp.TimeStampResp) -> None:
+        """A token must be over the hash we sent, with our nonce. Checked here so that a bad
+        server is found out on the sizing request, before anyone's key is used."""
+        token = response["time_stamp_token"]
+        info = token["content"]["encap_content_info"]["content"].parsed
+        same_hash = info["message_imprint"].dump() == req["message_imprint"].dump()
+        same_nonce = info["nonce"].native == req["nonce"].native
+        if not same_hash or not same_nonce:
+            raise TimestampFailed(
+                f"The server {self.url} answered with a timestamp for something else. The "
+                "document wasn't signed."
+            )
 
 
 # -- signing and checking the result -------------------------------------------------------------
@@ -451,7 +512,9 @@ def _open_reader(fh: BinaryIO, password: str | None) -> PdfFileReader:
     return reader
 
 
-def verify_output(path: Path, source: Path, password: str | None, engine: Engine) -> None:
+def verify_output(
+    path: Path, source: Path, password: str | None, engine: Engine, timestamped: bool = False
+) -> None:
     """Refuse to deliver anything but a correct signature: the new one must cover the whole
     file, and signatures that held before must still hold."""
     with path.open("rb") as fh:
@@ -461,6 +524,13 @@ def verify_output(path: Path, source: Path, password: str | None, engine: Engine
             raise SigningError("The new signature didn't verify. The file was not written.")
         if status.coverage != SignatureCoverageLevel.ENTIRE_FILE:
             raise SigningError("The new signature doesn't cover the whole file.")
+        if timestamped:
+            stamp = status.timestamp_validity
+            if stamp is None or not (stamp.intact and stamp.valid):
+                raise TimestampFailed(
+                    "The timestamp server's answer doesn't match this signature. The file was "
+                    "not written."
+                )
         broken = [s.field_name for s in signatures[:-1] if not _signature_ok(s)]
     if broken:
         with source.open("rb") as fh:
@@ -516,6 +586,9 @@ def sign_file(
         raise TimestampFailed(f"The timestamp server refused the request: {exc}") from exc
     except OSError as exc:
         raise SigningError(f"Couldn't write {target.name}: {exc}") from exc
+    except _PARSE_ERRORS as exc:  # e.g. a PFX whose key doesn't belong to its certificate
+        log.exception("signing failed")
+        raise SigningError(f"The signature couldn't be made: {exc}") from exc
 
 
 def _sign_open_file(
@@ -538,50 +611,57 @@ def _sign_open_file(
     if options.placement is not None and read_certification_data(reader) is not None:
         raise SigningRefused(VISIBLE_AFTER_CERTIFICATION)
     token.check()
+    # Everything that can fail without the key comes first: a token login is the last step, so
+    # a wrong address or a read-only folder can't cost a PIN entry.
     timestamper = HttpTimeStamper(options.tsa_url) if options.tsa_url else None
-    with _signer_for(key) as signer:
-        cert = signer.signing_cert
-        assert cert is not None
-        info = describe(cert.dump())
-        require_usable(info)
-
-        def about_to_use_key() -> None:
-            token.check()
-            report(WAITING_FOR_KEY)
-
-        _before_key_use(signer, about_to_use_key)
-        field_name = _new_field_name(reader)
-        spec = SigFieldSpec(field_name, on_page=0)
-        style: BaseStampStyle | None = None
-        if options.placement is not None:
-            boxes = page_boxes(reader, options.placement.page)
-            rect = options.placement.rect
-            spec = SigFieldSpec(
-                field_name,
-                on_page=options.placement.page,
-                box=boxes.visible_to_user(rect),  # type: ignore[arg-type]  # floats work
-            )
-            when = options.signed_at or datetime.now().astimezone()
-            text = _appearance_text(info.subject, options, when)
-            style = _PageStampStyle(
-                pdf=appearance_pdf(engine, rect.width, rect.height, text), rotate=boxes.rotate
-            )
-        pdf_signer = PdfSigner(
-            PdfSignatureMetadata(
-                field_name=field_name,
-                reason=options.reason or None,
-                location=options.location or None,
-                subfilter=SigSeedSubFilter.PADES,
-            ),
-            signer=signer,
-            timestamper=timestamper,
-            stamp_style=style,
-            new_field_spec=spec,
+    der = _certificate_der(key)
+    info = describe(der)
+    require_usable(info)
+    public_key = x509.Certificate.load(der).public_key
+    digest = digest_for(public_key)
+    if timestamper is not None:
+        report("Contacting the timestamp server…")
+        asyncio.run(timestamper.async_dummy_response(digest))  # reused to size the signature
+    field_name = _new_field_name(reader)
+    spec = SigFieldSpec(field_name, on_page=0)
+    style: BaseStampStyle | None = None
+    if options.placement is not None:
+        boxes = page_boxes(reader, options.placement.page)
+        rect = options.placement.rect
+        spec = SigFieldSpec(
+            field_name,
+            on_page=options.placement.page,
+            box=boxes.visible_to_user(rect),  # type: ignore[arg-type]  # floats work
         )
-        with replaced_atomically(target) as tmp:
-            with tmp.open("wb") as out:
-                pdf_signer.sign_pdf(writer, output=out)
-            token.check()
-            report("Checking the signature…")
-            verify_output(tmp, source, password, engine)
+        when = options.signed_at or datetime.now().astimezone()
+        text = _appearance_text(info.subject, options, when)
+        style = _PageStampStyle(
+            pdf=appearance_pdf(engine, rect.width, rect.height, text), rotate=boxes.rotate
+        )
+    meta = PdfSignatureMetadata(
+        field_name=field_name,
+        md_algorithm=digest,
+        reason=options.reason or None,
+        location=options.location or None,
+        subfilter=SigSeedSubFilter.PADES,
+    )
+
+    def about_to_use_key() -> None:
+        token.check()
+        report(WAITING_FOR_KEY)
+
+    with replaced_atomically(target) as tmp:
+        with tmp.open("wb") as out, _signer_for(key) as signer:
+            _before_key_use(signer, about_to_use_key)
+            PdfSigner(
+                meta,
+                signer=signer,
+                timestamper=timestamper,
+                stamp_style=style,
+                new_field_spec=spec,
+            ).sign_pdf(writer, output=out)
+        token.check()
+        report("Checking the signature…")
+        verify_output(tmp, source, password, engine, timestamped=timestamper is not None)
+        token.check()  # the last moment a cancel can still stop the file from appearing
     return SignResult(target, info.subject, timestamper is not None)

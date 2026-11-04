@@ -23,6 +23,10 @@ class PinLocked(SigningError):
     """The token's PIN is locked; only the token's own tools can unlock it."""
 
 
+class PinFinalTry(SigningError):
+    """One more wrong PIN locks the token, and the user hasn't confirmed: nothing was sent."""
+
+
 class TokenUnavailable(SigningError):
     """The token or smart card isn't there (or stopped answering)."""
 

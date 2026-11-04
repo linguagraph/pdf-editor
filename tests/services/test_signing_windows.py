@@ -112,12 +112,29 @@ def test_hardware_provider_detection(name: str, expected: bool | None) -> None:
         (0x80090036, Cancelled),  # NTE_USER_CANCELLED
         (0x8010006E, Cancelled),  # SCARD_W_CANCELLED_BY_USER
         (0x80090008, SigningError),  # NTE_BAD_ALGID
+        (1223, Cancelled),  # ERROR_CANCELLED, bare from GetLastError
+        (0x800704C7, Cancelled),  # the same as an HRESULT
+        (86, WrongPin),  # ERROR_INVALID_PASSWORD, bare
+        (1326, WrongPin),  # ERROR_LOGON_FAILURE, bare
+        (0x80100068, TokenUnavailable),  # SCARD_W_RESET_CARD
         (0x12345678, SigningError),
         (ctypes.c_long(0x80090036).value, Cancelled),  # a signed LONG, as ctypes returns it
     ],
 )
 def test_windows_errors_mean_something(status: int, error: type[Exception]) -> None:
     with pytest.raises(error):
+        raise_for_status(status, "signing")
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (0x8010006F, "wasn't given a PIN"),  # SCARD_W_CARD_NOT_AUTHENTICATED
+        (0x80090010, "refused access"),  # NTE_PERM
+    ],
+)
+def test_windows_errors_with_their_own_wording(status: int, message: str) -> None:
+    with pytest.raises(SigningError, match=message):
         raise_for_status(status, "signing")
 
 
@@ -286,7 +303,7 @@ class SoftStoreKey:
 
 @pytest.mark.parametrize("kind", ["rsa", "ec"])
 def test_store_route_signs_once_and_validates(
-    kind: str, fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path, monkeypatch
+    kind: str, fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path: Path, monkeypatch
 ) -> None:
     soft = SoftStoreKey(throwaway_pfx(kind))
     monkeypatch.setattr(windows_store, "open_certificate", lambda _t, _w=0: soft)
@@ -300,6 +317,7 @@ def test_store_route_signs_once_and_validates(
     )
     (status,) = signature_status(target)
     assert status.intact and status.valid
+    cms_check(target)
     # the size estimate doesn't touch the key: one signature, so at most one PIN prompt
     assert soft.signed == 1
 
@@ -367,7 +385,7 @@ def test_real_cng_signature_with_an_ephemeral_key(kind: str, throwaway_pfx) -> N
 @windows_only
 @pytest.mark.parametrize("kind", ["rsa", "ec"])
 def test_real_cng_end_to_end_pdf(
-    kind: str, fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path, monkeypatch
+    kind: str, fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path: Path, monkeypatch
 ) -> None:
     pfx = throwaway_pfx(kind, name="ELANERO THROWAWAY TEST")
     monkeypatch.setattr(
@@ -383,6 +401,7 @@ def test_real_cng_end_to_end_pdf(
     (status,) = signature_status(target)
     assert status.intact and status.valid
     assert status.coverage.name == "ENTIRE_FILE"
+    cms_check(target)
 
 
 @contextmanager

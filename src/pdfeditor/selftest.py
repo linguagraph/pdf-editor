@@ -506,7 +506,11 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         import pyhanko.sign.pkcs11  # noqa: F401 - must import when frozen
         from pyhanko.pdf_utils.metadata import xmp_xml  # noqa: F401 - lxml, for files with XMP
 
-        not_a_module = "kernel32.dll" if sys.platform == "win32" else "does-not-exist.so"
+        not_a_module = (
+            str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "kernel32.dll")
+            if sys.platform == "win32"
+            else "/does-not-exist.so"
+        )
         try:
             tokens.list_tokens(not_a_module)
         except SigningError:

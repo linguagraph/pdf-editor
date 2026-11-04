@@ -78,9 +78,12 @@ _WRONG_PIN = {
     0x8010006B,  # SCARD_W_WRONG_CHV
     0x80090033,  # NTE_INCORRECT_PASSWORD
     0x8007052B,  # ERROR_WRONG_PASSWORD
+    0x8007052E,  # ERROR_LOGON_FAILURE
     0x80070056,  # ERROR_INVALID_PASSWORD
 }
-_LOCKED = {0x8010006C}  # SCARD_W_CHV_BLOCKED
+_LOCKED = {0x8010006C, 0x80070775}  # SCARD_W_CHV_BLOCKED, ERROR_ACCOUNT_LOCKED_OUT
+_NO_PIN = {0x8010006F}  # SCARD_W_CARD_NOT_AUTHENTICATED
+_DENIED = {0x80090010, 0x80070005}  # NTE_PERM, E_ACCESSDENIED
 _NO_DEVICE = {
     0x80090016,  # NTE_BAD_KEYSET: key container gone, the usual sign of an unplugged token
     0x8009000D,  # NTE_NO_KEY
@@ -94,6 +97,7 @@ _NO_DEVICE = {
     0x8010001D,  # SCARD_E_NO_SERVICE
     0x8010001E,  # SCARD_E_SERVICE_STOPPED
     0x80100069,  # SCARD_W_REMOVED_CARD
+    0x80100068,  # SCARD_W_RESET_CARD
     0x80100066,  # SCARD_W_UNRESPONSIVE_CARD
     0x80100067,  # SCARD_W_UNPOWERED_CARD
     0x8010000A,  # SCARD_E_TIMEOUT
@@ -305,6 +309,8 @@ def is_hardware_provider(name: str) -> bool | None:
 def raise_for_status(status: int, doing: str) -> NoReturn:
     """Turn a Windows crypto error into what the user needs to know."""
     code = status & 0xFFFFFFFF
+    if code < 0x10000:  # a bare Win32 code from GetLastError: HRESULT_FROM_WIN32
+        code |= 0x80070000
     if code in _USER_CANCELLED:
         raise Cancelled()
     if code in _WRONG_PIN:
@@ -316,6 +322,16 @@ def raise_for_status(status: int, doing: str) -> NoReturn:
         raise PinLocked(
             "The PIN of this token or smart card is locked. Unlock it with the tools from its "
             "vendor, then sign again."
+        )
+    if code in _NO_PIN:
+        raise SigningError(
+            "The token or smart card wasn't given a PIN, so it didn't sign. Sign again and enter "
+            "the PIN when asked."
+        )
+    if code in _DENIED:
+        raise SigningError(
+            "The token or key provider refused access to this key. A wrong PIN can cause this "
+            "too: tokens lock after a few failures, so check the PIN before trying again."
         )
     if code in _NO_DEVICE:
         raise TokenUnavailable(

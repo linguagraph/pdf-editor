@@ -40,6 +40,18 @@ def describe(der: bytes, *, provider: str = "", hardware: bool | None = None) ->
     )
 
 
+def digest_for(public_key: Any) -> str:
+    """The digest to sign with. SHA-256 for every RSA key: pyHanko would pick SHA-384 or SHA-512
+    for large keys, which old token software refuses only after the PIN has been entered, with
+    nothing gained that matters for a document signature. ECDSA follows its curve, as is
+    expected of it."""
+    from pyhanko.sign.signers.pdf_cms import select_suitable_signing_md
+
+    return (
+        "sha256" if public_key.algorithm == "rsa" else str(select_suitable_signing_md(public_key))
+    )
+
+
 def require_usable(info: CertificateInfo) -> None:
     """Refuse an expired, not yet valid or non-signing certificate before any key is touched."""
     problem = info.problem()

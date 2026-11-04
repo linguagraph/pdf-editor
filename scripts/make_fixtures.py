@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import io
+import struct
 import sys
+import zlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -151,6 +153,48 @@ def encrypted() -> None:
         owner_pw="owner",
         permissions=perms,
     )
+
+
+def hybrid_xref() -> None:
+    """A hybrid-reference file (ISO 32000 7.5.8.4), as some office suites write: a classic xref
+    table with /XRefStm, and the page tree node only reachable through that stream."""
+    objs = {
+        1: b"<</Type/Catalog/Pages 2 0 R>>",
+        2: b"<</Type/Pages/Count 1/Kids[3 0 R]>>",
+        3: b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Contents 6 0 R/Resources<<>>>>",
+        6: b"<</Length 0>>\nstream\n\nendstream",
+    }
+    out = bytearray(b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n")
+    offsets = {}
+    for n in (1, 3, 6):
+        offsets[n] = len(out)
+        out += b"%d 0 obj\n" % n + objs[n] + b"\nendobj\n"
+    offsets[4] = len(out)
+    packed = zlib.compress(b"2 0 " + objs[2])
+    out += (
+        b"4 0 obj\n<</Type/ObjStm/N 1/First 4/Filter/FlateDecode/Length %d>>\nstream\n"
+        % len(packed)
+        + packed
+        + b"\nendstream\nendobj\n"
+    )
+    offsets[5] = len(out)
+    entries = zlib.compress(struct.pack(">BHB", 2, 4, 0))
+    out += (
+        b"5 0 obj\n<</Type/XRef/W[1 2 1]/Index[2 1]/Size 7/Filter/FlateDecode/Length %d>>\nstream\n"
+        % len(entries)
+        + entries
+        + b"\nendstream\nendobj\n"
+    )
+    table = len(out)
+    out += b"xref\n0 2\n0000000000 65535 f \n" + b"%010d 00000 n \n" % offsets[1]
+    out += b"3 4\n"
+    for n in (3, 4, 5, 6):
+        out += b"%010d 00000 n \n" % offsets[n]
+    out += b"trailer\n<</Size 7/Root 1 0 R/XRefStm %d>>\nstartxref\n%d\n%%%%EOF\n" % (
+        offsets[5],
+        table,
+    )
+    (OUT / "hybrid_xref.pdf").write_bytes(out)
 
 
 def rotated_pages() -> None:
@@ -610,6 +654,7 @@ GENERATORS: dict[str, Callable[[], None]] = {
     "annotations": annotations,
     "outline": outline,
     "encrypted": encrypted,
+    "hybrid_xref": hybrid_xref,
     "rotated_pages": rotated_pages,
     "cjk_text": cjk_text,
     "subset_fonts": subset_fonts,

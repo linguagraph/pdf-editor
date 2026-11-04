@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pdfeditor.services.signing.errors import (
+    PinFinalTry,
     PinLocked,
     SigningError,
     SigningRefused,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from pdfeditor.services.signing._pdf import Preflight, StatusFn
 
 __all__ = [
+    "PinFinalTry",
     "PinLocked",
     "SigningError",
     "SigningRefused",

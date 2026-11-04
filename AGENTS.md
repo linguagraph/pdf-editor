@@ -148,8 +148,11 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
 - Tests and manual runs may list the Windows certificate store but must never sign, or open a
   key, with a certificate they didn't create: it could prompt for a PIN or burn an attempt on a
   real token. See `tests/services/test_signing_windows.py` for how to use throwaway keys.
-- PINs and passwords are never logged or stored, and a PIN is never sent to a token twice for
-  one user action (tokens lock).
+- PINs and passwords are never logged or stored. Tokens lock, so listing tokens never sends a
+  PIN; a PIN goes only to the one token the user chose, at most once per user action, with no
+  retries; a locked token isn't tried, and one on its final try only after explicit confirmation.
+  The one carve-out: a key marked `CKA_ALWAYS_AUTHENTICATE` gets the same PIN once more with its
+  signature, because the token demands it for each operation.
 
 ## Things to avoid
 

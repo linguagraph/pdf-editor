@@ -20,6 +20,17 @@ log = logging.getLogger(__name__)
 _ids = itertools.count(1)
 
 
+def _file_stamp(path: Path | None) -> tuple[int, int] | None:
+    """Size and modification time, to notice another program changing a file."""
+    if path is None:
+        return None
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
+
+
 class EventKind(Enum):
     CHANGED = "changed"  # document content changed (see ``changes``)
     SAVED = "saved"
@@ -64,6 +75,7 @@ class DocumentSession:
         self._snapshots: SnapshotStore | None = None
         self._listeners: list[Listener] = []
         self._tasks: list[str] = []  # background tasks reading the document (see begin_task)
+        self._file_stamp = _file_stamp(document.path)
 
     @classmethod
     def open(
@@ -103,6 +115,11 @@ class DocumentSession:
         if self._snapshots is None:
             self._snapshots = SnapshotStore()
         return self._snapshots
+
+    def file_changed_on_disk(self) -> bool:
+        """Has the file changed since it was opened or saved here? Then what's on screen isn't
+        what a signature over the file would cover."""
+        return self.path is not None and _file_stamp(self.path) != self._file_stamp
 
     # -- events ---------------------------------------------------------------------------
     def subscribe(self, listener: Listener) -> Callable[[], None]:
@@ -206,6 +223,7 @@ class DocumentSession:
             )
             saved = doc.save(target, options)
         self.require_full_save = False
+        self._file_stamp = _file_stamp(saved)
         self.save_path_hint = None
         self.undo_stack.set_clean()
         log.info("saved %s%s", saved, " (incremental)" if incremental else "")

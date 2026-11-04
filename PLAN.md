@@ -451,20 +451,22 @@ Keys come from three routes behind one signer interface: the Windows certificate
 
 - [x] Engine-free signing service: PAdES baseline B-B (SHA-256 or stronger by key), RFC 3161 timestamp from a user-configured server (B-T), invisible and visible signatures, incremental update, temp-then-swap with verification (pyHanko validation, earlier signatures still sound, reopening in the engine).
 - [x] Visible signature placed in visible page coordinates, correct and upright on rotated, cropped and offset pages; appearance typeset by the engine, so any script works.
-- [x] Refusals: certification forbidding changes (DocMDP 1), visible signature on a certified document, encrypted document's password or permissions, expired or non-signing certificate, unreachable timestamp server. Encrypted documents stay encrypted.
+- [x] Refusals: certification forbidding changes (DocMDP 1), a signature locking the form fields (FieldMDP), visible signature on a certified document, encrypted document's password or permissions, expired or non-signing certificate, unreachable timestamp server. Encrypted documents stay encrypted.
 - [x] PFX/P12 route. _(Tested for real, RSA and ECDSA.)_
 - [ ] Windows store route. _(partial: listing reads the real store without touching keys; signing tested for real through CNG and CryptoAPI with throwaway software keys, RSA and ECDSA; PIN prompts, parent window and error mapping tested with fakes only. **Not tested with a real USB token**: see the checklist below.)_
 - [ ] PKCS#11 route. _(partial: tested against a fake module with pyHanko's real signer, and the real native extension loads and rejects a bad DLL, also frozen. **Not tested with a real token or SoftHSM**: see the checklist below.)_
 - [x] UI: Protect ▸ Sign (Place Signature tool, Sign Document dialog), command palette, Tools menu; runs as a job without the engine lock while waiting for the key; save first, target checks before the key is touched.
 - [x] Frozen exe: hidden imports, self-test signs end to end with a memory key and runs real CNG; signing libraries load lazily (test).
 
+**Known limit:** closing the app during a PIN prompt closes the window at once, but the process ends only when that prompt is answered or dismissed: Windows or the middleware owns it, and nothing can interrupt it. Cancelling discards the result, so no file appears.
+
 **Left out for now:** signing into an existing empty signature field (a new field is always added), RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures.
 
 **Manual checklist for the owner (needs real hardware):**
 1. *Minidriver/CSP token (most national tokens):* plug in, install the vendor's middleware, check that Windows lists the certificate (`certmgr.msc`). In Elanero: Protect ▸ Sign Document ▸ Windows certificate store. The certificate shows as "USB token or smart card" with the right expiry. Listing and opening the dialog don't ask for a PIN.
 2. Sign: the PIN prompt appears **in front of** Elanero, the app stays responsive behind it. The result opens in a new tab; Acrobat shows a valid signature (subject to trust in the issuer), PAdES, with the chain. Repeat with a visible signature on a rotated page, and with a timestamp server.
-3. *PKCS#11-only token:* Key ▸ USB token through its PKCS#11 module, browse to the vendor's 64-bit DLL, List. Certificates appear (or the prompt to log in first). Sign with the PIN. A token with a pin pad asks on the device.
-4. *Wrong PIN:* enter a wrong PIN **once** on a token that has attempts to spare. A clear message, no second attempt; the next try shows the warning. A token at its last try or locked says so before anything is sent.
+3. *PKCS#11-only token:* Key ▸ USB token through its PKCS#11 module, browse to the vendor's 64-bit DLL (one that needs DLLs next to it, if the vendor has that). List sends no PIN. Certificates appear, or the token shows as a row to log in to: select it, enter the PIN, Log In and List. Sign with the PIN. A token with a pin pad asks on the device. With two tokens plugged in, the PIN goes only to the selected one.
+4. *Wrong PIN:* enter a wrong PIN **once** on a token that has attempts to spare. A clear message, no second attempt, the field cleared; the next try shows the warning. A token at its last try says so per token, even with its certificates hidden, and asks for confirmation before anything is sent; a locked one doesn't ask for a PIN at all.
 5. *Unplugged:* pull the token and sign (store route: its certificate may stay listed). A clear message to plug it in, no file written. Pull it during a PIN prompt too.
 6. Cancel at the PIN prompt: "cancelled", no file written. Press Cancel in the app while the prompt is open: takes effect once the prompt is answered, no file written.
 

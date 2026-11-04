@@ -7,6 +7,7 @@ Windows shows its PIN prompt from the job's thread while the app stays responsiv
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,7 +97,9 @@ class SignController:
         self.act_sign.triggered.connect(lambda _=False: self.sign())
         window.addAction(self.act_sign)
         self.last_message = ""
-        self.rejected_tokens: set[str] = set()  # a wrong PIN: warn before the next attempt
+        # (serial, slot) of tokens that got a wrong PIN: warn before the next attempt.
+        self.rejected_tokens: set[tuple[str, int]] = set()
+        self._flow_running = False
         self.dialog: SignDialog | None = None
 
     def ribbon(self) -> None:
@@ -118,6 +121,12 @@ class SignController:
     def _saved_first(self, view: DocumentView) -> bool:
         """A signature covers the bytes on disk, so what's on screen must be saved first."""
         session = view.session
+        if session.file_changed_on_disk():
+            self._warn(
+                f"“{session.display_name}” was changed outside Elanero since it was opened here, "
+                "so the file on disk isn't what you see. Close it and open it again, then sign."
+            )
+            return False
         with session.lock:
             repaired = session.document.info().is_repaired
         if session.path is not None and not session.is_dirty and not repaired:
@@ -157,7 +166,11 @@ class SignController:
                 except SigningError as exc:
                     return exc
 
-            outcome = run_modal(self.w, "Checking the document…", work)
+            try:
+                outcome = run_modal(self.w, "Checking the document…", work)
+            except RuntimeError as exc:  # a file the checks themselves trip over
+                self._warn(f"This document can't be signed: {exc}")
+                return False, None
             if outcome is None:
                 return False, None
             if isinstance(outcome, WrongPassword) or getattr(outcome, "needs_password", False):
@@ -193,7 +206,27 @@ class SignController:
             str(source.with_name(source.stem + "-signed.pdf")),
             "PDF documents (*.pdf)",
         )
-        return Path(chosen).with_suffix(".pdf") if chosen else None
+        if not chosen:
+            return None
+        path = Path(chosen)
+        if path.suffix.lower() == ".pdf":
+            return path  # the file dialog has asked about overwriting this name
+        # Append, don't replace: "Contract 1.5" must not become "Contract 1.pdf". The file dialog
+        # only asked about the name typed, so ask about the name that's really used.
+        path = path.with_name(path.name + ".pdf")
+        if path.exists() and not self.confirm_overwrite(path):
+            return None
+        return path
+
+    def confirm_overwrite(self, path: Path) -> bool:
+        answer = QMessageBox.question(
+            self.w,
+            "Save Signed Copy",
+            f"“{path.name}” already exists. Replace it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _target_problem(self, source: Path, target: Path) -> str:
         """Find out before asking the token for a signature, not after."""
@@ -208,6 +241,12 @@ class SignController:
                     pass
             except OSError as exc:
                 return f"“{target.name}” can't be overwritten: {exc}"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryFile(dir=target.parent):
+                pass
+        except OSError as exc:
+            return f"The folder “{target.parent}” can't be written to: {exc}"
         return ""
 
     def sign(
@@ -217,6 +256,20 @@ class SignController:
         target: Path | None = None,
     ) -> Job | None:
         """The whole flow; the job's outcome is a :class:`SignResult` or the error it met."""
+        if self._flow_running:  # its first check runs a nested event loop: a second click
+            return None
+        self._flow_running = True
+        try:
+            return self._sign(placement, dialog, target)
+        finally:
+            self._flow_running = False
+
+    def _sign(
+        self,
+        placement: SignaturePlacement | None,
+        dialog: SignDialog | None,
+        target: Path | None,
+    ) -> Job | None:
         view = self.w.current_view()
         if view is None:
             return None
@@ -262,7 +315,7 @@ class SignController:
 
         def work(job: Job) -> SignResult | SigningError:
             try:
-                return sign_file(
+                result = sign_file(
                     source,
                     target,
                     key,
@@ -274,6 +327,8 @@ class SignController:
                 )
             except SigningError as exc:  # shown with its own wording, once
                 return exc
+            job.commit()  # the file is there: a cancel from here on can't take that back
+            return result
 
         return self.w.jobs.start(
             "Signing the document…",
@@ -281,6 +336,7 @@ class SignController:
             session=session,
             on_done=lambda outcome: self._finished(outcome, key),
             on_cancelled=self._cancelled,
+            detached=True,  # reads the file, not the session; a PIN prompt can wait for minutes
         )
 
     def _cancelled(self) -> None:
@@ -289,12 +345,12 @@ class SignController:
 
     def _finished(self, outcome: object, key: KeyRef) -> object:
         if isinstance(outcome, WrongPin) and isinstance(key, Pkcs11Key):
-            self.rejected_tokens.add(key.token_serial)
+            self.rejected_tokens.add((key.token_serial, key.slot_id))
         if isinstance(outcome, SigningError):
             self._warn(str(outcome))
             return outcome
         if isinstance(key, Pkcs11Key):
-            self.rejected_tokens.discard(key.token_serial)
+            self.rejected_tokens.discard((key.token_serial, key.slot_id))
         if isinstance(outcome, SignResult):
             self.w.open_path(outcome.path)
             stamp = " with a timestamp" if outcome.timestamped else ""

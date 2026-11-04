@@ -6,6 +6,7 @@ of a dataclass being formatted.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -83,10 +84,16 @@ class Pkcs11Key:
     module: str  # path of the vendor's PKCS#11 DLL
     slot_id: int
     token_serial: str
-    cert_id: bytes
+    cert_id: bytes  # shared by a certificate's renewals on the same key: doesn't identify it
+    certificate: bytes = field(repr=False)  # the chosen certificate (DER), which does
     cert_label: str = ""
     pin: str | None = field(default=None, repr=False)
     protected_auth: bool = False
+    allow_final_try: bool = False  # the user confirmed: one more wrong PIN would lock the token
+
+    @property
+    def thumbprint(self) -> str:
+        return hashlib.sha1(self.certificate, usedforsecurity=False).hexdigest().upper()
 
 
 @dataclass(frozen=True, slots=True)

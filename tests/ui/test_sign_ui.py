@@ -5,14 +5,15 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+import threading
+import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from pdfeditor.core.commands import AddAnnotationCommand
-from pdfeditor.core.jobs import Cancelled
 from pdfeditor.model.annotations import AnnotationModel, AnnotationType
 from pdfeditor.model.geometry import Point, Rect
 from pdfeditor.model.signing import (
@@ -26,7 +27,7 @@ from pdfeditor.model.signing import (
     TokenInfo,
     WindowsStoreKey,
 )
-from pdfeditor.services.signing import SigningError, WrongPin, windows_store
+from pdfeditor.services.signing import WrongPin, windows_store
 from pdfeditor.ui import sign_controller
 from pdfeditor.ui.dialogs.sign import (
     NO_CERTIFICATES,
@@ -55,6 +56,20 @@ def certificate(
 def token_info(state: PinState = PinState.OK, protected: bool = False, until=FUTURE) -> TokenInfo:
     cert = TokenCertificate(certificate("Token Signer", until, hardware=True), b"\x01", "sig")
     return TokenInfo(7, "My Token", "Vendor", "SER1", protected, state, (cert,))
+
+
+def hidden_token(
+    serial: str = "SER1", slot: int = 7, state: PinState = PinState.OK, protected: bool = False
+) -> TokenInfo:
+    return TokenInfo(slot, f"Token {serial}", "Vendor", serial, protected, state)
+
+
+def token_dialog(window: MainWindow, *tokens: TokenInfo) -> SignDialog:
+    dialog = SignDialog(None, window)
+    dialog.source.setCurrentIndex(dialog.source.findData(SOURCE_TOKEN))
+    dialog.module.setText("C:/vendor/pkcs11.dll")
+    dialog.set_tokens(list(tokens))
+    return dialog
 
 
 @pytest.fixture
@@ -297,16 +312,61 @@ def test_token_route_needs_pin_and_warns_about_the_counter(window: MainWindow, v
 
     dialog.set_tokens([token_info(PinState.FINAL_TRY)])
     assert "one more wrong PIN" in dialog.pin_warning.text()
+    assert "one more wrong PIN" in dialog.token_list.item(0).text()
     dialog.set_tokens([token_info(PinState.LOCKED)])
     assert "locked" in dialog.pin_warning.text()
-    dialog.pin.setText("1234")
+    assert not dialog.pin.isEnabled(), "a locked token isn't asked for a PIN"
     assert "locked" in dialog.problem()
 
 
+@pytest.mark.parametrize(
+    ("state", "text"), [(PinState.FINAL_TRY, "one more wrong PIN"), (PinState.LOCKED, "locked")]
+)
+def test_pin_state_shows_even_while_certificates_are_hidden(
+    window: MainWindow, view, state: PinState, text: str
+) -> None:
+    dialog = token_dialog(window, hidden_token(state=state))
+    assert text in dialog.token_list.item(0).text()
+    assert text in dialog.pin_warning.text()
+    if state is PinState.LOCKED:
+        assert dialog.login_button.isHidden() and not dialog.pin.isEnabled()
+        assert "locked" in dialog.problem()
+
+
+def test_pin_state_shows_per_token(window: MainWindow, view) -> None:
+    dialog = token_dialog(
+        window,
+        hidden_token("A", 0),
+        hidden_token("B", 1, PinState.FINAL_TRY),
+        hidden_token("C", 2, PinState.LOCKED),
+    )
+    assert dialog.token_list.count() == 3
+    assert "one more wrong" not in dialog.token_list.item(0).text()
+    assert "one more wrong" in dialog.token_list.item(1).text()
+    assert "locked" in dialog.token_list.item(2).text()
+
+
+def test_final_try_token_needs_confirmation_at_sign(window: MainWindow, view, monkeypatch) -> None:
+    dialog = token_dialog(window, token_info(PinState.FINAL_TRY))
+    dialog.pin.setText("1")
+    answers: list[bool] = []
+
+    def confirm() -> bool:
+        answers.append(False)
+        return False
+
+    monkeypatch.setattr(dialog, "confirm_final_try", confirm)
+    dialog.primary_clicked()
+    assert answers == [False] and not dialog.result()
+    dialog.pin.clear()
+    plain = token_dialog(window, token_info())
+    plain.pin.setText("1")
+    plain.primary_clicked()
+    assert plain.result() and plain.key().allow_final_try is False
+
+
 def test_token_with_pin_pad_asks_for_no_pin(window: MainWindow, view) -> None:
-    dialog = SignDialog(None, window)
-    dialog.source.setCurrentIndex(dialog.source.findData(SOURCE_TOKEN))
-    dialog.set_tokens([token_info(protected=True)])
+    dialog = token_dialog(window, token_info(protected=True))
     assert dialog.pin.isHidden()
     assert "on the device" in dialog.pin_warning.text()
     assert dialog.problem() == ""
@@ -321,26 +381,200 @@ def test_expired_certificate_on_a_token_cant_be_chosen(window: MainWindow, view)
     assert "Select a certificate" in dialog.problem()
 
 
-def test_listing_asks_for_the_pin_only_when_certificates_stay_hidden(
-    window: MainWindow, view, monkeypatch
-) -> None:
-    calls: list[str | None] = []
-    hidden = TokenInfo(7, "My Token", "Vendor", "SER1", False, PinState.OK)
+def test_listing_never_sends_a_pin(window: MainWindow, view, monkeypatch) -> None:
+    calls: list[tuple] = []
 
-    def fake_list(_module: str, pin: str | None = None) -> list[TokenInfo]:
-        calls.append(pin)
-        return [token_info()] if pin else [hidden]
+    def fake_list(*args, **kwargs) -> list[TokenInfo]:
+        calls.append(args + tuple(kwargs.values()))
+        return [hidden_token()]
 
     monkeypatch.setattr("pdfeditor.ui.dialogs.sign.list_tokens", fake_list)
     dialog = SignDialog(None, window)
-    dialog.module.setText("vendor.dll")
-    dialog.pin.setText("9999")  # typed early: still not sent on the first listing
+    dialog.source.setCurrentIndex(dialog.source.findData(SOURCE_TOKEN))
+    dialog.module.setText("C:/vendor/pkcs11.dll")
+    dialog.pin.setText("9999")
     dialog.list_token_certificates()
-    assert calls == [None]
-    assert "only after login" in dialog.token_status.text()
     dialog.list_token_certificates()
-    assert calls == [None, "9999"]
-    assert dialog.token_list.count() == 1
+    assert calls == [("C:/vendor/pkcs11.dll",)] * 2, "listing takes no PIN at all"
+    assert "after login" in dialog.token_list.item(0).text()
+
+
+def test_login_goes_to_the_selected_token_once(window: MainWindow, view, monkeypatch) -> None:
+    sent: list[tuple] = []
+
+    def fake_login(module, slot, serial, pin, **kwargs):
+        sent.append((slot, serial, pin))
+        cert = TokenCertificate(certificate("Hidden Signer", hardware=True), b"\x01", "sig")
+        return TokenInfo(slot, f"Token {serial}", "Vendor", serial, False, PinState.OK, (cert,))
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.login_and_list", fake_login)
+    dialog = token_dialog(window, hidden_token("A", 0), hidden_token("B", 1))
+    assert dialog.problem().startswith("This token shows no certificates")
+    dialog.token_list.setCurrentRow(1)
+    dialog.pin.setText("2222")
+    dialog.log_in_to_selected()
+    assert sent == [(1, "B", "2222")], "only the selected token gets the PIN"
+    assert dialog.token_list.count() == 2
+    selected = dialog._selected_token()
+    assert selected[0].serial == "B" and selected[1] is not None
+    assert dialog.problem() == "", "the PIN stays for the signature"
+
+
+def test_wrong_pin_at_login_clears_the_field_and_stays_on_that_token(
+    window: MainWindow, view, monkeypatch
+) -> None:
+    sent: list[str] = []
+
+    def fake_login(_module, _slot, _serial, pin, **_kwargs):
+        sent.append(pin)
+        raise WrongPin("The token rejected the PIN.")
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.login_and_list", fake_login)
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.sign.list_tokens",
+        lambda _module: [hidden_token("A", 0), hidden_token("B", 1, PinState.COUNT_LOW)],
+    )
+    dialog = token_dialog(window, hidden_token("A", 0), hidden_token("B", 1))
+    dialog.token_list.setCurrentRow(1)
+    dialog.pin.setText("0000")
+    dialog.log_in_to_selected()
+    assert sent == ["0000"]
+    assert dialog.pin.text() == "", "another press can't resend a rejected PIN"
+    assert "rejected" in dialog.error.text()
+    assert dialog._selected_token()[0].serial == "B", "the next PIN mustn't land on another token"
+    assert ("B", 1) in dialog.rejected_tokens
+    assert "rejected the last PIN" in dialog.pin_warning.text()
+    dialog.log_in_to_selected()  # pressed again, with the field empty
+    assert sent == ["0000"]
+    assert "Enter the token's PIN" in dialog.error.text()
+
+
+def test_login_at_final_try_needs_a_yes(window: MainWindow, view, monkeypatch) -> None:
+    sent: list[tuple] = []
+
+    def fake_login(_module, slot, _serial, pin, **kwargs):
+        sent.append((pin, kwargs["allow_final_try"]))
+        return hidden_token("A", slot, PinState.FINAL_TRY)
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.login_and_list", fake_login)
+    dialog = token_dialog(window, hidden_token("A", 0, PinState.FINAL_TRY))
+    dialog.pin.setText("1111")
+    monkeypatch.setattr(dialog, "confirm_final_try", lambda: False)
+    dialog.log_in_to_selected()
+    assert sent == []
+    monkeypatch.setattr(dialog, "confirm_final_try", lambda: True)
+    dialog.log_in_to_selected()
+    assert sent == [("1111", True)]
+
+
+def test_pin_pad_token_logs_in_on_the_device(window: MainWindow, view, monkeypatch) -> None:
+    sent: list[tuple] = []
+
+    def fake_login(_module, slot, serial, pin, **kwargs):
+        sent.append((pin, kwargs["protected_auth"]))
+        return token_info(protected=True)
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.login_and_list", fake_login)
+    dialog = token_dialog(window, hidden_token(protected=True))
+    assert not dialog.login_button.isHidden() and dialog.pin.isHidden()
+    dialog.log_in_to_selected()
+    assert sent == [(None, True)]
+    assert dialog.problem() == ""
+
+
+def test_double_click_on_login_sends_the_pin_once(
+    window: MainWindow, view, monkeypatch, qtbot
+) -> None:
+    """The progress dialog only turns modal after 300 ms: a real double-click gets through."""
+    import time
+
+    sent: list[str] = []
+
+    def slow_login(_module, _slot, _serial, pin, **_kwargs):
+        sent.append(pin)
+        time.sleep(0.25)
+        raise WrongPin("rejected")
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.login_and_list", slow_login)
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.list_tokens", lambda _m: [hidden_token()])
+    dialog = token_dialog(window, hidden_token())
+    dialog.pin.setText("9999")
+    dialog.show()
+    qtbot.waitExposed(dialog)
+
+    def click() -> None:
+        qtbot.mouseClick(dialog.login_button, Qt.MouseButton.LeftButton)
+
+    QTimer.singleShot(0, click)
+    QTimer.singleShot(120, click)
+    qtbot.wait(800)
+    dialog.close()
+    assert sent == ["9999"]
+
+
+def test_buttons_are_disabled_while_the_token_is_busy(
+    window: MainWindow, view, monkeypatch
+) -> None:
+    seen: list[tuple[bool, bool, bool]] = []
+    dialog = token_dialog(window, hidden_token())
+
+    def observe(_module):
+        seen.append(
+            (dialog.list_button.isEnabled(), dialog.browse_button.isEnabled(), dialog._busy)
+        )
+        return []
+
+    logins: list[str] = []
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.list_tokens", observe)
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.sign.login_and_list", lambda *a, **_k: logins.append(a[3])
+    )
+    dialog.pin.setText("1234")
+    dialog.list_token_certificates()
+    dialog.set_tokens([hidden_token()])
+    assert seen == [(False, False, True)]
+    assert dialog.list_button.isEnabled() and not dialog._busy
+    # re-entry is refused while busy, from any of the paths that reach the token
+    dialog._busy = True
+    dialog.list_token_certificates()
+    dialog.log_in_to_selected()
+    dialog.primary_clicked()
+    assert len(seen) == 1 and logins == [] and not dialog.result()
+    dialog._busy = False
+
+
+def test_browse_never_sends_the_typed_pin(window: MainWindow, view, monkeypatch) -> None:
+    listed: list[tuple] = []
+    logins: list[str] = []
+
+    def fake_list(*args):
+        listed.append(args)
+        return [hidden_token()]
+
+    monkeypatch.setattr("pdfeditor.ui.dialogs.sign.list_tokens", fake_list)
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.sign.login_and_list", lambda *a, **k: logins.append(a[3])
+    )
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.sign.QFileDialog.getOpenFileName",
+        lambda *_a, **_k: ("C:/other/vendor.dll", ""),
+    )
+    dialog = token_dialog(window, hidden_token())
+    dialog.pin.setText("1234")
+    dialog._browse_module()
+    assert listed == [("C:/other/vendor.dll",)], "a public listing, and no more"
+    assert logins == []
+    assert dialog.pin.text() == "", "a PIN typed for the old module goes away with it"
+
+
+def test_editing_the_module_drops_what_was_listed(window: MainWindow, view) -> None:
+    dialog = token_dialog(window, token_info())
+    dialog.pin.setText("1")
+    assert dialog.problem() == ""
+    dialog.module.setText("C:/vendorB/b.dll")
+    assert dialog.token_list.count() == 0 and dialog._token_rows == []
+    assert dialog.pin.text() == ""
+    assert "Select a certificate" in dialog.problem(), "rows from the old module can't be used"
 
 
 def test_module_path_is_remembered_but_never_the_pin(window: MainWindow, view, monkeypatch) -> None:
@@ -368,16 +602,14 @@ def test_wrong_pin_warns_on_retry_and_never_retries(
         raise WrongPin("The token rejected the PIN.")
 
     monkeypatch.setattr(sign_controller, "sign_file", refuse)
-    dialog = SignDialog(None, window)
-    dialog.source.setCurrentIndex(dialog.source.findData(SOURCE_TOKEN))
-    dialog.set_tokens([token_info()])
+    dialog = token_dialog(window, token_info())
     dialog.pin.setText("0000")
     dialog.accept()
     outcome = wait_for(window.signing.sign(dialog=dialog, target=tmp_path / "x.pdf"))
     assert isinstance(outcome, WrongPin)
     assert len(attempts) == 1, "no automatic second try: tokens lock"
     assert warnings == ["The token rejected the PIN."]
-    assert window.signing.rejected_tokens == {"SER1"}
+    assert window.signing.rejected_tokens == {("SER1", 7)}
     retry = SignDialog(None, window, rejected_tokens=window.signing.rejected_tokens)
     retry.source.setCurrentIndex(retry.source.findData(SOURCE_TOKEN))
     retry.set_tokens([token_info()])
@@ -385,43 +617,166 @@ def test_wrong_pin_warns_on_retry_and_never_retries(
     assert not (tmp_path / "x.pdf").exists()
 
 
-def test_cancel_during_signing_writes_nothing(
-    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch
-) -> None:
-    def cancelled(*_a, **_k):
-        raise Cancelled()
+class BlockingStoreKey:
+    """A store key whose signature waits, as a PIN prompt does. Signs with a throwaway key."""
 
-    monkeypatch.setattr(sign_controller, "sign_file", cancelled)
-    dialog = pfx_dialog(window, throwaway_pfx())
-    dialog.primary_clicked()
-    wait_for(window.signing.sign(dialog=dialog, target=tmp_path / "x.pdf"))
-    assert "cancelled" in window.signing.last_message
-    assert not (tmp_path / "x.pdf").exists()
+    def __init__(self, pfx: Path) -> None:
+        from cryptography.hazmat.primitives.serialization import Encoding, pkcs12
+
+        self.key, cert, _o = pkcs12.load_key_and_certificates(pfx.read_bytes(), b"test")
+        self.der = cert.public_bytes(Encoding.DER)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.lock_owned_in_key_call: bool | None = None
+
+    def __enter__(self) -> BlockingStoreKey:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        pass
+
+    def chain(self) -> list[bytes]:
+        return []
+
+    def sign_digest(self, digest: bytes, _name: str) -> bytes:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+
+        from pdfeditor.core.engine_lock import ENGINE_LOCK
+
+        self.lock_owned_in_key_call = ENGINE_LOCK._is_owned()
+        self.entered.set()
+        assert self.release.wait(30)
+        return self.key.sign(digest, padding.PKCS1v15(), Prehashed(hashes.SHA256()))
 
 
-def test_job_keeps_the_document_read_only_and_doesnt_hold_the_engine_lock(
-    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch
+def store_dialog(
+    window: MainWindow, monkeypatch, info: CertificateInfo | None = None
+) -> SignDialog:
+    monkeypatch.setattr(windows_store, "available", lambda: True)
+    monkeypatch.setattr(windows_store, "list_certificates", lambda: [info or certificate()])
+    dialog = SignDialog(None, window)
+    dialog.source.setCurrentIndex(dialog.source.findData(SOURCE_STORE))
+    dialog.refresh_store()
+    dialog.use_timestamp.setChecked(False)
+    dialog.accept()
+    return dialog
+
+
+def test_engine_lock_is_free_while_the_key_waits(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch, qtbot
 ) -> None:
     """While Windows shows a PIN prompt the GUI needs the engine (to paint, to scroll)."""
-    seen: dict[str, object] = {}
+    key = BlockingStoreKey(throwaway_pfx())
+    monkeypatch.setattr(windows_store, "open_certificate", lambda _t, _w=0: key)
+    target = tmp_path / "x.pdf"
     session = view.session
-
-    def observe(*_a, **_k):
-        seen["busy"] = session.busy
-        acquired = session.lock.acquire(timeout=5)  # would dead-end if the job held it elsewhere
-        seen["lock"] = acquired
-        if acquired:
+    job = window.signing.sign(dialog=store_dialog(window, monkeypatch), target=target)
+    try:
+        qtbot.waitUntil(key.entered.is_set, timeout=20_000)
+        assert key.lock_owned_in_key_call is False, "the job's thread holds the engine lock"
+        # the GUI thread, a different thread here, gets the lock and uses the document
+        assert session.lock.acquire(timeout=5)
+        try:
+            assert session.document.page(0).rect.width > 0
+        finally:
             session.lock.release()
-        raise SigningError("stop here")
+        assert session.busy, "and the document stays read-only"
+    finally:
+        key.release.set()
+    assert isinstance(wait_for(job), SignResult)
+    assert not session.busy
 
-    monkeypatch.setattr(sign_controller, "sign_file", observe)
-    monkeypatch.setattr(sign_controller.QMessageBox, "warning", lambda *_a: None)
+
+def test_cancel_during_the_key_wait_writes_nothing(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch, qtbot
+) -> None:
+    """The real sign_file: Cancel can't interrupt the token, but its answer is thrown away."""
+    key = BlockingStoreKey(throwaway_pfx())
+    monkeypatch.setattr(windows_store, "open_certificate", lambda _t, _w=0: key)
+    target = tmp_path / "x.pdf"
+    job = window.signing.sign(dialog=store_dialog(window, monkeypatch), target=target)
+    qtbot.waitUntil(key.entered.is_set, timeout=20_000)
+    window.jobs.cancel(job)
+    key.release.set()
+    wait_for(job)
+    assert "No file was written" in window.signing.last_message
+    assert not target.exists()
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_cancel_during_verification_writes_nothing(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch
+) -> None:
+    from pdfeditor.services.signing import _pdf
+
+    real = _pdf.verify_output
+
+    def cancel_then_verify(*args, **kwargs):
+        for job in window.jobs.running():
+            job.cancel()
+        real(*args, **kwargs)
+
+    monkeypatch.setattr(_pdf, "verify_output", cancel_then_verify)
     dialog = pfx_dialog(window, throwaway_pfx())
     dialog.primary_clicked()
-    wait_for(window.signing.sign(dialog=dialog, target=tmp_path / "x.pdf"))
-    assert seen["lock"] is True
-    assert seen["busy"]
-    assert not session.busy
+    target = tmp_path / "x.pdf"
+    wait_for(window.signing.sign(dialog=dialog, target=target))
+    assert "No file was written" in window.signing.last_message
+    assert not target.exists()
+
+
+def test_result_wins_over_a_cancel_after_the_swap(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch, signature_status
+) -> None:
+    """The file is there: saying "cancelled, nothing written" would be false."""
+    import os
+
+    real = os.replace
+    target = tmp_path / "x.pdf"
+
+    def replace_then_cancel(a, b):
+        real(a, b)
+        if Path(b) == target.resolve():
+            for job in window.jobs.running():
+                job.cancel()
+
+    monkeypatch.setattr("pdfeditor.core.safe_output.os.replace", replace_then_cancel)
+    dialog = pfx_dialog(window, throwaway_pfx())
+    dialog.primary_clicked()
+    outcome = wait_for(window.signing.sign(dialog=dialog, target=target))
+    assert isinstance(outcome, SignResult)
+    assert signature_status(target)[0].valid
+    assert "Signed by" in window.signing.last_message
+
+
+def test_closing_the_tab_during_a_pin_prompt_doesnt_freeze(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, monkeypatch, qtbot
+) -> None:
+    key = BlockingStoreKey(throwaway_pfx())
+    monkeypatch.setattr(windows_store, "open_certificate", lambda _t, _w=0: key)
+    target = tmp_path / "x.pdf"
+    job = window.signing.sign(dialog=store_dialog(window, monkeypatch), target=target)
+    qtbot.waitUntil(key.entered.is_set, timeout=20_000)
+    session = view.session
+    started = time.monotonic()
+    try:
+        assert window.close_tab(window._tab_index(view), ask=False)
+        assert time.monotonic() - started < 5, "the GUI thread waited for the PIN prompt"
+        assert session.closed
+    finally:
+        key.release.set()
+    qtbot.waitUntil(lambda: job.is_settled, timeout=20_000)
+    assert not target.exists(), "cancelled by the close"
+
+
+def test_ordinary_jobs_are_still_waited_for_on_close(window: MainWindow, view, qtbot) -> None:
+    release = threading.Event()
+    job = window.jobs.start("Reading", lambda _j: release.wait(0.5), session=view.session)
+    qtbot.waitUntil(lambda: job.started, timeout=5_000)
+    window.jobs.cancel_for(view.session)
+    assert job.done, "a job that reads the document finishes before it's closed"
 
 
 def test_target_problems_are_found_before_asking_for_a_signature(
@@ -495,6 +850,98 @@ def test_encrypted_document_asks_for_its_password(
     assert isinstance(outcome, SignResult)
     assert len(prompts) == 2 and "doesn't open" in prompts[1]
     assert signature_status(target, "owner")[0].valid
+
+
+def test_file_changed_on_disk_is_refused_until_reopened(
+    window: MainWindow, view, throwaway_pfx, tmp_path: Path, warnings
+) -> None:
+    import os
+
+    path = view.session.path
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    assert view.session.file_changed_on_disk()
+    dialog = pfx_dialog(window, throwaway_pfx())
+    dialog.accept()
+    assert window.signing.sign(dialog=dialog, target=tmp_path / "x.pdf") is None
+    assert warnings and "changed outside" in warnings[-1]
+
+
+def test_saving_doesnt_count_as_a_change_on_disk(window: MainWindow, view) -> None:
+    note = AnnotationModel(AnnotationType.SQUARE, 0, Rect(10, 10, 60, 60))
+    view.session.execute(AddAnnotationCommand(note))
+    assert window.save(view)
+    assert not view.session.file_changed_on_disk()
+
+
+@pytest.mark.parametrize(
+    ("typed", "name"),
+    [
+        ("Contract 1.5", "Contract 1.5.pdf"),
+        ("report.v2", "report.v2.pdf"),
+        ("plain", "plain.pdf"),
+        ("kept.PDF", "kept.PDF"),
+    ],
+)
+def test_target_name_keeps_what_was_typed(
+    window: MainWindow, view, tmp_path: Path, monkeypatch, typed: str, name: str
+) -> None:
+    monkeypatch.setattr(
+        sign_controller.QFileDialog,
+        "getSaveFileName",
+        lambda *_a, **_k: (str(tmp_path / typed), ""),
+    )
+    assert window.signing.choose_target(view.session.path) == tmp_path / name
+
+
+def test_appended_name_that_exists_needs_a_yes(
+    window: MainWindow, view, tmp_path: Path, monkeypatch
+) -> None:
+    existing = tmp_path / "Contract 1.5.pdf"
+    existing.write_bytes(b"unrelated")
+    monkeypatch.setattr(
+        sign_controller.QFileDialog,
+        "getSaveFileName",
+        lambda *_a, **_k: (str(tmp_path / "Contract 1.5"), ""),
+    )
+    monkeypatch.setattr(window.signing, "confirm_overwrite", lambda _p: False)
+    assert window.signing.choose_target(view.session.path) is None
+    monkeypatch.setattr(window.signing, "confirm_overwrite", lambda _p: True)
+    assert window.signing.choose_target(view.session.path) == existing
+
+
+def test_unwritable_folder_is_found_before_the_key(
+    window: MainWindow, view, tmp_path: Path
+) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("not a folder")
+    assert "can't be written" in window.signing._target_problem(
+        view.session.path, blocker / "o.pdf"
+    )
+
+
+def test_unexpected_error_in_the_document_check_is_reported(
+    window: MainWindow, view, monkeypatch, warnings
+) -> None:
+    def trips(*_a):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(sign_controller, "preflight", trips)
+    assert window.signing.sign() is None
+    assert "can't be signed" in warnings[-1]
+
+
+def test_second_click_while_the_flow_runs_is_ignored(window: MainWindow, view, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def nested(*_a):
+        calls.append(1)
+        assert window.signing.sign() is None  # what a second click would do meanwhile
+        return None
+
+    monkeypatch.setattr(window.signing, "_saved_first", nested)
+    assert window.signing.sign() is None
+    assert calls == [1]
 
 
 def test_keys_are_not_leaked_by_dataclass_repr(tmp_path: Path) -> None:

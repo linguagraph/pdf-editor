@@ -140,7 +140,7 @@ def test_visible_to_user_space_user_unit_and_bad_crop() -> None:
 # -- signing ---------------------------------------------------------------------------------
 @pytest.mark.parametrize("kind", ["rsa", "ec"])
 def test_invisible_signature_round_trip(
-    kind: str, fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path
+    kind: str, fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path: Path
 ) -> None:
     source = fixture_pdf("text_multipage")
     target = tmp_path / "out.pdf"
@@ -154,6 +154,7 @@ def test_invisible_signature_round_trip(
     assert result.signer == "Elanero Test Signer" and not result.timestamped
     statuses = signature_status(target)
     assert_valid(statuses)
+    cms_check(target)
     assert statuses[0].coverage.name == "ENTIRE_FILE"
     assert statuses[0].md_algorithm == "sha256"
     # an incremental update: the original bytes are untouched at the start of the file
@@ -258,7 +259,7 @@ def test_appearance_shows_non_latin_names(throwaway_pfx, signature_status, tmp_p
 
 
 def test_second_signature_keeps_the_first_valid(
-    fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path
+    fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path: Path
 ) -> None:
     first, second = tmp_path / "one.pdf", tmp_path / "two.pdf"
     sign_file(
@@ -277,6 +278,7 @@ def test_second_signature_keeps_the_first_valid(
     assert statuses[1].coverage.name == "ENTIRE_FILE"
     assert second.read_bytes().startswith(first.read_bytes())
     assert_round_trip(second)
+    cms_check(second)
     with pikepdf.open(second) as pdf:
         names = [str(f.T) for f in pdf.Root.AcroForm.Fields]
     assert names == ["ElaneroSignature1", "ElaneroSignature2"]
@@ -287,6 +289,51 @@ def test_signs_a_file_signed_by_another_tool(throwaway_pfx, signature_status, tm
     sign_file(REAL_SIGNED, target, key_for(throwaway_pfx()), SignatureOptions(), ENGINE)
     assert_valid(signature_status(target), 2)
     assert_round_trip(target)
+
+
+def test_independent_check_catches_a_changed_byte(fixture_pdf, throwaway_pfx, cms_check, tmp_path):
+    """The check that doesn't rely on pyHanko must itself be able to fail."""
+    target = tmp_path / "o.pdf"
+    sign_file(fixture_pdf("images"), target, key_for(throwaway_pfx()), SignatureOptions(), ENGINE)
+    raw = bytearray(target.read_bytes())
+    raw[20] ^= 0xFF
+    tampered = tmp_path / "tampered.pdf"
+    tampered.write_bytes(raw)
+    with pytest.raises(AssertionError):
+        cms_check(tampered)
+
+
+def test_hybrid_reference_file(fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path):
+    source = fixture_pdf("hybrid_xref")
+    target = tmp_path / "o.pdf"
+    sign_file(
+        source,
+        target,
+        key_for(throwaway_pfx()),
+        SignatureOptions(SignaturePlacement(0, Rect(10, 10, 200, 60))),
+        ENGINE,
+    )
+    assert target.read_bytes().startswith(source.read_bytes())
+    assert_valid(signature_status(target))
+    assert_round_trip(target)
+    cms_check(target)
+
+
+@pytest.mark.parametrize(("bits", "digest"), [(3072, "sha256"), (4096, "sha256")])
+def test_large_rsa_keys_still_use_sha256(
+    bits, digest, fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path
+) -> None:
+    """pyHanko would pick SHA-384 or SHA-512, which old token software refuses after the PIN."""
+    target = tmp_path / "o.pdf"
+    sign_file(
+        fixture_pdf("images"),
+        target,
+        key_for(throwaway_pfx(f"rsa{bits}")),
+        SignatureOptions(),
+        ENGINE,
+    )
+    assert signature_status(target)[0].md_algorithm == digest
+    cms_check(target)
 
 
 def test_document_with_xmp_metadata(throwaway_pfx, signature_status, tmp_path) -> None:
@@ -410,6 +457,36 @@ def test_certification_allowing_signatures_stays_valid(
         )
 
 
+def locked_by_field_mdp(source: Path, target: Path, pfx: Path) -> None:
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign import fields, signers
+
+    with source.open("rb") as fh:
+        writer = IncrementalPdfFileWriter(fh)
+        signer = signers.SimpleSigner.load_pkcs12_data(pfx.read_bytes(), [], b"test")
+        with target.open("wb") as out:
+            signers.PdfSigner(
+                signers.PdfSignatureMetadata(field_name="Locker"),
+                signer,
+                new_field_spec=fields.SigFieldSpec(
+                    "Locker", field_mdp_spec=fields.FieldMDPSpec(fields.FieldMDPAction.ALL)
+                ),
+            ).sign_pdf(writer, output=out)
+
+
+def test_field_lock_is_refused_before_the_key_is_used(
+    fixture_pdf, throwaway_pfx, tmp_path: Path
+) -> None:
+    locked = tmp_path / "locked.pdf"
+    locked_by_field_mdp(fixture_pdf("text_multipage"), locked, throwaway_pfx())
+    with pytest.raises(SigningRefused, match="locks this document's form fields"):
+        preflight(locked)
+    key = key_for(throwaway_pfx())
+    with pytest.raises(SigningRefused, match="locks this document's form fields"):
+        sign_file(locked, tmp_path / "o.pdf", key, SignatureOptions(), ENGINE)
+    assert not (tmp_path / "o.pdf").exists()
+
+
 def test_same_source_and_target_is_refused(fixture_pdf, throwaway_pfx, tmp_path: Path) -> None:
     path = tmp_path / "a.pdf"
     shutil.copy2(fixture_pdf("text_multipage"), path)
@@ -425,6 +502,116 @@ def test_broken_file_is_a_clear_error(throwaway_pfx, tmp_path: Path) -> None:
     with pytest.raises(SigningError):
         sign_file(junk, tmp_path / "o.pdf", key_for(throwaway_pfx()), SignatureOptions(), ENGINE)
     assert not (tmp_path / "o.pdf").exists()
+
+
+def test_parser_errors_while_signing_are_friendly(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, monkeypatch
+) -> None:
+    from pdfeditor.services.signing import _pdf
+
+    def trips(*_args, **_kwargs):
+        raise KeyError("/Kids")
+
+    monkeypatch.setattr(_pdf, "page_boxes", trips)
+    with pytest.raises(SigningError, match="couldn't be made"):
+        sign_file(
+            fixture_pdf("images"),
+            tmp_path / "o.pdf",
+            key_for(throwaway_pfx()),
+            SignatureOptions(SignaturePlacement(0, Rect(10, 10, 200, 60))),
+            ENGINE,
+        )
+
+
+def test_cancel_during_verification_stops_the_swap(
+    fixture_pdf, throwaway_pfx, tmp_path: Path
+) -> None:
+    token = CancelToken()
+
+    def status(text: str) -> None:
+        if text.startswith("Checking"):
+            token.cancel()
+
+    target = tmp_path / "o.pdf"
+    target.write_bytes(b"keep me")
+    with pytest.raises(Cancelled):
+        sign_file(
+            fixture_pdf("images"),
+            target,
+            key_for(throwaway_pfx()),
+            SignatureOptions(),
+            ENGINE,
+            token=token,
+            status=status,
+        )
+    assert target.read_bytes() == b"keep me"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_data_reaches_the_disk_before_the_swap(tmp_path: Path, monkeypatch) -> None:
+    import os
+
+    from pdfeditor.core import safe_output
+
+    calls: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(os, "fsync", lambda fd: (calls.append("fsync"), real_fsync(fd))[1])
+    monkeypatch.setattr(
+        os, "replace", lambda a, b: (calls.append("replace"), real_replace(a, b))[1]
+    )
+    target = tmp_path / "t.bin"
+    with safe_output.replaced_atomically(target) as tmp:
+        tmp.write_bytes(b"data")
+    assert calls == ["fsync", "replace"]
+    assert target.read_bytes() == b"data"
+
+
+def test_nothing_needing_no_key_happens_after_login(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, monkeypatch
+) -> None:
+    """A wrong timestamp address, or a read-only folder, must not cost a PIN entry."""
+    from pdfeditor.services.signing import _pdf
+
+    def no_login(_key):
+        raise AssertionError("logged in before finding out signing can't work")
+
+    monkeypatch.setattr(_pdf, "_signer_for", no_login)
+    pfx = key_for(throwaway_pfx())
+    with pytest.raises(TimestampFailed):
+        sign_file(
+            fixture_pdf("images"),
+            tmp_path / "o.pdf",
+            pfx,
+            SignatureOptions(tsa_url="http://127.0.0.1:9/tsa"),
+            ENGINE,
+        )
+    blocker = tmp_path / "a-file"
+    blocker.write_text("not a folder")
+    with pytest.raises(SigningError, match="Couldn't write"):
+        sign_file(fixture_pdf("images"), blocker / "o.pdf", pfx, SignatureOptions(), ENGINE)
+
+
+def test_temp_file_is_writable_before_login(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, monkeypatch
+) -> None:
+    from pdfeditor.services.signing import _pdf
+
+    real = _pdf._signer_for
+    seen: list[list[Path]] = []
+
+    def checked(key):
+        seen.append(list(tmp_path.glob(".o.pdf.*.tmp")))
+        return real(key)
+
+    monkeypatch.setattr(_pdf, "_signer_for", checked)
+    sign_file(
+        fixture_pdf("images"),
+        tmp_path / "o.pdf",
+        key_for(throwaway_pfx()),
+        SignatureOptions(),
+        ENGINE,
+    )
+    assert len(seen) == 1 and len(seen[0]) == 1, "the output is opened before the key is"
 
 
 def test_failed_verification_leaves_no_file(
@@ -516,7 +703,7 @@ def test_cancel_while_waiting_for_the_key_writes_nothing(
 
 # -- encrypted documents ---------------------------------------------------------------------
 def test_encrypted_document_stays_encrypted(
-    fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path
+    fixture_pdf, throwaway_pfx, signature_status, cms_check, tmp_path: Path
 ) -> None:
     source = fixture_pdf("encrypted")
     assert preflight(source).needs_password
@@ -532,6 +719,7 @@ def test_encrypted_document_stays_encrypted(
     )
     assert_valid(signature_status(target, "owner"))
     assert_round_trip(target, "owner")
+    cms_check(target, "owner")
     with pytest.raises(pikepdf.PasswordError):
         pikepdf.open(target)
     assert target.read_bytes().startswith(source.read_bytes())
@@ -618,6 +806,93 @@ def local_tsa(tmp_path: Path, throwaway_pfx) -> Iterator[str]:
     server.server_close()
 
 
+@pytest.fixture
+def bad_tsa(tmp_path: Path, throwaway_pfx) -> Iterator:
+    """``bad_tsa(mode)``: the address of a local RFC 3161 server that misbehaves in that way."""
+    import time
+
+    from asn1crypto import keys, tsp, x509
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from pyhanko.sign.timestamps import DummyTimeStamper
+
+    key, cert, _others = pkcs12.load_key_and_certificates(throwaway_pfx().read_bytes(), b"test")
+    assert key is not None and cert is not None
+    stamper = DummyTimeStamper(
+        x509.Certificate.load(cert.public_bytes(serialization.Encoding.DER)),
+        keys.PrivateKeyInfo.load(
+            key.private_bytes(
+                serialization.Encoding.DER,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        ),
+    )
+    state = {"mode": "", "requests": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            request = tsp.TimeStampReq.load(body)
+            mode = state["mode"]
+            state["requests"] += 1
+            if mode == "wrong_hash_after_first" and state["requests"] > 1:
+                mode = "wrong_hash"
+            if mode == "wrong_hash":
+                imprint = request["message_imprint"]
+                request = tsp.TimeStampReq(
+                    {
+                        "version": 1,
+                        "message_imprint": {
+                            "hash_algorithm": imprint["hash_algorithm"],
+                            "hashed_message": b"\x11" * len(imprint["hashed_message"].native),
+                        },
+                        "nonce": request["nonce"].native,
+                        "cert_req": True,
+                    }
+                )
+            elif mode == "no_nonce":
+                request = tsp.TimeStampReq(
+                    {"version": 1, "message_imprint": request["message_imprint"], "cert_req": True}
+                )
+            self.send_response(200)
+            if mode == "trickle":
+                self.send_header("Content-Length", "100000")
+                self.end_headers()
+                for _ in range(50):
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+                return
+            if mode == "not_asn1":
+                answer = b"<html>nope</html>"
+            elif mode == "too_big":
+                answer = b"x" * (5 * 1024 * 1024)
+            elif mode == "no_token":
+                answer = bytes.fromhex("30053003020100")  # granted, and no token
+            else:
+                answer = asyncio.run(stamper.async_request_tsa_response(request)).dump()
+            self.send_header("Content-Length", str(len(answer)))
+            self.end_headers()
+            self.wfile.write(answer)
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def address(mode: str) -> str:
+        state["mode"] = mode
+        return f"http://127.0.0.1:{server.server_port}/tsa"
+
+    yield address
+    server.shutdown()
+    server.server_close()
+
+
 def test_timestamp_from_a_server(
     fixture_pdf, throwaway_pfx, signature_status, tmp_path: Path, local_tsa: str
 ) -> None:
@@ -651,13 +926,111 @@ def test_unreachable_timestamp_server_is_a_clear_error(
     assert not target.exists()
 
 
-def test_timestamp_address_must_be_http(fixture_pdf, throwaway_pfx, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "http://[bad", "https://", "http://exa mple/", "http://x:port/"]
+)
+def test_timestamp_address_must_be_http(url, fixture_pdf, throwaway_pfx, tmp_path: Path) -> None:
     with pytest.raises(TimestampFailed, match="web address"):
         sign_file(
             fixture_pdf("images"),
             tmp_path / "o.pdf",
             key_for(throwaway_pfx()),
-            SignatureOptions(tsa_url="file:///etc/passwd"),
+            SignatureOptions(tsa_url=url),
+            ENGINE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("wrong_hash", "for something else"),
+        ("no_nonce", "for something else"),
+        ("no_token", "didn't answer with a timestamp"),
+        ("not_asn1", "didn't answer with a timestamp"),
+        ("too_big", "more than"),
+    ],
+)
+def test_bad_timestamp_server_answers_are_refused_before_the_key(
+    mode, message, fixture_pdf, throwaway_pfx, tmp_path: Path, bad_tsa, monkeypatch
+) -> None:
+    from pdfeditor.services.signing import _pdf
+
+    def no_login(_key):
+        raise AssertionError("the bad server must be found out before the key is used")
+
+    monkeypatch.setattr(_pdf, "_signer_for", no_login)
+    target = tmp_path / "o.pdf"
+    with pytest.raises(TimestampFailed, match=message):
+        sign_file(
+            fixture_pdf("images"),
+            target,
+            key_for(throwaway_pfx()),
+            SignatureOptions(tsa_url=bad_tsa(mode)),
+            ENGINE,
+        )
+    assert not target.exists()
+
+
+def test_timestamp_failing_only_on_the_real_request_writes_nothing(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, bad_tsa
+) -> None:
+    """The sizing request was honest, the real one not: found out when checking the answer."""
+    target = tmp_path / "o.pdf"
+    with pytest.raises(TimestampFailed, match="for something else"):
+        sign_file(
+            fixture_pdf("images"),
+            target,
+            key_for(throwaway_pfx()),
+            SignatureOptions(tsa_url=bad_tsa("wrong_hash_after_first")),
+            ENGINE,
+        )
+    assert not target.exists()
+
+
+def test_verification_refuses_a_timestamp_that_doesnt_match(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, local_tsa: str, monkeypatch
+) -> None:
+    """Even a token that slips past the request check isn't reported as a success."""
+    from pdfeditor.services.signing import _pdf
+
+    original = _pdf._status
+
+    class BadStamp:
+        intact, valid = False, True
+
+    class Status:
+        def __init__(self, real) -> None:
+            self.real = real
+            self.timestamp_validity = BadStamp()
+
+        def __getattr__(self, name):
+            return getattr(self.real, name)
+
+    monkeypatch.setattr(_pdf, "_status", lambda s: Status(original(s)))
+    target = tmp_path / "o.pdf"
+    with pytest.raises(TimestampFailed, match="doesn't match"):
+        sign_file(
+            fixture_pdf("images"),
+            target,
+            key_for(throwaway_pfx()),
+            SignatureOptions(tsa_url=local_tsa),
+            ENGINE,
+        )
+    assert not target.exists()
+
+
+def test_slow_timestamp_server_hits_the_deadline(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, bad_tsa, monkeypatch
+) -> None:
+    from pdfeditor.services.signing import _pdf
+
+    monkeypatch.setattr(_pdf, "TSA_DEADLINE_SECONDS", 0.2)
+    with pytest.raises(TimestampFailed, match="no complete answer"):
+        sign_file(
+            fixture_pdf("images"),
+            tmp_path / "o.pdf",
+            key_for(throwaway_pfx()),
+            SignatureOptions(tsa_url=bad_tsa("trickle")),
             ENGINE,
         )
 
