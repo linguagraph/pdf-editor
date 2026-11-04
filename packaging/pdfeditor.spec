@@ -84,7 +84,16 @@ a = Analysis(
     + [(str(GENERATED / "THIRD_PARTY_NOTICES.txt"), "pdfeditor/data"),
        (str(ROOT / "LICENSE"), "pdfeditor/data")],
     # Loaded lazily through the engine registry, so static analysis can't see it.
-    hiddenimports=["pdfeditor.engine.mupdf"],
+    # pyHanko and pkcs11 load at sign time only, inside functions; list what they import by name.
+    hiddenimports=[
+        "pdfeditor.engine.mupdf",
+        "pdfeditor.services.signing._pdf",
+        "pkcs11._pkcs11",
+        "pkcs11.defaults",
+        "pkcs11.util.ec",
+        "pkcs11.util.dsa",
+        "pyhanko.sign.pkcs11",
+    ],
     excludes=QT_EXCLUDES + DEV_EXCLUDES,
     noarchive=False,
 )

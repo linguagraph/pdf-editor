@@ -17,6 +17,10 @@ dependencies = [
     "pikepdf>=8.0",
     "fonttools>=4.47",
     "Pillow>=10.0",
+    # Digital signing (MIT). Capped: services/signing/_pdf.py hooks pyHanko's stamp internals.
+    "pyhanko>=0.38,<0.39",
+    # USB tokens through a PKCS#11 module (MIT); the range is the one pyHanko supports.
+    "python-pkcs11~=0.9.3",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +35,6 @@ dev = [
     "mypy>=1.8",
     "import-linter>=2.0",
     "pre-commit>=3.6",
-    "pyhanko>=0.25",  # scripts/make_signed_sample.py; signature checks in tests
     "numpy>=1.26",  # pixel comparisons in tests only (the app itself uses Pillow)
 ]
 

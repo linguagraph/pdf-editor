@@ -29,6 +29,10 @@ Elanero works offline. It connects to the internet only when you ask it to:
   download; see [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
 - **Opening a link.** When you click a web link in a document or in Elanero, it opens in your
   web browser.
+- **Adding a timestamp to a signature.** If you turn on "Add a trusted timestamp" when signing
+  and enter a timestamp server, Elanero sends that server a hash of the signature (not the
+  document or your certificate). The server you pick sees your IP address. It's off by default,
+  and no server is preset.
 
 ## Contact
 

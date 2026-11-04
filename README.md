@@ -11,7 +11,8 @@ shapes, ink, standard and custom image stamps) · page organizing, split, merge,
 footers, Bates numbering, watermarks · editing text and images in place · redaction with leak
 verification and document sanitizing · OCR (built-in Tesseract, deskew) · export to Word,
 Excel, HTML, Markdown, text and images · reduce file size · compare documents · password
-security · PDF/A-2b conversion · accessibility checker, tag editor and experimental
+security · digital signatures (PAdES, with USB tokens and smart cards through Windows or
+PKCS#11, or a PFX file) · PDF/A-2b conversion · accessibility checker, tag editor and experimental
 auto-tagging · keyboard shortcuts and a command palette (Ctrl+Shift+P).
 
 ## Download

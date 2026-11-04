@@ -11,7 +11,7 @@ The goal is an Acrobat-style desktop PDF editor written in Python, built from sc
 - **App type:** a desktop app with PySide6 (Qt 6, LGPL), packaged for Windows.
 - **In scope:** core view/annotate/pages, content editing, and the advanced/pro features.
 - **Distribution: a self-contained executable** (decided after Phase 3). Users run one `Elanero.exe` with no Python, no installer and no separately installed tools. Everything every in-scope feature needs is bundled: Qt, MuPDF, qpdf/pikepdf, fonts, ICC profiles and OCR language data. External programs (LibreOffice, Ghostscript, veraPDF) may only add optional extras, never a core feature. The frozen build is built and smoke-tested in CI from Phase P on, so packaging problems show up early rather than at release.
-- **Out of scope for now:** creating form fields and digital signatures. Existing forms and signatures must still render and be kept intact on save (no flattening, and incremental save where signatures exist).
+- **Out of scope for now:** creating form fields. Existing forms and signatures must still render and be kept intact on save (no flattening, and incremental save where signatures exist). Digital signing moved into scope with issue #94: see Phase S.
 
 ---
 
@@ -444,8 +444,32 @@ Nothing can embed a font from the system.
 - Restricted fonts are clearly unavailable.
 - All checks, round-trip tests and `build_exe.py --test` pass.
 
+### Phase S: Digital signing (M–L), issue #94
+Goal: sign PDFs digitally, above all with USB tokens and smart cards (national qualified e-signature tokens), from the self-contained exe. PAdES B-B, optionally B-T, always an incremental update.
+
+Keys come from three routes behind one signer interface: the Windows certificate store through CNG/CryptoAPI (almost every token's middleware puts its certificate there, and Windows or the middleware shows the PIN prompt), a vendor's PKCS#11 module, and a PFX/P12 file. Code: `services/signing/`, `ui/sign_controller.py`, `ui/dialogs/sign.py`, `model/signing.py`.
+
+- [x] Engine-free signing service: PAdES baseline B-B (SHA-256 or stronger by key), RFC 3161 timestamp from a user-configured server (B-T), invisible and visible signatures, incremental update, temp-then-swap with verification (pyHanko validation, earlier signatures still sound, reopening in the engine).
+- [x] Visible signature placed in visible page coordinates, correct and upright on rotated, cropped and offset pages; appearance typeset by the engine, so any script works.
+- [x] Refusals: certification forbidding changes (DocMDP 1), visible signature on a certified document, encrypted document's password or permissions, expired or non-signing certificate, unreachable timestamp server. Encrypted documents stay encrypted.
+- [x] PFX/P12 route. _(Tested for real, RSA and ECDSA.)_
+- [ ] Windows store route. _(partial: listing reads the real store without touching keys; signing tested for real through CNG and CryptoAPI with throwaway software keys, RSA and ECDSA; PIN prompts, parent window and error mapping tested with fakes only. **Not tested with a real USB token**: see the checklist below.)_
+- [ ] PKCS#11 route. _(partial: tested against a fake module with pyHanko's real signer, and the real native extension loads and rejects a bad DLL, also frozen. **Not tested with a real token or SoftHSM**: see the checklist below.)_
+- [x] UI: Protect ▸ Sign (Place Signature tool, Sign Document dialog), command palette, Tools menu; runs as a job without the engine lock while waiting for the key; save first, target checks before the key is touched.
+- [x] Frozen exe: hidden imports, self-test signs end to end with a memory key and runs real CNG; signing libraries load lazily (test).
+
+**Left out for now:** signing into an existing empty signature field (a new field is always added), RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures.
+
+**Manual checklist for the owner (needs real hardware):**
+1. *Minidriver/CSP token (most national tokens):* plug in, install the vendor's middleware, check that Windows lists the certificate (`certmgr.msc`). In Elanero: Protect ▸ Sign Document ▸ Windows certificate store. The certificate shows as "USB token or smart card" with the right expiry. Listing and opening the dialog don't ask for a PIN.
+2. Sign: the PIN prompt appears **in front of** Elanero, the app stays responsive behind it. The result opens in a new tab; Acrobat shows a valid signature (subject to trust in the issuer), PAdES, with the chain. Repeat with a visible signature on a rotated page, and with a timestamp server.
+3. *PKCS#11-only token:* Key ▸ USB token through its PKCS#11 module, browse to the vendor's 64-bit DLL, List. Certificates appear (or the prompt to log in first). Sign with the PIN. A token with a pin pad asks on the device.
+4. *Wrong PIN:* enter a wrong PIN **once** on a token that has attempts to spare. A clear message, no second attempt; the next try shows the warning. A token at its last try or locked says so before anything is sent.
+5. *Unplugged:* pull the token and sign (store route: its certificate may stay listed). A clear message to plug it in, no file written. Pull it during a PIN prompt too.
+6. Cancel at the PIN prompt: "cancelled", no file written. Press Cancel in the app while the prompt is open: takes effect once the prompt is answered, no file written.
+
 ### Later / not in current scope
-- AcroForm creation and editing, digital signatures (PAdES) and certificate validation. Rendering and keeping existing forms and signatures intact is covered above.
+- AcroForm creation and editing, and a certificate validation panel (checking and showing signatures in other people's files). Rendering and keeping existing forms and signatures intact is covered above; creating signatures is Phase S.
 - A permissive engine backend (pypdfium2 + pikepdf) implementing `engine/base.py`. The contract tests from Phase 1 are its acceptance suite.
 - Measurement tools, 3D/multimedia, batch "Action Wizard", cloud sync.
 

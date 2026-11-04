@@ -6,8 +6,9 @@ Guidance for AI coding agents and human contributors working in this repository.
 
 An Acrobat-style desktop PDF editor in Python: PySide6 (Qt 6) UI on top of an **abstract PDF
 engine layer**, implemented first with PyMuPDF. The roadmap and live progress are in
-[PLAN.md](PLAN.md). Forms authoring and digital signatures are **out of scope** for now, but
-existing forms and signatures must render and survive saving.
+[PLAN.md](PLAN.md). Forms authoring is **out of scope** for now, but existing forms must render
+and survive saving. Digital signing is in scope (Phase S), and existing signatures must survive
+saving too.
 
 ## Progress tracking (required)
 
@@ -139,6 +140,16 @@ dependencies with licenses that conflict with AGPL, and record every new runtime
 - GitHub doesn't let a PR's author approve it. When the reviewer is the same account, post the
   review with `gh pr review --comment` (verdict, findings, follow-ups), fix findings on the
   branch, wait for green CI, then merge.
+
+## Digital signing rules
+
+- Signing libraries (`pyhanko`, `cryptography`, `pkcs11`) load lazily, never at startup:
+  `pdfeditor.ui.main_window` must import without them (`tests/unit/test_signing_lazy_import.py`).
+- Tests and manual runs may list the Windows certificate store but must never sign, or open a
+  key, with a certificate they didn't create: it could prompt for a PIN or burn an attempt on a
+  real token. See `tests/services/test_signing_windows.py` for how to use throwaway keys.
+- PINs and passwords are never logged or stored, and a PIN is never sent to a token twice for
+  one user action (tokens lock).
 
 ## Things to avoid
 
