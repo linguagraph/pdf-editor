@@ -132,8 +132,8 @@ def run(argv: list[str]) -> int:
     slot = InstanceSlot()
 
     # The splash covers the real startup work (loading the engine, importing the UI, building
-    # the main window), its bar advancing after each stage, then stays up for its minimum time
-    # while the bar fills; the window appears once it's gone.
+    # the main window), its bar advancing after each stage, and no longer: the window takes
+    # over as soon as it's ready.
     splash = show_splash(settings.theme)
     try:
         import pdfeditor.core.session  # noqa: F401 - preloaded, so the bar tracks it
@@ -157,8 +157,7 @@ def run(argv: list[str]) -> int:
         server.files_received.connect(hold)
         if forward:
             server.listen()
-        splash.set_progress(0.9)
-        splash.complete()
+        splash.set_progress(1.0)
         window.show()
     except BaseException:
         splash.close()  # never leave the splash up over the crash dialog

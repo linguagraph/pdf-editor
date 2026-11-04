@@ -1,7 +1,10 @@
-; Inno Setup 6 script for an optional installer around the portable Elanero.exe.
+; Inno Setup 6 script for the optional installer.
 ; scripts/build_exe.py --installer fills in the @...@ values and runs ISCC.
-; The portable exe stays the primary deliverable: the installer only copies it, adds Start
-; menu entries, optionally registers .pdf, and uninstalls cleanly.
+; The portable one-file Elanero.exe stays the primary deliverable. The installer holds the same
+; app as a folder (Elanero.exe + _internal), which starts about 0.8 s faster because nothing has
+; to be unpacked to %TEMP% on every launch (issue #95). It copies the folder, adds Start menu
+; entries, optionally registers .pdf, and uninstalls cleanly. {app}\Elanero.exe keeps its path,
+; so upgrades from the one-file install keep their shortcuts and file associations.
 
 #define AppName "Elanero - PDF Editor"
 ; Identifiers stay "pdfeditor" (install folder, ProgID, setup file name) so upgrades keep working.
@@ -41,10 +44,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "pdfassoc"; Description: "Open PDF files with Elanero"; GroupDescription: "File associations:"; Flags: unchecked
 
 [Files]
-Source: "@EXE@"; DestDir: "{app}"; DestName: "{#AppExe}"; Flags: ignoreversion
+Source: "@APPDIR@\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 Type: files; Name: "{app}\{#OldAppExe}"
+; An upgrade must not leave files of the previous version's app folder behind.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

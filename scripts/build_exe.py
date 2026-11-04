@@ -5,7 +5,8 @@
     uv run python scripts/build_exe.py --clean-env     # + self-test and a windowed launch with
                                                        #   no Python/PATH and an empty profile
     uv run python scripts/build_exe.py --sign          # + Authenticode signature (see below)
-    uv run python scripts/build_exe.py --installer     # + dist/pdfeditor-<ver>-setup.exe (Inno)
+    uv run python scripts/build_exe.py --installer     # + dist/Elanero/ (tested the same way)
+                                                       #   and dist/pdfeditor-<ver>-setup.exe
     uv run python scripts/build_exe.py --onedir        # the app as a folder: dist/Elanero/
     uv run python scripts/build_exe.py --msix          # + dist/Elanero-<ver>-x64.msix (Store)
     uv run python scripts/build_exe.py --msix --sign-test  # ... signed for a test machine
@@ -252,10 +253,11 @@ def sign(target: Path) -> None:
     print(f"signed {target}")
 
 
-def installer_script(exe: Path, out_dir: Path) -> Path:
-    """The Inno Setup script with this build's version and paths filled in."""
+def installer_script(app_dir: Path, out_dir: Path) -> Path:
+    """The Inno Setup script with this build's version and paths filled in; ``app_dir`` is the
+    folder build the installer packs."""
     text = ISS.read_text(encoding="utf-8")
-    text = text.replace("@VERSION@", version()).replace("@EXE@", str(exe))
+    text = text.replace("@VERSION@", version()).replace("@APPDIR@", str(app_dir))
     text = text.replace("@OUTDIR@", str(out_dir)).replace("@LICENSE@", str(ROOT / "LICENSE"))
     text = text.replace("@ICON@", str(ICON))
     GENERATED.mkdir(parents=True, exist_ok=True)
@@ -264,11 +266,11 @@ def installer_script(exe: Path, out_dir: Path) -> Path:
     return script
 
 
-def build_installer(exe: Path) -> Path:
+def build_installer(app_dir: Path) -> Path:
     iscc = find_tool("iscc", ISCC_GLOB)
     if iscc is None:
         raise SystemExit("Inno Setup 6 (ISCC.exe) not found: https://jrsoftware.org/isinfo.php")
-    subprocess.run([str(iscc), "/Q", str(installer_script(exe, DIST))], check=True)
+    subprocess.run([str(iscc), "/Q", str(installer_script(app_dir, DIST))], check=True)
     setup = DIST / f"pdfeditor-{version()}-setup.exe"
     print(f"built {setup}")
     return setup
@@ -298,7 +300,7 @@ def main() -> int:
     args = parser.parse_args()
     onedir = args.onedir or args.msix
     if args.installer and onedir:
-        parser.error("the installer wraps the one-file exe: build it without --onedir/--msix")
+        parser.error("--installer builds the folder itself: use it without --onedir/--msix")
     exe = exe_path(onedir) if args.skip_build else build(onedir, args.msix)
     if args.sign:
         sign(exe)
@@ -316,9 +318,18 @@ def main() -> int:
         if size_mb > SIZE_BUDGET_MB:
             raise SystemExit(f"the MSIX is {size_mb:.1f} MB, over the {SIZE_BUDGET_MB} MB budget")
     if code == 0 and args.installer:
-        setup = build_installer(exe)
+        # The portable exe above is one release asset; the installer packs the folder build.
+        app = exe_path(onedir=True) if args.skip_build else build(onedir=True)
         if args.sign:
-            sign(setup)
+            sign(app)
+        if args.test or (args.skip_build and not args.clean_env):
+            code = self_test(app)
+        if code == 0 and args.clean_env:
+            code = clean_env_smoke(app, window_check=not args.no_window_check, onedir=True)
+        if code == 0:
+            setup = build_installer(app.parent)
+            if args.sign:
+                sign(setup)
     return code
 
 

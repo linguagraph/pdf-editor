@@ -54,6 +54,73 @@ jobs:
           path: dist/Elanero.exe
           retention-days: 14
 
+  build-installer:
+    # The Inno Setup installer packs the one-folder app (issue #95). Upgrade a real one-file
+    # install made with the last installer of that era, check the result, then uninstall.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # for the old installer script
+      - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv venv && uv pip install -e ".[build]"
+      # Our own launcher: the prebuilt one is flagged by antivirus (#90). MSVC is on the image.
+      - run: uv run python scripts/build_bootloader.py
+      - name: Install Inno Setup if the image lacks it
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - run: uv run python scripts/build_exe.py --installer --test
+      - name: Upgrade a one-file install, self-test it, uninstall it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $silent = '/VERYSILENT', '/CURRENTUSER', '/NORESTART', '/SUPPRESSMSGBOXES'
+          function Run-Setup($exe, $arguments) {
+            $p = Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$exe exited with $($p.ExitCode)" }
+          }
+          $app = "$env:LOCALAPPDATA\Programs\pdfeditor"
+          $command = 'HKCU:\Software\Classes\pdfeditor.pdf\shell\open\command'
+          $old = "$env:RUNNER_TEMP\old"
+          New-Item -ItemType Directory $old | Out-Null
+
+          # The old install: the same exe path, the app inside one file.
+          $script = (git show 5c54fca:packaging/installer.iss) -join "`n"
+          $script = $script.Replace('@VERSION@', '0.0.1').Replace('@EXE@', "$PWD\dist\Elanero.exe")
+          $script = $script.Replace('@OUTDIR@', $old).Replace('@LICENSE@', "$PWD\LICENSE")
+          $script = $script.Replace('@ICON@', "$PWD\src\pdfeditor\data\branding\elanero\icons\platform\elanero.ico")
+          Set-Content "$old\old.iss" $script
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "$old\old.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'old installer did not compile' }
+          Run-Setup "$old\pdfeditor-0.0.1-setup.exe" $silent
+          if (Test-Path "$app\_internal") { throw 'the old install should be one file' }
+          if (-not (Test-Path "$app\Elanero.exe")) { throw 'old install missing' }
+          # What a previous folder version could leave behind.
+          New-Item -ItemType Directory "$app\_internal" | Out-Null
+          Set-Content "$app\_internal\stale.dll" 'stale'
+
+          $setup = Get-ChildItem dist\pdfeditor-*-setup.exe | Select-Object -First 1
+          "installer: $([math]::Round($setup.Length / 1MB, 1)) MB"
+          Run-Setup $setup.FullName $silent
+          if (Test-Path "$app\_internal\stale.dll") { throw 'stale file survived the upgrade' }
+          if (-not (Test-Path "$app\_internal\python311.dll")) { throw 'app folder not installed' }
+          if ((Get-Item "$app\Elanero.exe").Length -gt 30MB) { throw 'still the one-file exe' }
+          $expected = "`"$app\Elanero.exe`" `"%1`""
+          if ((Get-Item $command).GetValue('') -ne $expected) { throw 'association does not point at the exe' }
+          $report = "$env:RUNNER_TEMP\installer-selftest.txt"
+          $p = Start-Process -FilePath "$app\Elanero.exe" -ArgumentList '--self-test','--self-test-report',$report -Wait -PassThru
+          Get-Content $report
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+          if (-not (Select-String -Path $report -Pattern 'channel: Installer' -Quiet)) { throw 'not detected as installed' }
+
+          Run-Setup "$app\unins000.exe" '/VERYSILENT', '/NORESTART', '/SUPPRESSMSGBOXES'
+          for ($i = 0; $i -lt 60 -and (Test-Path $app); $i++) { Start-Sleep 1 } # it finishes from a temp copy
+          if (Test-Path $app) { Get-ChildItem -Recurse $app | Select-Object -First 20 FullName; throw 'files left after uninstall' }
+          if (Test-Path $command) { throw 'registry left after uninstall' }
+
   build-msix:
     # The Microsoft Store package (PLAN.md Phase 18): build it from the one-folder app with the
     # test identity (the real one is git-ignored), then install the .msix itself and run the

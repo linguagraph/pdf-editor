@@ -11,18 +11,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QEventLoop, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QElapsedTimer, QEventLoop, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QGuiApplication,
     QIcon,
+    QMouseEvent,
     QPainter,
     QPainterPath,
+    QPaintEvent,
     QPixmap,
     QScreen,
-    QShowEvent,
 )
-from PySide6.QtWidgets import QSplashScreen
+from PySide6.QtWidgets import QWidget
 
 from pdfeditor.bundle import data_path
 
@@ -39,9 +40,9 @@ SPLASH_BAR = QRectF(720, 752, 481, 13)
 SPLASH_BACKGROUND_AT = (710, 758)
 SPLASH_TRACK_AT = (1100, 758)
 SPLASH_FILL_AT = (860, 758)
-# The splash stays up at least this long, so it can be seen (and its bar fill up) even when
-# the app starts in half a second. Clicking it dismisses it right away.
-SPLASH_MIN_SECONDS = 2.5
+# How long finish() waits for the main window to reach the screen, so that nothing is left
+# showing in between; it normally already has.
+SPLASH_HANDOVER_MS = 1000
 
 
 def brand_path(*parts: str) -> Path:
@@ -104,19 +105,24 @@ def splash_pixmap(scheme: str, screen: QScreen | None = None) -> QPixmap:
     return pixmap
 
 
-class LoadingSplash(QSplashScreen):
+class LoadingSplash(QWidget):
     """The splash screen with a live progress bar over the artwork's static one.
 
     Startup reports real progress with :meth:`set_progress` between its stages; the GUI thread
     is busy during each stage, so every update repaints at once instead of waiting for the
-    event loop. :meth:`complete` then fills the rest of the bar while the splash stays up for
-    its minimum time.
+    event loop. It stays up only as long as that work takes: the branding pack's rules say not
+    to delay startup for the sake of the branding.
+
+    A plain frameless widget, not a ``QSplashScreen``: on Windows (Qt 6.11) that class's
+    ``show()`` sits idle for a full second before its first paint (issue #95).
     """
 
     def __init__(self, pixmap: QPixmap) -> None:
-        super().__init__(pixmap)
+        super().__init__(None, Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
+        self._pixmap = pixmap
         self._progress = 0.0
-        self._clock = QElapsedTimer()  # started when the splash first appears
+        self.resize(pixmap.deviceIndependentSize().toSize())
+        self.move(self.screen().geometry().center() - self.rect().center())
         image = pixmap.toImage()
         scale = image.width() / SPLASH_ART_WIDTH
 
@@ -127,10 +133,8 @@ class LoadingSplash(QSplashScreen):
         self._track = sample(SPLASH_TRACK_AT)
         self._fill = sample(SPLASH_FILL_AT)
 
-    def showEvent(self, event: QShowEvent) -> None:
-        if not self._clock.isValid():
-            self._clock.start()
-        super().showEvent(event)
+    def pixmap(self) -> QPixmap:
+        return self._pixmap
 
     def progress(self) -> float:
         return self._progress
@@ -144,33 +148,19 @@ class LoadingSplash(QSplashScreen):
         if self.isVisible():
             self.repaint()
 
-    def complete(self, min_seconds: float = SPLASH_MIN_SECONDS) -> None:
-        """Fill the rest of the bar, keeping the splash up until ``min_seconds`` after it was
-        shown. Returns at once when that time has already passed or the splash was clicked
-        away."""
-        if not self.isVisible() or not self._clock.isValid():
-            self.set_progress(1.0)
-            return
-        remaining = min_seconds * 1000 - self._clock.elapsed()
-        if remaining <= 0:
-            self.set_progress(1.0)
-            return
-        start, begun = self._progress, self._clock.elapsed()
-        loop = QEventLoop()
-        timer = QTimer()
-        timer.setInterval(16)
+    def finish(self, window: QWidget) -> None:
+        """Close the splash once the shown ``window`` is on screen (or after a short while)."""
+        handle = window.windowHandle()
+        clock = QElapsedTimer()
+        clock.start()
+        while (
+            handle is not None and not handle.isExposed() and clock.elapsed() < SPLASH_HANDOVER_MS
+        ):
+            QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 10)
+        self.close()
 
-        def tick() -> None:
-            t = min((self._clock.elapsed() - begun) / remaining, 1.0)
-            self.set_progress(start + (1.0 - start) * t)
-            if t >= 1.0 or not self.isVisible():
-                loop.quit()
-
-        timer.timeout.connect(tick)
-        timer.start()
-        loop.exec()
-        timer.stop()
-        self.set_progress(1.0)
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.hide()  # a click dismisses it
 
     def bar_rect(self) -> QRectF:
         """The bar in widget (logical) coordinates."""
@@ -178,10 +168,10 @@ class LoadingSplash(QSplashScreen):
         bar = SPLASH_BAR
         return QRectF(bar.x() * scale, bar.y() * scale, bar.width() * scale, bar.height() * scale)
 
-    def drawContents(self, painter: QPainter) -> None:
-        super().drawContents(painter)
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._pixmap)
         bar = self.bar_rect()
-        painter.save()
         # Cover the example bar (and its antialiased edge), then draw the real one in its place.
         painter.fillRect(bar.adjusted(-2, -2, 2, 2), self._background)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -197,15 +187,13 @@ class LoadingSplash(QSplashScreen):
             fill = QPainterPath()
             fill.addRoundedRect(filled, radius, radius)
             painter.fillPath(fill, self._fill)
-        painter.restore()
 
 
 def show_splash(theme: str) -> LoadingSplash:
     """Show the startup splash in the theme the main window will open in.
 
-    The caller advances its bar with ``set_progress`` as startup proceeds, then calls
-    ``complete()`` and ``finish(window)`` once the window is ready, or ``close()`` when
-    startup fails.
+    The caller advances its bar with ``set_progress`` as startup proceeds, then shows the
+    window and calls ``finish(window)``, or ``close()`` when startup fails.
     """
     splash = LoadingSplash(splash_pixmap(splash_scheme(theme)))
     splash.setAccessibleName("Elanero is starting")

@@ -8,6 +8,7 @@ import json
 import pytest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QSplashScreen
 
 from pdfeditor import APP_DISPLAY_NAME
 from pdfeditor.bundle import data_path
@@ -156,30 +157,47 @@ def test_splash_bar_shows_real_progress(qtbot, scheme: str) -> None:
 
 
 @pytest.mark.gui
-def test_splash_complete_holds_for_its_minimum_time(qtbot) -> None:
-    import time
-
+def test_splash_adds_no_wait_of_its_own(qtbot) -> None:
+    """Issue #95. QSplashScreen.show() idles for a second on Windows, and a minimum display
+    time would hold back a window that's ready. The first doesn't happen on the test platform,
+    so check that neither has come back rather than measure a clock."""
     splash = branding.show_splash("light")
     qtbot.addWidget(splash)
-    splash.set_progress(0.4)
-    start = time.monotonic()
-    splash.complete(min_seconds=0.3)
-    assert splash.progress() == 1.0
-    assert time.monotonic() - start >= 0.15
-    # Once the minimum has passed, completing doesn't wait.
-    start = time.monotonic()
-    splash.complete(min_seconds=0.3)
-    assert time.monotonic() - start < 0.1
+    assert not isinstance(splash, QSplashScreen)
+    assert not hasattr(splash, "complete")
+    assert not hasattr(branding, "SPLASH_MIN_SECONDS")
     splash.close()
 
 
 @pytest.mark.gui
-def test_dismissed_splash_completes_at_once(qtbot) -> None:
-    import time
+def test_splash_is_centered_at_the_art_size(qtbot) -> None:
+    splash = branding.show_splash("dark")
+    qtbot.addWidget(splash)
+    assert splash.size() == splash.pixmap().deviceIndependentSize().toSize()
+    assert splash.windowFlags() & Qt.WindowType.FramelessWindowHint
+    center = splash.screen().geometry().center()
+    assert abs(splash.geometry().center().x() - center.x()) <= 1
+    assert abs(splash.geometry().center().y() - center.y()) <= 1
+    splash.close()
 
+
+@pytest.mark.gui
+def test_click_dismisses_the_splash(qtbot) -> None:
     splash = branding.show_splash("light")
     qtbot.addWidget(splash)
-    splash.hide()  # what clicking the splash does
-    start = time.monotonic()
-    splash.complete(min_seconds=5)
-    assert time.monotonic() - start < 0.1 and splash.progress() == 1.0
+    qtbot.mouseClick(splash, Qt.MouseButton.LeftButton)
+    assert not splash.isVisible()
+
+
+@pytest.mark.gui
+def test_finish_doesnt_hang_on_a_window_that_never_appears(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QWidget
+
+    monkeypatch.setattr(branding, "SPLASH_HANDOVER_MS", 20)
+    splash = branding.show_splash("light")
+    qtbot.addWidget(splash)
+    window = QWidget()
+    qtbot.addWidget(window)
+    window.winId()  # has a native window, but was never shown
+    splash.finish(window)
+    assert not splash.isVisible()

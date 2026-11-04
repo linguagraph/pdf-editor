@@ -128,9 +128,10 @@ def _keep(entry):
 a.binaries = [e for e in a.binaries if _keep(e)]
 a.datas = [e for e in a.datas if _keep(e)]
 pyz = PYZ(a.pure)
-# PDFEDITOR_ONEDIR=1 (build_exe.py --onedir / --msix) builds the same app as a folder,
-# dist/Elanero/Elanero.exe + _internal/, for the MSIX package: it starts without unpacking
-# 70 MB to %TEMP% first. The default is the portable one-file dist/Elanero.exe.
+# PDFEDITOR_ONEDIR=1 (build_exe.py --onedir / --msix / --installer) builds the same app as a
+# folder, dist/Elanero/Elanero.exe + _internal/, for the MSIX package and the installer: it
+# starts without unpacking 150 MB to %TEMP% first. The default is the portable one-file
+# dist/Elanero.exe.
 ONEDIR = os.environ.get("PDFEDITOR_ONEDIR") == "1"
 exe = EXE(
     pyz,

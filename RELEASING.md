@@ -7,7 +7,8 @@ Every release ships three ways from the same source tag:
 
 - **Microsoft Store:** `Elanero-<version>-x64.msix`. Microsoft signs it and updates users.
 - **Portable:** `Elanero.exe`.
-- **Installer:** `pdfeditor-<version>-setup.exe`, made with Inno Setup.
+- **Installer:** `pdfeditor-<version>-setup.exe`, made with Inno Setup. It installs the app as a
+  folder, which starts faster than the one-file exe because nothing is unpacked on launch.
 
 The portable exe and the installer are unsigned until we have a code-signing certificate
 (PLAN.md Phase 17 and Phase 18 S10).
