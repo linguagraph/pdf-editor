@@ -234,16 +234,22 @@ def test_long_rows_scroll_sideways_instead_of_being_cut_off(
     signatures._show_reports(inspect_signatures(signed, None, []))
     tree = signatures.tree
     top = tree.topLevelItem(0)
+    assert top.isExpanded(), "the first signature opens expanded"
 
-    def needed(parent: Any) -> int:
-        metrics = tree.fontMetrics()
-        return max(metrics.horizontalAdvance(_) for _ in _rows(parent))
+    def needed(parent: Any, depth: int) -> int:
+        """What the widest row under ``parent`` takes, as the tree itself lays it out."""
+        hints = [
+            tree.sizeHintForIndex(tree.indexFromItem(parent.child(i))).width()
+            for i in range(parent.childCount())
+        ]
+        return max(hints) + tree.indentation() * depth
 
-    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(top))
+    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(top, 1))
+    assert tree.columnWidth(0) > tree.viewport().width(), "wider than the panel: it must scroll"
     assert tree.horizontalScrollBar().maximum() > 0
     # Expanding the details widens the column to fit them too.
     details = next(
         top.child(i) for i in range(top.childCount()) if top.child(i).text(0) == "Signature Details"
     )
     details.setExpanded(True)
-    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(details))
+    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(details, 2))

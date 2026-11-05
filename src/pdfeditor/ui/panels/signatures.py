@@ -211,11 +211,13 @@ class SignaturesPanel(ViewPanel):
         self.status.setVisible(False)
         self.empty.setVisible(not reports)
         for index, report in enumerate(reports):
-            self.tree.addTopLevelItem(self._entry(report, expanded=index == 0))
+            entry = self._entry(report)
+            self.tree.addTopLevelItem(entry)
+            entry.setExpanded(index == 0)  # only takes effect once the item is in the tree
         self.tree.setVisible(bool(reports))
         self.badge_changed.emit()
 
-    def _entry(self, report: SignatureReport, expanded: bool) -> QTreeWidgetItem:
+    def _entry(self, report: SignatureReport) -> QTreeWidgetItem:
         signer = report.signer_name or "an unknown signer"
         if report.signer_email:
             signer = f"{signer} <{report.signer_email}>"
@@ -245,7 +247,6 @@ class SignaturesPanel(ViewPanel):
             font.setUnderline(True)
             link.setFont(0, font)
             top.addChild(link)
-        top.setExpanded(expanded)
         return top
 
     def _details(self, report: SignatureReport) -> QTreeWidgetItem:
