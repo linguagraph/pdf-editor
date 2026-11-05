@@ -14,7 +14,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHeaderView,
+    QLabel,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pdfeditor.core.commands import ChangeKind
 from pdfeditor.model.signing import SignatureReport, SignatureVerdict
@@ -71,7 +78,12 @@ class SignaturesPanel(ViewPanel):
         self.status.setVisible(False)
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
-        self.tree.setWordWrap(True)
+        # The column is as wide as its longest row and the panel scrolls sideways: these sentences
+        # and certificate names mustn't be cut off with "...".
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setHorizontalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
         self.tree.setVisible(False)
         self.tree.itemClicked.connect(self._clicked)
@@ -199,11 +211,13 @@ class SignaturesPanel(ViewPanel):
         self.status.setVisible(False)
         self.empty.setVisible(not reports)
         for index, report in enumerate(reports):
-            self.tree.addTopLevelItem(self._entry(report, expanded=index == 0))
+            entry = self._entry(report)
+            self.tree.addTopLevelItem(entry)
+            entry.setExpanded(index == 0)  # only takes effect once the item is in the tree
         self.tree.setVisible(bool(reports))
         self.badge_changed.emit()
 
-    def _entry(self, report: SignatureReport, expanded: bool) -> QTreeWidgetItem:
+    def _entry(self, report: SignatureReport) -> QTreeWidgetItem:
         signer = report.signer_name or "an unknown signer"
         if report.signer_email:
             signer = f"{signer} <{report.signer_email}>"
@@ -233,7 +247,6 @@ class SignaturesPanel(ViewPanel):
             font.setUnderline(True)
             link.setFont(0, font)
             top.addChild(link)
-        top.setExpanded(expanded)
         return top
 
     def _details(self, report: SignatureReport) -> QTreeWidgetItem:
