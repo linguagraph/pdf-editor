@@ -103,6 +103,7 @@ class JobCenter(QObject):
         on_done: Callable[[object], object] | None = None,
         on_failed: Callable[[str], object] | None = None,
         on_cancelled: Callable[[], object] | None = None,
+        detached: bool = False,
     ) -> Job:
         """Run ``work`` in the background.
 
@@ -110,9 +111,14 @@ class JobCenter(QObject):
         ``job.outcome`` (see :func:`pdfeditor.ui.jobs.wait_for`). Failures and cancellation
         show a toast unless handlers are given. With ``session`` the document is read-only
         while the job runs, and nothing is delivered if it was closed meanwhile.
+
+        ``detached``: the job never touches the session's document, only keeps it read-only, so
+        closing the document cancels it without waiting. For work that can sit for minutes in a
+        call nothing can interrupt, like a token's PIN prompt, which would freeze the app.
         """
         # No Qt parent: the list below keeps it alive while it runs, callers may keep it after
         job = Job(work, label=label, total=total, session=session)
+        job.detached = detached
         title = _title(label)
 
         def failed(message: str) -> object:
@@ -159,7 +165,7 @@ class JobCenter(QObject):
         for job in jobs:
             with job._state:  # a job not started yet now never will touch the document
                 job.cancel()
-                if job.started:
+                if job.started and not job.detached:
                     started.append(job)
         if not wait:
             return

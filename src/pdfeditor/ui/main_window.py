@@ -111,6 +111,7 @@ from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
 from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
+from pdfeditor.ui.sign_controller import PlaceSignatureTool, SignController
 from pdfeditor.ui.single_instance import start_new_window
 from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.start_page import StartPage
@@ -336,6 +337,7 @@ class MainWindow(QMainWindow):
         self.organize = OrganizeController(self)
         self.edit = EditController(self, self.tool_group, self.tool_actions)
         self.protect = ProtectController(self, self.tool_group, self.tool_actions)
+        self.signing = SignController(self, self.tool_group, self.tool_actions)
         self.tools = ToolsController(self)
         self.export = ExportController(self)
         self.optimize = OptimizeController(self)
@@ -691,6 +693,8 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.pdfa.act_preflight)
         tools_menu.addAction(self.pdfa.act_save_pdfa)
         tools_menu.addAction(self.pdfa.act_accessibility)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.signing.act_sign)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -734,6 +738,7 @@ class MainWindow(QMainWindow):
         self.edit.ribbon()
         self.organize.ribbon()
         self.protect.ribbon()
+        self.signing.ribbon()
         comment = self.ribbon.add_tab("Comment")
         comment.add_group(
             *(self.tool_actions[n] for n in ("highlight", "underline", "strikeout", "squiggly")),
@@ -1517,6 +1522,8 @@ class MainWindow(QMainWindow):
             tool = edit_tool
         elif name == "redact":
             tool = RedactTool(self.protect)
+        elif name == "place_signature":
+            tool = PlaceSignatureTool(self.signing)
         else:
             tool = annotate.tool_for(name) or SelectTool()
         tool.name = name

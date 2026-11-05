@@ -58,6 +58,8 @@ class Job(QObject):
         self._fn = fn
         self.token = CancelToken()
         self.done = False
+        self.committed = False  # see commit()
+        self.detached = False  # see JobCenter.start
         self.label = label
         self.session = session
         self.done_steps = 0
@@ -88,6 +90,11 @@ class Job(QObject):
 
     def cancel(self) -> None:
         self.token.cancel()
+
+    def commit(self) -> None:
+        """The job has done something that can't be taken back (written the user's file): from
+        here on a cancel comes too late, and the result must be delivered, not "cancelled"."""
+        self.committed = True
 
     @contextmanager
     def hold(self, lock: AbstractContextManager[object]) -> Iterator[None]:
@@ -142,10 +149,13 @@ class Job(QObject):
             self.failed.emit(str(exc))
             return
         self.done = True
-        if self.token.cancelled:
-            self.cancelled.emit()
-        else:
-            self.finished.emit(result)
+        try:
+            if self.token.cancelled and not self.committed:
+                self.cancelled.emit()
+            else:
+                self.finished.emit(result)
+        except RuntimeError:  # the app has exited around a job that outlived it (a PIN prompt)
+            log.info("job %r ended after the app did", self.label)
 
 
 _pool: QThreadPool | None = None

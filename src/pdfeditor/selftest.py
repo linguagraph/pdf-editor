@@ -456,6 +456,82 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
             raise AssertionError(f"unexpected security after save: {method}")
         return "AES-256 encrypt, reopen with password"
 
+    def signing() -> str:
+        """PAdES with a key made here, in memory: no certificate store, token or network."""
+        import datetime as dt
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.serialization import pkcs12
+        from cryptography.x509.oid import NameOID
+
+        from pdfeditor.model.geometry import Rect
+        from pdfeditor.model.signing import PfxKey, SignatureOptions, SignaturePlacement
+        from pdfeditor.services.signing import SigningError, sign_file, tokens, windows_store
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Elanero Self-Test")])
+        now = dt.datetime.now(dt.UTC)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - dt.timedelta(days=1))
+            .not_valid_after(now + dt.timedelta(days=1))
+            .sign(key, hashes.SHA256())
+        )
+        pfx = pkcs12.serialize_key_and_certificates(
+            b"self-test", key, cert, None, serialization.BestAvailableEncryption(b"self-test")
+        )
+        pfx_path = workdir / "selftest.pfx"
+        pfx_path.write_bytes(pfx)
+        out = workdir / "signed.pdf"
+        # with a visible appearance, and verified inside sign_file by pyHanko and the engine
+        sign_file(
+            data_path("selftest.pdf"),
+            out,
+            PfxKey(pfx_path, "self-test"),
+            SignatureOptions(SignaturePlacement(0, Rect(72, 600, 320, 680)), reason="Self-test"),
+            get_engine(),
+        )
+        import pikepdf
+
+        with pikepdf.open(out) as pdf:
+            if "/AP" not in pdf.Root.AcroForm.Fields[0]:
+                raise AssertionError("the signature has no appearance")
+        # the PKCS#11 native extension loads and rejects what isn't a module
+        import pyhanko.sign.pkcs11  # noqa: F401 - must import when frozen
+        from pyhanko.pdf_utils.metadata import xmp_xml  # noqa: F401 - lxml, for files with XMP
+
+        not_a_module = (
+            str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "kernel32.dll")
+            if sys.platform == "win32"
+            else "/does-not-exist.so"
+        )
+        try:
+            tokens.list_tokens(not_a_module)
+        except SigningError:
+            pass
+        else:
+            raise AssertionError("PKCS#11 accepted something that isn't a module")
+        detail = "PAdES signature with a memory key verified, PKCS#11 loads"
+        if windows_store.available():
+            # real CNG calls, on a key that never leaves this process
+            with windows_store.import_ephemeral_pfx(pfx, "self-test") as store_key:
+                digest = hashes.Hash(hashes.SHA256())
+                digest.update(b"self-test")
+                raw = digest.finalize()
+                signature = store_key.sign_digest(raw, "sha256")
+            from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+
+            key.public_key().verify(signature, raw, ec.ECDSA(Prehashed(hashes.SHA256())))
+            windows_store.list_certificates()  # reads the store only: no key is touched
+            detail += ", CNG signs"
+        return detail
+
     def pdfa() -> str:
         from pdfeditor.engine.base import SaveOptions
         from pdfeditor.services.pdfa import convert_to_pdfa
@@ -544,6 +620,7 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         ("export", export),
         ("optimize", optimize),
         ("security", security),
+        ("signing", signing),
         ("PDF/A", pdfa),
         ("licenses", licenses),
         ("branding", branding),
