@@ -23,6 +23,7 @@ from pdfeditor.ui.icons import icon
 from pdfeditor.ui.job_center import JobCenter
 from pdfeditor.ui.jobs import Job
 from pdfeditor.ui.panels.base import EmptyState, ViewPanel
+from pdfeditor.ui.theme import current_colors
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,12 @@ ICONS = {
     SignatureVerdict.VALID: "circle-check",
     SignatureVerdict.UNTRUSTED: "circle-alert",
     SignatureVerdict.INVALID: "x",
+}
+# In the row itself: a collapsed entry must say its verdict in words, not only by its icon.
+VERDICT_LABELS = {
+    SignatureVerdict.VALID: "valid",
+    SignatureVerdict.UNTRUSTED: "needs checking",
+    SignatureVerdict.INVALID: "invalid",
 }
 NOT_CHECKED_HERE = "Unsaved changes aren't part of these results."
 REVOCATION = "Revocation wasn't checked: Elanero doesn't go online to validate."
@@ -53,6 +60,8 @@ class SignaturesPanel(ViewPanel):
         self._checked_key: tuple[object, ...] | None = None
         self._checked_path: Path | None = None
         self._reports: list[SignatureReport] | None = None
+        # Kept until the app exits: a tab may have the earlier version open.
+        self._version_folders: list[tempfile.TemporaryDirectory[str]] = []
 
         self.note = QLabel(NOT_CHECKED_HERE, self)
         self.note.setWordWrap(True)
@@ -198,8 +207,9 @@ class SignaturesPanel(ViewPanel):
         signer = report.signer_name or "an unknown signer"
         if report.signer_email:
             signer = f"{signer} <{report.signer_email}>"
-        top = QTreeWidgetItem([f"Rev. {report.revision}: Signed by {signer}"])
-        top.setIcon(0, icon(ICONS[report.verdict]))
+        label = VERDICT_LABELS[report.verdict]
+        top = QTreeWidgetItem([f"Rev. {report.revision}: Signed by {signer} ({label})"])
+        top.setIcon(0, icon(ICONS[report.verdict], _verdict_color(report.verdict)))
         top.setData(0, REPORT_ROLE, report)
         if report.page is not None:
             top.setToolTip(0, f"Go to page {report.page + 1}")
@@ -216,12 +226,13 @@ class SignaturesPanel(ViewPanel):
             top.addChild(_text(f"Field: {report.field_name} (invisible signature)"))
         else:
             top.addChild(_text(f"Field: {report.field_name}"))
-        link = _text("Click to view this version")
-        link.setData(0, ACTION_ROLE, VIEW_VERSION)
-        font = link.font(0)
-        font.setUnderline(True)
-        link.setFont(0, font)
-        top.addChild(link)
+        if report.revision_end > 0:  # a damaged byte range has no earlier version to show
+            link = _text("Click to view this version")
+            link.setData(0, ACTION_ROLE, VIEW_VERSION)
+            font = link.font(0)
+            font.setUnderline(True)
+            link.setFont(0, font)
+            top.addChild(link)
         top.setExpanded(expanded)
         return top
 
@@ -262,8 +273,11 @@ class SignaturesPanel(ViewPanel):
         source = self._checked_path
         if source is None or self._jobs is None or self._open_version is None:
             return
-        folder = Path(tempfile.mkdtemp(prefix="elanero-signatures-"))
-        target = folder / f"{source.stem} (revision {report.revision}).pdf"
+        folder = tempfile.TemporaryDirectory(
+            prefix="elanero-signatures-", ignore_cleanup_errors=True
+        )
+        self._version_folders.append(folder)
+        target = Path(folder.name) / f"{source.stem} (revision {report.revision}).pdf"
 
         def work(_job: Job) -> object:
             extract_revision(source, report.revision_end, target)
@@ -274,6 +288,15 @@ class SignaturesPanel(ViewPanel):
                 self._open_version(result)
 
         self._jobs.start("Preparing the earlier version…", work, on_done=opened, detached=True)
+
+
+def _verdict_color(verdict: SignatureVerdict) -> str:
+    colors = current_colors()
+    return {
+        SignatureVerdict.VALID: colors.success,
+        SignatureVerdict.UNTRUSTED: colors.warning,
+        SignatureVerdict.INVALID: colors.danger,
+    }[verdict]
 
 
 def _text(value: str) -> QTreeWidgetItem:
@@ -289,9 +312,12 @@ def _modified_line(report: SignatureReport) -> str:
 
 
 def _time_line(report: SignatureReport) -> str:
+    when = f"Signed {report.signing_time:%Y.%m.%d %H:%M:%S %z}. " if report.signing_time else ""
     if report.time_source == "trusted timestamp":
-        return "Signing time is from a trusted timestamp."
-    return "Signing time is from the clock on the signer's computer."
+        return f"{when}Signing time is from a trusted timestamp."
+    if report.time_source == "unconfirmed timestamp":
+        return f"{when}Signing time is from a timestamp server whose identity wasn't confirmed."
+    return f"{when}Signing time is from the clock on the signer's computer."
 
 
 def _ltv_line(report: SignatureReport) -> str:

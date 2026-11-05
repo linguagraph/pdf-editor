@@ -6,12 +6,15 @@ import datetime as dt
 import socket
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pikepdf
 import pypdfium2 as pdfium
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
+from pyhanko.pdf_utils import generic
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 
 from pdfeditor.engine.registry import get_engine
 from pdfeditor.model.geometry import Rect
@@ -28,7 +31,7 @@ from pdfeditor.services.signing import (
     inspect_signatures,
     sign_file,
 )
-from pdfeditor.services.signing.inspect import _to_visible
+from pdfeditor.services.signing.inspect import _placement, _time_source, _to_visible
 from tests.services import test_signing as signing_tests
 
 local_tsa = signing_tests.local_tsa  # the pytest fixture, borrowed from the signing tests
@@ -131,13 +134,61 @@ def test_two_signatures_are_ordered_and_the_first_reports_later_changes(
         doc.close()
 
 
-def test_timestamped_signature_reports_a_trusted_timestamp(
+def test_timestamp_from_an_unconfirmed_server_isnt_called_trusted(
     fixture_pdf, pfx: Path, local_tsa: str, tmp_path: Path
 ) -> None:
     target = _sign(fixture_pdf("images"), pfx, tmp_path / "ts.pdf", tsa_url=local_tsa)
-    (report,) = inspect_signatures(target, None, [_der(pfx)])
-    assert report.time_source == "trusted timestamp"
+    (report,) = inspect_signatures(target, None, [_der(pfx)])  # the test TSA isn't a root
+    assert report.time_source == "unconfirmed timestamp"
     assert report.signing_time is not None
+    assert report.verdict is SignatureVerdict.UNTRUSTED
+    assert "timestamp server" in report.summary
+
+
+def test_time_source_needs_an_intact_and_confirmed_stamp() -> None:
+    stamp = SimpleNamespace(intact=True, valid=True, trusted=True)
+    assert _time_source(stamp) == "trusted timestamp"
+    stamp.trusted = False
+    assert _time_source(stamp) == "unconfirmed timestamp"
+    stamp.valid = False
+    assert _time_source(stamp) == "signer's computer clock"
+    assert _time_source(None) == "signer's computer clock"
+
+
+def test_a_later_signature_doesnt_cast_doubt_on_an_earlier_one(
+    fixture_pdf, pfx: Path, tmp_path: Path
+) -> None:
+    """Co-signing is how multi-signer documents work: the first signer must not look altered."""
+    first = _sign(fixture_pdf("images"), pfx, tmp_path / "one.pdf")
+    second = _sign(first, pfx, tmp_path / "two.pdf")
+    earlier, _later = inspect_signatures(second, None, [_der(pfx)])
+    assert earlier.verdict is SignatureVerdict.VALID
+    assert earlier.modified_after
+    assert "changed after" not in earlier.summary
+    assert "added after" in earlier.coverage
+    untrusted, _later = inspect_signatures(second, None, [])
+    assert untrusted.verdict is SignatureVerdict.UNTRUSTED
+    assert "identity couldn't be confirmed" in untrusted.summary
+
+
+def test_a_real_change_after_signing_is_never_valid(pfx: Path, signed: Path) -> None:
+    """A later revision that isn't another signature or form data."""
+    with signed.open("r+b") as fh:
+        writer = IncrementalPdfFileWriter(fh, strict=False)
+        writer.root["/Lang"] = generic.TextStringObject("xx")
+        writer.update_root()
+        writer.write_in_place()
+    (report,) = inspect_signatures(signed, None, [_der(pfx)])
+    assert report.modified_after
+    assert report.verdict is not SignatureVerdict.VALID
+
+
+def test_widget_in_kids_isnt_called_invisible() -> None:
+    widget = generic.DictionaryObject(
+        {generic.pdf_name("/Rect"): generic.ArrayObject(map(generic.FloatObject, (1, 2, 30, 40)))}
+    )
+    field = generic.DictionaryObject({generic.pdf_name("/Kids"): generic.ArrayObject([widget])})
+    assert _placement(None, field)[2] is False
 
 
 def test_untimestamped_signature_uses_the_signers_clock(signed: Path, pfx: Path) -> None:

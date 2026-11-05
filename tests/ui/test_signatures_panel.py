@@ -14,7 +14,7 @@ from pdfeditor.engine.registry import get_engine
 from pdfeditor.model.signing import PfxKey, SignatureOptions, SignatureVerdict
 from pdfeditor.services.signing import inspect_signatures, sign_file
 from pdfeditor.ui.main_window import MainWindow
-from pdfeditor.ui.panels.signatures import SignaturesPanel
+from pdfeditor.ui.panels.signatures import VERDICT_LABELS, SignaturesPanel
 
 pytestmark = pytest.mark.gui
 
@@ -83,7 +83,7 @@ def test_signed_document_is_checked_in_the_background(
     qtbot.waitUntil(lambda: signatures._reports is not None, timeout=20000)
     assert signatures.badge_count() == 1
     top = signatures.tree.topLevelItem(0)
-    assert top.text(0) == "Rev. 1: Signed by Elanero Test Signer"
+    assert top.text(0) == "Rev. 1: Signed by Elanero Test Signer (needs checking)"
     # Windows doesn't trust the throwaway certificate, so it must not show as valid.
     assert signatures._reports[0].verdict is not SignatureVerdict.VALID
     assert any("hasn't changed" in row for row in _rows(top))
@@ -116,6 +116,8 @@ def test_each_verdict_has_its_own_validity_sentence(
         assert any("Revocation wasn't checked" in row for row in rows)
         assert any(row.startswith("Last Checked:") for row in rows)
         assert "Click to view this version" in rows
+        top = signatures.tree.topLevelItem(0).text(0)
+        assert top.endswith(f"({VERDICT_LABELS[verdict]})"), "collapsed rows must say it in words"
 
 
 def test_unsaved_changes_are_called_out(

@@ -211,7 +211,7 @@ class SignatureReport:
     modified_after: bool  # the file has changed since this signature was applied
     coverage: str  # what this signature covers, in words
     signing_time: datetime | None
-    time_source: str  # "trusted timestamp" or "signer's computer clock"
+    time_source: str  # "trusted timestamp", "unconfirmed timestamp" or "signer's computer clock"
     has_ltv_data: bool  # the file carries long-term validation data (/DSS)
     reason: str  # why the verdict isn't VALID, "" when it is
     location: str

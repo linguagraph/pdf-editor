@@ -35,6 +35,9 @@ from pdfeditor.services.signing.errors import SigningError
 
 log = logging.getLogger(__name__)
 
+SIGNER_CLOCK = "signer's computer clock"
+TRUSTED_TIMESTAMP = "trusted timestamp"
+UNCONFIRMED_TIMESTAMP = "unconfirmed timestamp"
 PROTECTED_MESSAGE = "Can't check signatures in this protected document."
 _UNREADABLE_MESSAGE = "This file's signatures can't be read."
 _UNCHANGED_UNTRUSTED = (
@@ -46,6 +49,18 @@ _VALID = (
     "The signature is valid: the document hasn't changed since it was signed, and the "
     "signer's identity is trusted."
 )
+_ADDITIONS = "Only signatures, form data or validation data were added after this signature."
+_VALID_WITH_ADDITIONS = f"The signature is valid and the signer's identity is trusted. {_ADDITIONS}"
+_UNTRUSTED_WITH_ADDITIONS = (
+    f"The signed part hasn't changed, but the signer's identity couldn't be confirmed. {_ADDITIONS}"
+)
+_UNTRUSTED_TIMESTAMP = (
+    "The signer's identity is trusted and the document hasn't changed, but the timestamp "
+    "server's identity couldn't be confirmed."
+)
+# What may follow a signature without casting doubt on it: another signer's signature counts as
+# form filling. Anything else (annotations, content) keeps the "changed after signing" verdict.
+_ALLOWED_LATER_CHANGES = frozenset({"LTA_UPDATES", "FORM_FILLING"})
 
 
 def inspect_signatures(
@@ -142,9 +157,9 @@ def _report(
     trusted = bool(status.trusted and (stamp is None or stamp.trusted))
     verdict, summary, reason = _judge(status, stamp, modified, trusted)
     signing_time: datetime | None = status.signer_reported_dt
-    time_source = "signer's computer clock"
-    if stamp is not None and stamp.intact and stamp.valid:
-        time_source, signing_time = "trusted timestamp", stamp.timestamp
+    time_source = _time_source(stamp)
+    if stamp is not None and time_source != SIGNER_CLOCK:
+        signing_time = stamp.timestamp
     return SignatureReport(
         revision=number,
         field_name=details["field_name"],
@@ -172,6 +187,18 @@ def _report(
     )
 
 
+def _time_source(stamp: Any) -> str:
+    """Where the signing time comes from. "Trusted" only if the server's chain was confirmed."""
+    if stamp is None or not (stamp.intact and stamp.valid):
+        return SIGNER_CLOCK
+    return TRUSTED_TIMESTAMP if stamp.trusted else UNCONFIRMED_TIMESTAMP
+
+
+def _only_allowed_additions(status: Any) -> bool:
+    level = _safe(lambda: status.modification_level, None)
+    return level is not None and level.name in _ALLOWED_LATER_CHANGES
+
+
 def _judge(
     status: Any, stamp: Any, modified: bool, trusted: bool
 ) -> tuple[SignatureVerdict, str, str]:
@@ -185,11 +212,20 @@ def _judge(
     if stamp is not None and not (stamp.intact and stamp.valid):
         text = "The timestamp doesn't match the signature."
         return SignatureVerdict.INVALID, text, text
-    if modified:
+    allowed = modified and _only_allowed_additions(status)
+    if modified and not allowed:
         return (
             SignatureVerdict.UNTRUSTED,
             _CHANGED_AFTER,
             "The document was changed after this signature was applied.",
+        )
+    if status.trusted and not trusted:
+        return SignatureVerdict.UNTRUSTED, _UNTRUSTED_TIMESTAMP, ""
+    if not trusted and allowed:
+        return (
+            SignatureVerdict.UNTRUSTED,
+            _UNTRUSTED_WITH_ADDITIONS,
+            "The signer's certificate doesn't chain to a trusted root.",
         )
     if not trusted:
         return (
@@ -197,16 +233,15 @@ def _judge(
             _UNCHANGED_UNTRUSTED,
             "The signer's certificate doesn't chain to a trusted root.",
         )
-    return SignatureVerdict.VALID, _VALID, ""
+    return SignatureVerdict.VALID, _VALID_WITH_ADDITIONS if allowed else _VALID, ""
 
 
 def _coverage_text(status: Any) -> str:
     coverage = status.coverage
     if coverage == SignatureCoverageLevel.ENTIRE_FILE:
         return "The whole file is covered by this signature."
-    level = _safe(lambda: status.modification_level, None)
-    if level is not None and level.name == "LTA_UPDATES":
-        return "Only long-term validation data was added after this signature."
+    if _only_allowed_additions(status):
+        return _ADDITIONS
     return "Later changes were added after this signature."
 
 
@@ -225,7 +260,7 @@ def _unchecked(
         modified_after=False,
         coverage="",
         signing_time=None,
-        time_source="signer's computer clock",
+        time_source=SIGNER_CLOCK,
         has_ltv_data=details["has_ltv_data"],
         reason=reason,
         location=details["location"],
@@ -285,11 +320,13 @@ def _placement(reader: PdfFileReader, field: Any) -> tuple[int | None, Rect | No
     empty /Rect and no page."""
 
     def read() -> tuple[int | None, Rect | None, bool]:
-        box = _resolve(field.get("/Rect"))
+        kids = _resolve(field.get("/Kids"))  # a widget may be a child rather than the field itself
+        widget = _resolve(kids[0]) if kids else field
+        box = _resolve(widget.get("/Rect"))
         x0, y0, x1, y1 = (float(v) for v in box) if box is not None else (0.0, 0.0, 0.0, 0.0)
         if abs(x1 - x0) <= 0 or abs(y1 - y0) <= 0:
             return None, None, True
-        index = _page_index(reader, field)
+        index = _page_index(reader, widget)
         if index is None:
             return None, None, False
         boxes = page_boxes(reader, index)

@@ -88,6 +88,7 @@ a = Analysis(
     hiddenimports=[
         "pdfeditor.engine.mupdf",
         "pdfeditor.services.signing._pdf",
+        "pdfeditor.services.signing.inspect",
         "pkcs11._pkcs11",
         "pkcs11.defaults",
         "pkcs11.util.ec",
