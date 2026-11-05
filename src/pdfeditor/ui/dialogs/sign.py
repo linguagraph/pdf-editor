@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from pdfeditor.model.signing import (
     CertificateInfo,
+    EmptySignatureField,
     KeyRef,
     PfxKey,
     PinState,
@@ -101,13 +102,19 @@ class SignDialog(FormDialog):
         parent: QWidget | None = None,
         *,
         rejected_tokens: set[tuple[str, int]] | None = None,
+        empty_fields: tuple[EmptySignatureField, ...] = (),
     ) -> None:
-        subtitle = (
-            f"A visible signature on page {placement.page + 1}. "
-            if placement is not None
-            else "An invisible signature: nothing is drawn on the pages. "
-            "Use Place Signature to show one. "
-        )
+        # Only an invisible signature can go into an existing field: a drawn box makes a new one.
+        offer_fields = placement is None and bool(empty_fields)
+        if placement is not None:
+            subtitle = f"A visible signature on page {placement.page + 1}. "
+        elif offer_fields:
+            subtitle = "Choose the signature field to sign, or sign invisibly. "
+        else:
+            subtitle = (
+                "An invisible signature: nothing is drawn on the pages. "
+                "Use Place Signature to show one. "
+            )
         super().__init__(
             "Sign Document",
             subtitle + "The signed copy is saved as a new file; the original isn't changed.",
@@ -139,6 +146,16 @@ class SignDialog(FormDialog):
         self.add_widget(self.pages, 1)
 
         details = self.add_form()
+        self.field_choice: QComboBox | None = None
+        if offer_fields:
+            self.field_choice = QComboBox(self)
+            self.field_choice.addItem("New invisible signature", None)
+            for field in empty_fields:
+                index = self.field_choice.count()
+                self.field_choice.addItem(f"{field.label} (page {field.page + 1})", field.name)
+                self.field_choice.setItemData(index, field.name, Qt.ItemDataRole.ToolTipRole)
+            self.field_choice.setCurrentIndex(1)  # the first empty field, as the default
+            add_row(details, "Signature &field:", self.field_choice)
         self.reason = QLineEdit(self)
         self.location = QLineEdit(self)
         self.location.setText(str(self.settings.value("signing/location", "")))
@@ -618,11 +635,13 @@ class SignDialog(FormDialog):
         return PfxKey(Path(self.pfx_path.text().strip()), self.pfx_password.text())
 
     def options(self) -> SignatureOptions:
+        field_name = self.field_choice.currentData() if self.field_choice is not None else None
         return SignatureOptions(
             placement=self.placement,
             reason=self.reason.text().strip(),
             location=self.location.text().strip(),
             tsa_url=self.tsa_url.text().strip() if self.use_timestamp.isChecked() else "",
+            field_name=field_name if isinstance(field_name, str) else None,
         )
 
     def clear_secrets(self) -> None:

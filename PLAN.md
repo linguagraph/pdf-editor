@@ -11,7 +11,7 @@ The goal is an Acrobat-style desktop PDF editor written in Python, built from sc
 - **App type:** a desktop app with PySide6 (Qt 6, LGPL), packaged for Windows.
 - **In scope:** core view/annotate/pages, content editing, and the advanced/pro features.
 - **Distribution: a self-contained executable** (decided after Phase 3). Users run one `Elanero.exe` with no Python, no installer and no separately installed tools. Everything every in-scope feature needs is bundled: Qt, MuPDF, qpdf/pikepdf, fonts, ICC profiles and OCR language data. External programs (LibreOffice, Ghostscript, veraPDF) may only add optional extras, never a core feature. The frozen build is built and smoke-tested in CI from Phase P on, so packaging problems show up early rather than at release.
-- **Out of scope for now:** creating form fields. Existing forms and signatures must still render and be kept intact on save (no flattening, and incremental save where signatures exist). Digital signing moved into scope with issue #94: see Phase S.
+- **Out of scope for now:** creating form fields, except signature fields (Phase S, issue #100). Existing forms and signatures must still render and be kept intact on save (no flattening, and incremental save where signatures exist). Digital signing moved into scope with issue #94: see Phase S.
 
 ---
 
@@ -462,7 +462,9 @@ Keys come from three routes behind one signer interface: the Windows certificate
 
 **Known limit:** closing the app during a PIN prompt closes the window at once, but the process ends only when that prompt is answered or dismissed: Windows or the middleware owns it, and nothing can interrupt it. Cancelling discards the result, so no file appears.
 
-**Left out for now:** signing into an existing empty signature field (a new field is always added), RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures.
+- [x] Request signatures from recipients (issue #100). The sender places one named signature box per signer (Protect ▸ Sign ▸ Request Signatures), saves a `-for-signature.pdf` copy, and an email draft opens to every signer with the file to attach by hand. Each recipient signs their own field in Elanero (Sign Document ▸ Signature field) or Acrobat; the placeholder "Sign here" is replaced by the signature. Written atomically and verified: earlier signatures stay valid, and encrypted files stay encrypted. Certified documents are refused. _(Tested with pyHanko validation, pikepdf and pypdfium2, and UI tests; **not tested with Acrobat**: see checklist item 7.)_ **No server:** the app sends nothing, tracks nothing and sends no reminders. Code: `services/signing/request.py`, `ui/dialogs/request_signature.py`.
+
+**Left out for now:** RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures. Drawing a box in Sign Document always makes a new field; only an invisible signature can go into an existing empty field.
 
 **Manual checklist for the owner (needs real hardware):**
 1. *Minidriver/CSP token (most national tokens):* plug in, install the vendor's middleware, check that Windows lists the certificate (`certmgr.msc`). In Elanero: Protect ▸ Sign Document ▸ Windows certificate store. The certificate shows as "USB token or smart card" with the right expiry. Listing and opening the dialog don't ask for a PIN.
@@ -471,6 +473,7 @@ Keys come from three routes behind one signer interface: the Windows certificate
 4. *Wrong PIN:* enter a wrong PIN **once** on a token that has attempts to spare. A clear message, no second attempt, the field cleared; the next try shows the warning. A token at its last try says so per token, even with its certificates hidden, and asks for confirmation before anything is sent; a locked one doesn't ask for a PIN at all.
 5. *Unplugged:* pull the token and sign (store route: its certificate may stay listed). A clear message to plug it in, no file written. Pull it during a PIN prompt too.
 6. Cancel at the PIN prompt: "cancelled", no file written. Press Cancel in the app while the prompt is open: takes effect once the prompt is answered, no file written.
+7. *Request Signatures (not tested with Acrobat):* request two signatures in Elanero, open the `-for-signature.pdf` in Acrobat, sign one field, and check that its placeholder is replaced while the other field stays empty and both signatures validate.
 
 ### Later / not in current scope
 - AcroForm creation and editing, and a certificate validation panel (checking and showing signatures in other people's files). Rendering and keeping existing forms and signatures intact is covered above; creating signatures is Phase S.

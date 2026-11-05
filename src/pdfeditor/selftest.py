@@ -502,6 +502,28 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         with pikepdf.open(out) as pdf:
             if "/AP" not in pdf.Root.AcroForm.Fields[0]:
                 raise AssertionError("the signature has no appearance")
+        # Request Signatures: prepare an empty field, then sign into it (verified by sign_file)
+        from pdfeditor.model.signing import SignatureRequest
+        from pdfeditor.services.signing import prepare_for_signing
+
+        prepared = workdir / "selftest-for-signature.pdf"
+        prepare_for_signing(
+            data_path("selftest.pdf"),
+            prepared,
+            [SignatureRequest("Self-Test Signer", "", 0, Rect(72, 600, 320, 680))],
+            get_engine(),
+        )
+        requested = workdir / "selftest-requested.pdf"
+        sign_file(
+            prepared,
+            requested,
+            PfxKey(pfx_path, "self-test"),
+            SignatureOptions(field_name="SignatureRequest1"),
+            get_engine(),
+        )
+        with pikepdf.open(requested) as pdf:
+            if "/V" not in pdf.Root.AcroForm.Fields[0]:
+                raise AssertionError("the requested field wasn't signed")
         # the PKCS#11 native extension loads and rejects what isn't a module
         import pyhanko.sign.pkcs11  # noqa: F401 - must import when frozen
         from pyhanko.pdf_utils.metadata import xmp_xml  # noqa: F401 - lxml, for files with XMP

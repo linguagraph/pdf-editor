@@ -12,7 +12,8 @@ footers, Bates numbering, watermarks · editing text and images in place · reda
 verification and document sanitizing · OCR (built-in Tesseract, deskew) · export to Word,
 Excel, HTML, Markdown, text and images · reduce file size · compare documents · password
 security · digital signatures (PAdES, with USB tokens and smart cards through Windows or
-PKCS#11, or a PFX file) · PDF/A-2b conversion · accessibility checker, tag editor and experimental
+PKCS#11, or a PFX file) · request signatures from several recipients (the app sends nothing; you
+email the file) · PDF/A-2b conversion · accessibility checker, tag editor and experimental
 auto-tagging · keyboard shortcuts and a command palette (Ctrl+Shift+P).
 
 ## Download

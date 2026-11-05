@@ -114,12 +114,33 @@ class SignaturePlacement:
 
 
 @dataclass(frozen=True, slots=True)
+class SignatureRequest:
+    """A signature field to leave for one recipient, placed in visible page space."""
+
+    name: str  # the person who signs; shown in the field's placeholder
+    email: str  # optional: only used to address the email draft
+    page: int
+    rect: Rect
+
+
+@dataclass(frozen=True, slots=True)
+class EmptySignatureField:
+    """A signature field that nothing has signed yet."""
+
+    name: str  # the field's name in the PDF
+    label: str  # its tooltip (/TU), or the name when it has none
+    page: int
+    rect: Rect | None  # None: a field without a box, which can't show an appearance
+
+
+@dataclass(frozen=True, slots=True)
 class SignatureOptions:
     placement: SignaturePlacement | None = None  # None: an invisible signature
     reason: str = ""
     location: str = ""
     tsa_url: str = ""  # RFC 3161 server; empty: no timestamp and no network access
     signed_at: datetime | None = None  # shown in the appearance; defaults to now
+    field_name: str | None = None  # sign into this existing empty field instead of a new one
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +191,28 @@ class PageBoxes:
         ax, ay = convert(rect.x0, rect.y0)
         bx, by = convert(rect.x1, rect.y1)
         return min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
+
+    def user_to_visible(self, box: tuple[float, float, float, float]) -> Rect:
+        """The inverse of :meth:`visible_to_user`: a user-space box as a rect in visible space."""
+        x0, y0, x1, y1 = self.visible_box
+        unit = self.user_unit or 1.0
+        rotate = self.rotate % 360
+        ux0, uy0, ux1, uy1 = _normal(box)
+
+        def invert(ux: float, uy: float) -> tuple[float, float]:
+            if rotate == 90:
+                vx, vy = uy - y0, ux - x0
+            elif rotate == 180:
+                vx, vy = x1 - ux, uy - y0
+            elif rotate == 270:
+                vx, vy = y1 - uy, x1 - ux
+            else:
+                vx, vy = ux - x0, y1 - uy
+            return vx * unit, vy * unit
+
+        ax, ay = invert(ux0, uy0)
+        bx, by = invert(ux1, uy1)
+        return Rect(min(ax, bx), min(ay, by), max(ax, bx), max(ay, by))
 
 
 def _normal(box: tuple[float, float, float, float]) -> tuple[float, float, float, float]:

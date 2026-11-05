@@ -695,6 +695,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.pdfa.act_accessibility)
         tools_menu.addSeparator()
         tools_menu.addAction(self.signing.act_sign)
+        tools_menu.addAction(self.signing.act_request)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -1522,7 +1523,7 @@ class MainWindow(QMainWindow):
             tool = edit_tool
         elif name == "redact":
             tool = RedactTool(self.protect)
-        elif name == "place_signature":
+        elif name in ("place_signature", "request_signatures"):
             tool = PlaceSignatureTool(self.signing)
         else:
             tool = annotate.tool_for(name) or SelectTool()
