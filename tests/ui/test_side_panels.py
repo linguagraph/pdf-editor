@@ -71,6 +71,7 @@ def test_rail_lists_every_panel(window: MainWindow) -> None:
         "Search",
         "Attachments",
         "Layers",
+        "Signatures",
         "Accessibility",
         "Tags",
     ]

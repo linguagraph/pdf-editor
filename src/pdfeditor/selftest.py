@@ -502,6 +502,13 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         with pikepdf.open(out) as pdf:
             if "/AP" not in pdf.Root.AcroForm.Fields[0]:
                 raise AssertionError("the signature has no appearance")
+        # the Signatures panel's checker: trusting the memory key's certificate gives VALID
+        from pdfeditor.model.signing import SignatureVerdict
+        from pdfeditor.services.signing import inspect_signatures
+
+        (checked,) = inspect_signatures(out, None, [cert.public_bytes(serialization.Encoding.DER)])
+        if checked.verdict is not SignatureVerdict.VALID:
+            raise AssertionError(f"signature check said {checked.verdict}: {checked.reason}")
         # the PKCS#11 native extension loads and rejects what isn't a module
         import pyhanko.sign.pkcs11  # noqa: F401 - must import when frozen
         from pyhanko.pdf_utils.metadata import xmp_xml  # noqa: F401 - lxml, for files with XMP

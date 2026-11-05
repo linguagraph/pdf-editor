@@ -461,7 +461,9 @@ Keys come from three routes behind one signer interface: the Windows certificate
 
 **Known limit:** closing the app during a PIN prompt closes the window at once, but the process ends only when that prompt is answered or dismissed: Windows or the middleware owns it, and nothing can interrupt it. Cancelling discards the result, so no file appears.
 
-**Left out for now:** signing into an existing empty signature field (a new field is always added), RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures.
+- [ ] Signatures panel for files already signed (issue #98): one entry per signature with a validity sentence, whether the file changed after signing, signing-time source, long-term validation data present or absent, certificate details, "View this version", and go-to-page. Verdicts never overstate: VALID needs an intact signature that chains to a trusted root. Checks run offline, as a background job, while the panel is open and after a save. _(partial: tested with throwaway keys and fixtures only. Not yet checked on the owner's real signed files or against the owner's Windows trust store. Revocation is not checked, and the panel says so.)_
+
+**Left out for now:** signing into an existing empty signature field (a new field is always added), RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA).
 
 **Manual checklist for the owner (needs real hardware):**
 1. *Minidriver/CSP token (most national tokens):* plug in, install the vendor's middleware, check that Windows lists the certificate (`certmgr.msc`). In Elanero: Protect ▸ Sign Document ▸ Windows certificate store. The certificate shows as "USB token or smart card" with the right expiry. Listing and opening the dialog don't ask for a PIN.
@@ -472,7 +474,7 @@ Keys come from three routes behind one signer interface: the Windows certificate
 6. Cancel at the PIN prompt: "cancelled", no file written. Press Cancel in the app while the prompt is open: takes effect once the prompt is answered, no file written.
 
 ### Later / not in current scope
-- AcroForm creation and editing, and a certificate validation panel (checking and showing signatures in other people's files). Rendering and keeping existing forms and signatures intact is covered above; creating signatures is Phase S.
+- AcroForm creation and editing. Rendering and keeping existing forms and signatures intact is covered above; creating and checking signatures is Phase S.
 - A permissive engine backend (pypdfium2 + pikepdf) implementing `engine/base.py`. The contract tests from Phase 1 are its acceptance suite.
 - Measurement tools, 3D/multimedia, batch "Action Wizard", cloud sync.
 

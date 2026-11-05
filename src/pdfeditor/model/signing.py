@@ -174,3 +174,52 @@ class PageBoxes:
 
 def _normal(box: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     return min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])
+
+
+class SignatureVerdict(Enum):
+    """What the Signatures panel may say about a signature. A green tick means something legal
+    to a user, so VALID is only for signatures that are intact and chain to a trusted root."""
+
+    VALID = "valid"
+    UNTRUSTED = "untrusted"  # intact, but the signer's identity couldn't be confirmed
+    INVALID = "invalid"  # the signature fails, or changes after signing aren't allowed
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateDetails:
+    """The signer's certificate, as the Signature Details section shows it."""
+
+    subject: str
+    issuer: str
+    serial: str
+    not_before: datetime
+    not_after: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SignatureReport:
+    """One signature in a file, checked offline. The rect is in visible page space."""
+
+    revision: int  # 1 for the first signature in the file, counting in file order
+    field_name: str
+    signer_name: str
+    signer_email: str
+    verdict: SignatureVerdict
+    summary: str  # the validity sentence shown to the user
+    intact: bool
+    trusted: bool
+    modified_after: bool  # the file has changed since this signature was applied
+    coverage: str  # what this signature covers, in words
+    signing_time: datetime | None
+    time_source: str  # "trusted timestamp" or "signer's computer clock"
+    has_ltv_data: bool  # the file carries long-term validation data (/DSS)
+    reason: str  # why the verdict isn't VALID, "" when it is
+    location: str
+    certificate: CertificateDetails | None
+    digest_algorithm: str
+    subfilter: str
+    page: int | None  # None for an invisible signature
+    rect: Rect | None
+    invisible: bool
+    revision_end: int  # byte offset where this signature's revision ends
+    checked_at: datetime

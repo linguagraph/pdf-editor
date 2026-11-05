@@ -103,6 +103,7 @@ from pdfeditor.ui.panels.comments import CommentsPanel, add_reply
 from pdfeditor.ui.panels.inspector import InspectorPanel
 from pdfeditor.ui.panels.layers import LayersPanel
 from pdfeditor.ui.panels.search import SearchPanel
+from pdfeditor.ui.panels.signatures import SignaturesPanel
 from pdfeditor.ui.panels.thumbnails import ThumbnailsPanel
 from pdfeditor.ui.pdfa_controller import PdfaController
 from pdfeditor.ui.protect_controller import ProtectController, RedactTool
@@ -203,6 +204,7 @@ PANEL_ICONS: dict[type[ViewPanel], tuple[str, str]] = {
     SearchPanel: ("search", "search"),
     AttachmentsPanel: ("attachments", "paperclip"),
     LayersPanel: ("layers", "layers"),
+    SignaturesPanel: ("signatures", "signature"),
     AccessibilityPanel: ("accessibility", "accessibility"),
     TagsPanel: ("tags", "tags"),
 }
@@ -271,6 +273,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.search_panel = SearchPanel()
+        self.signatures_panel = SignaturesPanel()
         self.comments_panel = CommentsPanel()
         self.inspector = InspectorPanel()
         self.panels: list[ViewPanel] = [
@@ -280,6 +283,7 @@ class MainWindow(QMainWindow):
             self.search_panel,
             AttachmentsPanel(),
             LayersPanel(),
+            self.signatures_panel,
         ]
         self.accessibility_panel = AccessibilityPanel()
         self.tags_panel = TagsPanel()
@@ -324,6 +328,7 @@ class MainWindow(QMainWindow):
         # chip at the right of the status bar instead of modal progress dialogs.
         self.toasts = ToastHost(self, avoid=lambda: self.pill if self.pill.isVisible() else None)
         self.jobs = JobCenter(self.notify, self)
+        self.signatures_panel.attach(self.jobs, self.open_path)
         self.progress_chip = ProgressChip(self.jobs, self)
         self.statusBar().addPermanentWidget(self.progress_chip)
         self.jobs.running_changed.connect(self._update_ui)
@@ -1052,6 +1057,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabToolTip(index, str(saved))
         self._update_tab_title(view)
         self._update_ui()
+        self.signatures_panel.rebuild()  # the file on disk changed: its signatures may have too
         self.notify(f"Saved {saved.name}", "success", folder_action(saved))
         return True
 
