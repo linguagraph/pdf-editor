@@ -10,7 +10,7 @@ import io
 from dataclasses import dataclass
 from functools import cache
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 
 from pdfeditor.bundle import data_path
 
@@ -21,6 +21,7 @@ _CROP = (126, 150, 392, 436)
 _FOLD = (24, 186)
 # The E is strongly saturated; the pale document (saturation about 0.2) and the page curl are not.
 _SATURATION_LOW, _SATURATION_SPAN = 0.40, 0.25
+_FEATHER = 40  # pixels of the crop: the E's tail runs past the crop, so it fades out, not stops
 _FADE = 0.22  # the mark's strongest alpha: black text over it stays clearly readable
 _MAX_HEIGHT = 220  # pixels; keeps signed files small
 
@@ -34,6 +35,16 @@ class Mark:
     @property
     def aspect(self) -> float:
         return self.width / self.height
+
+
+def _feathered(alpha: Image.Image) -> Image.Image:
+    """``alpha`` falling to nothing at its edges, so the crop leaves no hard cut or stray pixels."""
+    mask = Image.new("L", alpha.size, 255)
+    draw = ImageDraw.Draw(mask)
+    for inset in range(_FEATHER):
+        right, bottom = alpha.width - 1 - inset, alpha.height - 1 - inset
+        draw.rectangle((inset, inset, right, bottom), outline=round(255 * inset / _FEATHER))
+    return ImageChops.multiply(alpha, mask)
 
 
 @cache
@@ -50,6 +61,7 @@ def mark() -> Mark:
     alpha = saturation.point(ramp)
     top, left = _FOLD
     alpha.paste(0, (left, 0, alpha.width, top))
+    alpha = _feathered(alpha)
     image = Image.merge("RGBA", (red, green, blue, alpha))
     if image.height > _MAX_HEIGHT:
         width = round(image.width * _MAX_HEIGHT / image.height)

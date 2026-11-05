@@ -1210,3 +1210,17 @@ def test_visible_appearance_adds_little_to_the_file(throwaway_pfx, tmp_path: Pat
     )
     sign_file(source, visible, key, options, ENGINE)
     assert visible.stat().st_size - invisible.stat().st_size < 150_000
+
+
+def test_mark_fades_out_at_its_edges() -> None:
+    """The E's tail runs past the crop: a hard cut or stray pixels would show on the document."""
+    from PIL import Image
+
+    from pdfeditor.services.signing.appearance_mark import mark
+
+    alpha = Image.open(io.BytesIO(mark().png)).getchannel("A")
+    width, height = alpha.size
+    border = [alpha.getpixel((x, y)) for x in range(width) for y in (0, height - 1)]
+    border += [alpha.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
+    assert max(border) <= 2
+    assert alpha.getextrema()[1] > 30, "the mark itself must still show"
