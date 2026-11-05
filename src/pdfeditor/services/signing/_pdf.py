@@ -272,7 +272,7 @@ def _field_placement(reader: PdfFileReader, ref: Any) -> tuple[int, Rect | None,
     if page is None:
         page = 0
     box = _box(widget.get("/Rect"))
-    if box is None:
+    if box is None or box[0] == box[2] or box[1] == box[3]:  # an invisible field has an empty /Rect
         return page, None, field_dict
     return page, page_boxes(reader, page).user_to_visible(box), field_dict
 
@@ -649,21 +649,13 @@ def _open_reader(fh: BinaryIO, password: str | None) -> PdfFileReader:
 
 
 def verify_output(
-    path: Path,
-    source: Path,
-    password: str | None,
-    engine: Engine,
-    timestamped: bool = False,
-    field_name: str | None = None,
+    path: Path, source: Path, password: str | None, engine: Engine, timestamped: bool = False
 ) -> None:
     """Refuse to deliver anything but a correct signature: the new one must cover the whole
-    file, and signatures that held before must still hold. ``field_name`` is the new signature's
-    field; signatures are listed in field order, so the last one isn't always the new one."""
+    file, and signatures that held before must still hold."""
     with path.open("rb") as fh:
         signatures = list(_open_reader(fh, password).embedded_signatures)
-        new = [s for s in signatures if s.field_name == field_name] if field_name else []
-        newest = new[-1] if new else (signatures[-1] if signatures else None)
-        status = _status(newest) if newest is not None else None
+        status = _status(signatures[-1]) if signatures else None
         if status is None or not (status.intact and status.valid):
             raise SigningError("The new signature didn't verify. The file was not written.")
         if status.coverage != SignatureCoverageLevel.ENTIRE_FILE:
@@ -675,7 +667,7 @@ def verify_output(
                     "The timestamp server's answer doesn't match this signature. The file was "
                     "not written."
                 )
-        broken = [s.field_name for s in signatures if s is not newest and not _signature_ok(s)]
+        broken = [s.field_name for s in signatures[:-1] if not _signature_ok(s)]
     if broken:
         with source.open("rb") as fh:
             before = _open_reader(fh, password).embedded_signatures
@@ -817,13 +809,6 @@ def _sign_open_file(
             ).sign_pdf(writer, output=out)
         token.check()
         report("Checking the signature…")
-        verify_output(
-            tmp,
-            source,
-            password,
-            engine,
-            timestamped=timestamper is not None,
-            field_name=field_name,
-        )
+        verify_output(tmp, source, password, engine, timestamped=timestamper is not None)
         token.check()  # the last moment a cancel can still stop the file from appearing
     return SignResult(target, info.subject, timestamper is not None)

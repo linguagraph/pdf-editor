@@ -111,7 +111,12 @@ from pdfeditor.ui.ribbon import Ribbon
 from pdfeditor.ui.settings import AppSettings
 from pdfeditor.ui.shortcuts import CommandPalette, ShortcutManager, ShortcutsDialog
 from pdfeditor.ui.side_panels import PanelDock, SidePanels, fit_docks
-from pdfeditor.ui.sign_controller import PlaceSignatureTool, SignController
+from pdfeditor.ui.sign_controller import (
+    REQUEST_TOOL,
+    PlaceSignatureTool,
+    RequestSignaturesTool,
+    SignController,
+)
 from pdfeditor.ui.single_instance import start_new_window
 from pdfeditor.ui.stamp_menu import StampMenu
 from pdfeditor.ui.start_page import StartPage
@@ -152,10 +157,15 @@ COMMENT_TOOLS = (
 )
 EDIT_TOOL_NAMES = {name for name, _t, _k in EDIT_TOOLS}
 # Tools that aren't "make one thing" tools: they don't switch back after use.
-STAY_ACTIVE = {"select", "hand", "edit"}
+STAY_ACTIVE = {"select", "hand", "edit", REQUEST_TOOL}
 # What the mode banner over the page says for tools that change how clicks on the page work
 # (other tools show their own name). Framed modes also get an accent frame around the pages.
 TOOL_MODES = {
+    REQUEST_TOOL: Mode(
+        QT_TRANSLATE_NOOP("ModeBanner", "Requesting signatures: drag a box for each signer"),
+        "file-pen-line",
+        True,
+    ),
     "edit": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Editing text & images"), "file-pen-line", True),
     "add_text": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding text"), "type", True),
     "add_image": Mode(QT_TRANSLATE_NOOP("ModeBanner", "Adding an image"), "image-plus", True),
@@ -1523,8 +1533,10 @@ class MainWindow(QMainWindow):
             tool = edit_tool
         elif name == "redact":
             tool = RedactTool(self.protect)
-        elif name in ("place_signature", "request_signatures"):
+        elif name == "place_signature":
             tool = PlaceSignatureTool(self.signing)
+        elif name == REQUEST_TOOL:
+            tool = RequestSignaturesTool(self.signing)
         else:
             tool = annotate.tool_for(name) or SelectTool()
         tool.name = name

@@ -404,3 +404,24 @@ def test_mailto_keeps_cyrillic_names_and_is_valid_without_emails() -> None:
     assert url.startswith("mailto:?subject=")
     assert unquote(url.split("subject=")[1].split("&body=")[0]) == "Please sign: Договор.pdf"
     assert "Иван" not in url  # the names are not in the address line at all
+
+
+def test_invisible_empty_field_has_no_box_and_signs_without_an_appearance(
+    fixture_pdf, throwaway_pfx, tmp_path: Path
+) -> None:
+    """An empty /Rect from another tool: there's no 0 x 0 appearance to build."""
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    from pyhanko.sign.fields import SigFieldSpec, append_signature_field
+
+    source = tmp_path / "invisible-field.pdf"
+    with fixture_pdf("text_multipage").open("rb") as fh:
+        writer = IncrementalPdfFileWriter(fh, strict=False)
+        append_signature_field(writer, SigFieldSpec("Hidden"))
+        with source.open("wb") as out:
+            writer.write(out)
+    (field,) = preflight(source).empty_fields
+    assert field.rect is None
+    target = tmp_path / "signed.pdf"
+    key = PfxKey(throwaway_pfx(), "test")
+    sign_file(source, target, key, SignatureOptions(field_name="Hidden"), get_engine())
+    assert preflight(target).empty_fields == ()

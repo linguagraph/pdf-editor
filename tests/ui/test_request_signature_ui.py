@@ -172,19 +172,90 @@ def test_add_another_keeps_the_tool_and_both_signers_get_fields(
     assert opened_urls[0].startswith("mailto:ana@example.com?subject=")
 
 
-def test_cancelling_a_signer_writes_nothing(
-    window: MainWindow, view, qtbot, stub_dialog, tmp_path: Path, monkeypatch
+def test_cancelling_a_signer_drops_only_that_box(
+    window: MainWindow, view, qtbot, stub_dialog, opened_urls, email_button, tmp_path, monkeypatch
 ) -> None:
-    target = tmp_path / "never.pdf"
+    target = tmp_path / "one.pdf"
     monkeypatch.setattr(window.signing, "choose_target", lambda *a, **k: target)
-    stub_dialog.script = [(0, False, "Ana", "")]
+    stub_dialog.script = [(1, True, "Ana", ""), (0, False, "Ben", ""), (1, False, "Cy", "")]
+    window.signing.request()
+    for top in (50, 130, 210):
+        window.signing.request_placed(0, Rect(50, top, 300, top + 60))
+        qtbot.wait(20)
+    qtbot.waitUntil(lambda: bool(opened_urls))
+    labels = [f.label for f in preflight(target).empty_fields]
+    assert labels == ["Signature of Ana", "Signature of Cy"]
+
+
+def test_done_finishes_without_drawing_another_box(
+    window: MainWindow, view, qtbot, stub_dialog, opened_urls, email_button, tmp_path, monkeypatch
+) -> None:
+    target = tmp_path / "done.pdf"
+    monkeypatch.setattr(window.signing, "choose_target", lambda *a, **k: target)
+    stub_dialog.script = [(1, True, "Ana", "")]
     window.signing.request()
     window.signing.request_placed(0, Rect(50, 50, 300, 110))
-    qtbot.waitUntil(lambda: window.signing._requests is None)
-    qtbot.wait(20)
-    assert not target.exists()
+    qtbot.waitUntil(lambda: bool(window.signing._requests))
+    assert window.current_tool == "request_signatures"
+    window.mode_banner.done.emit()
+    qtbot.waitUntil(lambda: bool(opened_urls))
     assert window.current_tool == "select"
+    assert [f.label for f in preflight(target).empty_fields] == ["Signature of Ana"]
+
+
+def test_the_tool_stays_active_after_a_box_whatever_the_preference(
+    window: MainWindow, view, qtbot, stub_dialog
+) -> None:
+    window.prefs.keep_tools = False
+    stub_dialog.script = [(1, True, "Ana", "")]
+    window.signing.request()
+    view.tool_used.emit()
+    assert window.current_tool == "request_signatures"
+    window.set_tool("select")
+
+
+def test_leaving_the_tool_with_no_signers_ends_the_request(
+    window: MainWindow, view, qtbot, stub_dialog, monkeypatch
+) -> None:
+    """It used to stay running: Request Signatures then did nothing, and Place Signature's next
+    box was taken for a signer's."""
+    window.signing.request()
+    window.set_tool("select")
+    assert window.signing._requests is None
     assert "No file was written" in window.signing.last_message
+    signed: list[object] = []
+    monkeypatch.setattr(window.signing, "sign", signed.append)
+    window.signing.placed(0, Rect(50, 50, 300, 110))
+    qtbot.waitUntil(lambda: bool(signed))
+    assert not stub_dialog.script
+    window.signing.request()
+    assert window.current_tool == "request_signatures"
+    window.set_tool("select")
+
+
+def test_closing_the_document_discards_the_request(
+    window: MainWindow, view, qtbot, stub_dialog, tmp_path, monkeypatch
+) -> None:
+    chosen: list[object] = []
+    monkeypatch.setattr(window.signing, "choose_target", lambda *a, **k: chosen.append(a))
+    stub_dialog.script = [(1, True, "Ana", "")]
+    window.signing.request()
+    window.signing.request_placed(0, Rect(50, 50, 300, 110))
+    qtbot.waitUntil(lambda: bool(window.signing._requests))
+    window.close_tab(window.tabs.currentIndex(), ask=False)
+    qtbot.wait(30)
+    assert window.signing._requests is None and window.signing._request_password is None
+    assert not chosen, "no save dialog for a document that's gone"
+
+
+def test_a_second_request_says_why_it_cant_start(window: MainWindow, view, monkeypatch) -> None:
+    said: list[str] = []
+    window.signing.request()
+    monkeypatch.setattr(window, "notify", lambda text, *_a, **_k: said.append(text))
+    window.signing.request()
+    assert said and "Done" in said[0]
+    monkeypatch.undo()
+    window.set_tool("select")
 
 
 def test_too_small_a_box_only_says_so(window: MainWindow, view, qtbot, stub_dialog) -> None:

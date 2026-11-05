@@ -98,8 +98,23 @@ class PlaceSignatureTool(Tool):
         b = view.scene_to_page(page, view.mapToScene(event.position().toPoint()))
         rect = Rect.from_points([a, b]).intersection(view.page_rect(page))
         view.tool_used.emit()
-        self.controller.placed(page, rect)
+        self._placed(page, rect)
         return True
+
+    def _placed(self, page: int, rect: Rect) -> None:
+        self.controller.placed(page, rect)
+
+
+class RequestSignaturesTool(PlaceSignatureTool):
+    """Drag a box for each signer. Leaving the tool (Done, Esc, another tool) ends the request."""
+
+    name = REQUEST_TOOL
+
+    def _placed(self, page: int, rect: Rect) -> None:
+        self.controller.request_placed(page, rect)
+
+    def deactivate(self, view: DocumentView) -> None:
+        self.controller.request_tool_left(view)
 
 
 class SignController:
@@ -145,9 +160,6 @@ class SignController:
 
     # -- placing --------------------------------------------------------------------------
     def placed(self, page: int, rect: Rect) -> None:
-        if self._requests is not None:
-            self.request_placed(page, rect)
-            return
         if rect.width < MIN_WIDTH or rect.height < MIN_HEIGHT:
             self.w.notify("Drag a larger box: a signature needs room for its text.", "info")
             return
@@ -160,6 +172,7 @@ class SignController:
     def request(self) -> None:
         """Start a request: check the saved file, then let the sender drag a box per signer."""
         if self._requests is not None:
+            self.w.notify("Finish the request you started first: press Done on its banner.", "info")
             return
         view = self.w.current_view()
         if view is None:
@@ -184,7 +197,7 @@ class SignController:
         self._request_view = view
         self._request_password = password
         self.w.set_tool(REQUEST_TOOL, view)
-        self.w.notify("Drag a box where the first signer's signature goes.", "info")
+        self.w.notify("Drag a box for each signer, then press Done.", "info")
 
     def request_placed(self, page: int, rect: Rect) -> None:
         if rect.width < MIN_WIDTH or rect.height < MIN_HEIGHT:
@@ -194,43 +207,47 @@ class SignController:
 
     def _ask_signer(self, page: int, rect: Rect) -> None:
         """One box, one signer. Finish makes the file; Add Another Signer goes back to dragging;
-        Cancel abandons the whole request."""
+        Cancel drops only this box, so the signers placed so far aren't lost."""
         if self._requests is None:
             return
         dialog = RequestSignerDialog(len(self._requests) + 1, page, self.w)
         if not dialog.exec():
-            self._end_requests("Requesting signatures was cancelled. No file was written.")
+            self.w.notify("That box was dropped. Drag it again, or press Done to finish.", "info")
             return
         self._requests.append(
             SignatureRequest(dialog.signer_name(), dialog.signer_email(), page, rect)
         )
         if dialog.add_another:
             count = len(self._requests)
-            self.w.set_tool(REQUEST_TOOL, self._request_view)
             self.w.notify(
-                f"{count} signer{'s' if count != 1 else ''} so far. Drag the next box.", "info"
+                f"{count} signer{'s' if count != 1 else ''} so far. Drag the next box, or press "
+                "Done to finish.",
+                "info",
             )
             return
-        self._finish_requests()
+        self.w.set_tool("select", self._request_view)  # which ends the request: see below
 
-    def _end_requests(self, message: str) -> None:
-        self._requests = None
-        if self._request_view is not None:
-            self.w.set_tool("select", self._request_view)
-        self._request_view = None
-        self.last_message = message
-        self.w.notify(message, "info")
-
-    def _finish_requests(self) -> None:
-        requests = self._requests or []
-        view = self._request_view
-        password = self._request_password
-        if view is None or not requests:
-            self._end_requests("Requesting signatures was cancelled. No file was written.")
+    def request_tool_left(self, view: DocumentView) -> None:
+        """Every way out of the tool ends the request: Done, Esc, another tool, closing the tab.
+        With signers placed the file is made next, and its save dialog can still cancel."""
+        if self._requests is None or view is not self._request_view:
             return
+        requests, password = self._requests, self._request_password
         self._requests = None
         self._request_view = None
-        self.w.set_tool("select", view)
+        self._request_password = None
+        if not requests:
+            self.last_message = "Requesting signatures was cancelled. No file was written."
+            return
+        # Not from inside the tool switch: a modal dialog comes next.
+        QTimer.singleShot(0, self.w, lambda: self._finish_requests(view, requests, password))
+
+    def _finish_requests(
+        self, view: DocumentView, requests: list[SignatureRequest], password: str | None
+    ) -> None:
+        if view not in self.w.views() or view.session.closed:  # left by closing the document
+            self.last_message = "Requesting signatures was cancelled. No file was written."
+            return
         source = view.session.path
         assert source is not None
         target = self.choose_target(source, suffix=REQUEST_SUFFIX, title="Save Copy for Signing")

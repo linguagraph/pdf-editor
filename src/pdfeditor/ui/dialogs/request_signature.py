@@ -24,7 +24,7 @@ def valid_email(text: str) -> bool:
 
 class RequestSignerDialog(FormDialog):
     """One signature box: who signs it. Finish ends the request, Add Another Signer keeps going,
-    and Cancel (or Esc) abandons the whole request."""
+    and Cancel (or Esc) drops only this box."""
 
     def __init__(self, number: int, page: int, parent: QWidget | None = None) -> None:
         super().__init__(
