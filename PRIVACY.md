@@ -33,6 +33,10 @@ Elanero works offline. It connects to the internet only when you ask it to:
   and enter a timestamp server, Elanero sends that server a hash of the signature (not the
   document or your certificate). The server you pick sees your IP address. It's off by default,
   and no server is preset.
+- **Checking signatures.** Elanero checks the signatures in a document offline. It never
+  fetches certificates, revocation lists or timestamp data to do this, so a check doesn't tell
+  anyone you opened the file. (On Windows it reads the certificates your PC already trusts,
+  from the Windows certificate stores, and doesn't open any key.)
 
 ## Contact
 
