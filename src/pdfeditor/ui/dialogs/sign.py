@@ -610,7 +610,10 @@ class SignDialog(FormDialog):
                 cert_label=cert.label,
                 pin=None if token.protected_auth else self.pin.text(),
                 protected_auth=token.protected_auth,
-                allow_final_try=self._final_try_confirmed,
+                # The yes was for a token shown on its final try, not for whichever comes next.
+                allow_final_try=(
+                    self._final_try_confirmed and token.pin_state is PinState.FINAL_TRY
+                ),
             )
         return PfxKey(Path(self.pfx_path.text().strip()), self.pfx_password.text())
 

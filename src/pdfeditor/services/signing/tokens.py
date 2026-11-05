@@ -215,9 +215,14 @@ def _token_info(slot: Any, token: Any, rows: list[tuple[bytes, bytes, str]]) -> 
 def list_tokens(module: str) -> list[TokenInfo]:
     """Every token plugged in, read without any PIN. A token that hides its certificates until
     login is listed with none, its PIN counter state still showing."""
+    lib = _load_module(module)
+    with _exclusive(module):  # a signature may be waiting on a PIN prompt in another thread
+        return _read_tokens(lib)
+
+
+def _read_tokens(lib: Any) -> list[TokenInfo]:
     from pkcs11 import PKCS11Error
 
-    lib = _load_module(module)
     tokens: list[TokenInfo] = []
     try:
         slots = lib.get_slots(token_present=True)

@@ -365,6 +365,24 @@ def test_final_try_token_needs_confirmation_at_sign(window: MainWindow, view, mo
     assert plain.result() and plain.key().allow_final_try is False
 
 
+def test_final_try_yes_doesnt_carry_over_to_another_token(
+    window: MainWindow, view, monkeypatch
+) -> None:
+    """The yes was about one token. A token listed as healthy may have reached its final try
+    since, and the service's own check must still stop that."""
+    monkeypatch.setattr(
+        "pdfeditor.ui.dialogs.sign.QMessageBox.warning",
+        lambda *_args: QMessageBox.StandardButton.Ok,
+    )
+    dialog = token_dialog(window, token_info(PinState.FINAL_TRY))
+    dialog.pin.setText("1")
+    assert dialog.confirm_final_try()
+    assert dialog.key().allow_final_try is True
+    dialog.set_tokens([token_info()])
+    dialog.pin.setText("1")
+    assert dialog.key().allow_final_try is False
+
+
 def test_token_with_pin_pad_asks_for_no_pin(window: MainWindow, view) -> None:
     dialog = token_dialog(window, token_info(protected=True))
     assert dialog.pin.isHidden()

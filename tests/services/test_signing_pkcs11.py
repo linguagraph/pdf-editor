@@ -618,6 +618,16 @@ def test_thumbprint_identifies_the_certificate(throwaway_pfx) -> None:
 
 
 # -- one login at a time ----------------------------------------------------------------------
+def test_listing_waits_its_turn_while_a_token_is_in_use(throwaway_pfx, module) -> None:
+    """The module is initialized without thread-safety guarantees, so a signature waiting on a
+    PIN prompt must not have another thread calling into the same module."""
+    token = FakeToken(throwaway_pfx())
+    module(token)
+    with tokens._exclusive("vendor.dll"), pytest.raises(SigningError, match="using this token"):
+        tokens.list_tokens("vendor.dll")
+    assert [t.serial for t in tokens.list_tokens("vendor.dll")] == [token.serial.decode()]
+
+
 def test_second_signature_on_a_token_in_use_is_refused(
     fixture_pdf, throwaway_pfx, tmp_path, module
 ) -> None:
