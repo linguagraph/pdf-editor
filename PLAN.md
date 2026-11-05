@@ -458,6 +458,7 @@ Keys come from three routes behind one signer interface: the Windows certificate
 - [ ] PKCS#11 route. _(partial: tested against a fake module with pyHanko's real signer, and the real native extension loads and rejects a bad DLL, also frozen. **Not tested with a real token or SoftHSM**: see the checklist below.)_
 - [x] UI: Protect ▸ Sign (Place Signature tool, Sign Document dialog), command palette, Tools menu; runs as a job without the engine lock while waiting for the key; save first, target checks before the key is touched.
 - [x] Frozen exe: hidden imports, self-test signs end to end with a memory key and runs real CNG; signing libraries load lazily (test).
+- [x] Visible signature look like Acrobat's Standard Text (issue #99): the name large on the left, "Digitally signed by", date with UTC offset and any reason or location on the right, and the faint Elanero E behind both. No border or background; one column in narrow boxes. The logo is cut from the bundled icon at runtime (`services/signing/appearance_mark.py`), never edited.
 
 **Known limit:** closing the app during a PIN prompt closes the window at once, but the process ends only when that prompt is answered or dismissed: Windows or the middleware owns it, and nothing can interrupt it. Cancelling discards the result, so no file appears.
 

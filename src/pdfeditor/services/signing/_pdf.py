@@ -18,7 +18,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -45,9 +45,9 @@ from pdfeditor.core.engine_lock import ENGINE_LOCK
 from pdfeditor.core.jobs import CancelToken
 from pdfeditor.core.safe_output import replaced_atomically
 from pdfeditor.engine.base import Engine, EngineError, SaveOptions
-from pdfeditor.model.color import Color
 from pdfeditor.model.geometry import Rect
-from pdfeditor.model.objects import ShapeKind, ShapeSpec, TextStyle
+from pdfeditor.model.objects import TextStyle
+from pdfeditor.model.pages import ImageStamp
 from pdfeditor.model.signing import (
     CertificateInfo,
     KeyRef,
@@ -58,6 +58,7 @@ from pdfeditor.model.signing import (
     SignResult,
     WindowsStoreKey,
 )
+from pdfeditor.services.signing.appearance_mark import mark as appearance_mark
 from pdfeditor.services.signing.certificates import describe, digest_for, require_usable
 from pdfeditor.services.signing.errors import (
     SigningError,
@@ -231,49 +232,114 @@ def _new_field_name(reader: PdfFileReader) -> str:
 
 
 # -- the appearance of a visible signature -------------------------------------------------------
-def _appearance_text(signer: str, options: SignatureOptions, when: datetime) -> str:
-    lines = [f"Digitally signed by {signer}", f"Date: {when:%Y-%m-%d %H:%M:%S %z}".strip()]
+# Acrobat's "Standard Text" look: the name large on the left, the details on the right, and the
+# logo faint behind both. A box at least this many times wider than tall gets two columns.
+_WIDE_BOX = 1.6
+_NAME_SIZE = 40.0  # the largest size the name is tried at
+_MARK_SHARE = 0.9  # the logo's height as a share of the box's
+_MIN_TEXT_SIZE = 3.0
+
+
+@dataclass(frozen=True, slots=True)
+class SignatureAppearance:
+    """What a visible signature shows: the signer's name, then the detail lines."""
+
+    name: str
+    details: tuple[str, ...]
+
+
+def _acrobat_date(when: datetime) -> str:
+    """Acrobat's date form, with the UTC offset written the PDF way: 2026.11.05 21:25:22 +02'00'."""
+    if when.tzinfo is None:
+        when = when.astimezone()  # a naive time is taken as local; the offset must be known
+    offset = int((when.utcoffset() or timedelta(0)).total_seconds() // 60)
+    hours, minutes = divmod(abs(offset), 60)
+    return f"{when:%Y.%m.%d %H:%M:%S} {'+' if offset >= 0 else '-'}{hours:02d}'{minutes:02d}'"
+
+
+def _appearance(signer: str, options: SignatureOptions, when: datetime) -> SignatureAppearance:
+    details = [f"Digitally signed by {signer}", f"Date: {_acrobat_date(when)}"]
     if options.reason:
-        lines.append(f"Reason: {options.reason}")
+        details.append(f"Reason: {options.reason}")
     if options.location:
-        lines.append(f"Location: {options.location}")
-    return "\n".join(lines)
+        details.append(f"Location: {options.location}")
+    return SignatureAppearance(signer, tuple(details))
 
 
-def appearance_pdf(engine: Engine, width: float, height: float, text: str) -> bytes:
+def _fits(engine: Engine, rect: Rect, text: str, size: float) -> bool:
+    """Whether ``text`` fits in ``rect``, checked on a scratch page of exactly that size.
+
+    ``add_text`` grows a box downward to the page's edge rather than failing, so the page of
+    the appearance itself can't tell whether the text stays inside its own box (a name in the
+    top half of a narrow box would run into the details). A page of the box's size can.
+    """
+    scratch = engine.new_document()
+    try:
+        scratch.insert_blank_page(0, rect.width, rect.height)
+        scratch.page(0).add_text(Rect(0, 0, rect.width, rect.height), text, TextStyle(size=size))
+        return True
+    except EngineError:
+        return False
+    finally:
+        scratch.close()
+
+
+def _fit_text(engine: Engine, page: Any, rect: Rect, text: str, size: float) -> float:
+    """Typeset ``text`` in ``rect`` at the largest size from ``size`` down that fits."""
+    while not _fits(engine, rect, text, size):  # lines wrapped, so it doesn't fit: smaller
+        if size < _MIN_TEXT_SIZE:
+            raise SigningError(
+                "The signature rectangle is too small for its text. Draw a larger one."
+            )
+        size *= 0.85
+    page.add_text(rect, text, TextStyle(size=size))
+    return size
+
+
+def _stamp_logo(page: Any, box: Rect) -> None:
+    """The faint logo, centred in ``box`` and drawn under everything else on the page."""
+    mark = appearance_mark()
+    height = min(box.height * _MARK_SHARE, box.width * _MARK_SHARE / mark.aspect)
+    width = height * mark.aspect
+    center = box.center
+    rect = Rect(
+        center.x - width / 2, center.y - height / 2, center.x + width / 2, center.y + height / 2
+    )
+    page.stamp_image(ImageStamp(mark.png, rect, on_top=False))
+
+
+def appearance_pdf(
+    engine: Engine, width: float, height: float, appearance: SignatureAppearance
+) -> bytes:
     """A page of the signature's size with its text, typeset by the engine.
 
     pyHanko's own text boxes only cover Latin without extra native libraries, while signers'
     names are in every script; the engine already picks fonts for any text and embeds them.
-    The caller imports this page as the appearance's form XObject.
+    The caller imports this page as the appearance's form XObject. There is no border and no
+    background: the signature sits on the document as text and a faint logo.
     """
     with ENGINE_LOCK:
         doc = engine.new_document()
         try:
             doc.insert_blank_page(0, width, height)
             page = doc.page(0)
-            page.add_shape(
-                ShapeSpec(
-                    ShapeKind.RECTANGLE,
-                    Rect(0.5, 0.5, width - 0.5, height - 0.5),
-                    stroke=Color(0.35, 0.35, 0.35),
-                    width=0.75,
-                )
-            )
             margin = min(4.0, height / 8)
             box = Rect(margin, margin, width - margin, height - margin)
-            count = text.count("\n") + 1
-            size = min(12.0, box.height / (count * 1.25))
-            while True:
-                try:
-                    page.add_text(box, text, TextStyle(size=size))
-                    break
-                except EngineError:  # lines wrapped, so it doesn't fit: use a smaller size
-                    if size < 3.0:
-                        raise SigningError(
-                            "The signature rectangle is too small for its text. Draw a larger one."
-                        ) from None
-                    size *= 0.85
+            _stamp_logo(page, box)
+            details = "\n".join(appearance.details)
+            if box.width >= box.height * _WIDE_BOX:
+                gap = box.width * 0.04
+                half = (box.width - gap) / 2
+                left = Rect(box.x0, box.y0, box.x0 + half, box.y1)
+                right = Rect(box.x0 + half + gap, box.y0, box.x1, box.y1)
+                size = _fit_text(engine, page, left, appearance.name, _NAME_SIZE)
+                _fit_text(engine, page, right, details, size)
+            else:
+                middle = box.y0 + box.height / 2
+                name_rect = Rect(box.x0, box.y0, box.x1, middle)
+                details_rect = Rect(box.x0, middle, box.x1, box.y1)
+                size = _fit_text(engine, page, name_rect, appearance.name, _NAME_SIZE)
+                _fit_text(engine, page, details_rect, details, size)
             return doc.to_bytes(SaveOptions())
         finally:
             doc.close()
@@ -634,9 +700,9 @@ def _sign_open_file(
             box=boxes.visible_to_user(rect),  # type: ignore[arg-type]  # floats work
         )
         when = options.signed_at or datetime.now().astimezone()
-        text = _appearance_text(info.subject, options, when)
+        appearance = _appearance(info.subject, options, when)
         style = _PageStampStyle(
-            pdf=appearance_pdf(engine, rect.width, rect.height, text), rotate=boxes.rotate
+            pdf=appearance_pdf(engine, rect.width, rect.height, appearance), rotate=boxes.rotate
         )
     meta = PdfSignatureMetadata(
         field_name=field_name,

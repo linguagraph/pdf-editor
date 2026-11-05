@@ -28,3 +28,16 @@ def test_main_window_import_does_not_load_signing_libraries() -> None:
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_appearance_mark_needs_only_pillow() -> None:
+    """The logo helper is imported with the signing code, but it must not pull in pyHanko."""
+    code = (
+        "import sys\n"
+        "import pdfeditor.services.signing.appearance_mark\n"
+        f"loaded = sorted(m for m in {HEAVY!r} if m in sys.modules)\n"
+        "print(loaded)\n"
+        "sys.exit(1 if loaded else 0)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr

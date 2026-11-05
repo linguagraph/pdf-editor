@@ -95,7 +95,8 @@ def render_pdfium(path: Path, page: int) -> Image.Image:
 
 def changed_box(before: Image.Image, after: Image.Image) -> tuple[float, ...] | None:
     """Where the page changed, in visible points (the images are at 2x)."""
-    box = ImageChops.difference(before, after).getbbox()
+    # Differences of a level or two are anti-aliasing noise, not drawing.
+    box = ImageChops.difference(before, after).point(lambda v: 255 if v > 16 else 0).getbbox()
     return None if box is None else tuple(v / 2 for v in box)
 
 
@@ -191,7 +192,7 @@ def test_visible_signature_on_rotated_and_cropped_pages(
     assert box is not None, "the appearance didn't draw"
     assert box[0] >= rect.x0 - 1 and box[1] >= rect.y0 - 1
     assert box[2] <= rect.x1 + 1 and box[3] <= rect.y1 + 1
-    assert box[2] - box[0] > rect.width - 4 and box[3] - box[1] > rect.height - 4
+    assert box[2] - box[0] > rect.width / 2  # the name and details, not just a speck
     # the same place in an independent renderer
     box = changed_box(render_pdfium(source, page), render_pdfium(target, page))
     assert box is not None and box[0] >= rect.x0 - 2 and box[3] <= rect.y1 + 2
@@ -214,7 +215,10 @@ def test_visible_signature_with_offset_boxes_and_inherited_rotation(
     assert_valid(signature_status(target))
     box = changed_box(render_rgb(source, 0), render_rgb(target, 0))
     assert box is not None
-    assert box == pytest.approx((rect.x0, rect.y0, rect.x1, rect.y1), abs=1.5)
+    # the text and logo sit inside the box; no border is drawn at its edges
+    assert box[0] >= rect.x0 - 1.5 and box[1] >= rect.y0 - 1.5
+    assert box[2] <= rect.x1 + 1.5 and box[3] <= rect.y1 + 1.5
+    assert box[2] - box[0] > rect.width / 2
 
 
 def test_appearance_reads_upright_whatever_the_page_rotation(throwaway_pfx, tmp_path: Path) -> None:
@@ -247,9 +251,12 @@ def test_appearance_shows_non_latin_names(throwaway_pfx, signature_status, tmp_p
         ENGINE,
     )
     assert_valid(signature_status(target))
-    from pdfeditor.services.signing._pdf import appearance_pdf
+    from pdfeditor.services.signing._pdf import SignatureAppearance, appearance_pdf
 
-    page = appearance_pdf(ENGINE, 350, 80, "Digitally signed by Иван Петров 山田\nReason: Одобрено")
+    appearance = SignatureAppearance(
+        "Иван Петров 山田", ("Digitally signed by Иван Петров 山田", "Reason: Одобрено")
+    )
+    page = appearance_pdf(ENGINE, 350, 80, appearance)
     doc = ENGINE.open(page)
     try:
         text = doc.page(0).text_page(with_chars=False).text
@@ -1051,3 +1058,155 @@ def test_no_timestamp_means_no_network(
         SignatureOptions(),
         ENGINE,
     )
+
+
+# -- the look of a visible signature: text on the left and right, a faint logo, no border ----------
+def blank_pdf(path: Path) -> Path:
+    with pikepdf.new() as pdf:
+        pdf.add_blank_page(page_size=(612, 792))
+        pdf.save(path)
+    return path
+
+
+def appearance_text(page: bytes) -> str:
+    doc = ENGINE.open(page)
+    try:
+        return " ".join(doc.page(0).text_page(with_chars=False).text.split())
+    finally:
+        doc.close()
+
+
+def char_box(page: bytes, needle: str) -> tuple[float, float, float, float]:
+    """Where the first character of ``needle`` is, (left, bottom, right, top) in PDF points."""
+    doc = pdfium.PdfDocument(page)
+    try:
+        textpage = doc[0].get_textpage()
+        return textpage.get_charbox(textpage.get_text_range().index(needle))
+    finally:
+        doc.close()
+
+
+def test_logo_mark_is_faded_and_has_no_teal_corners() -> None:
+    from pdfeditor.services.signing.appearance_mark import mark
+
+    picture = mark()
+    image = Image.open(io.BytesIO(picture.png))
+    assert image.mode == "RGBA" and image.height <= 220
+    alpha = image.getchannel("A")
+    assert 20 < alpha.getextrema()[1] <= round(0.22 * 255) + 1  # visible, but faded
+    width = image.width
+    for corner in ((0, 0, 8, 8), (width - 8, 0, width, 8)):
+        assert alpha.crop(corner).getextrema()[1] == 0  # the page curl and the teal are cut away
+    blue = ImageStat.Stat(image.convert("RGB"), mask=alpha)
+    red, green, blue_mean = (channel for channel in blue.mean)
+    assert blue_mean > green + 20 > red  # the blue E, not the teal or the white page
+
+
+def test_visible_signature_has_no_border_and_a_faint_blue_logo(
+    throwaway_pfx, signature_status, tmp_path: Path
+) -> None:
+    source = blank_pdf(tmp_path / "blank.pdf")
+    target = tmp_path / "out.pdf"
+    rect = Rect(100, 300, 420, 380)
+    sign_file(
+        source,
+        target,
+        key_for(throwaway_pfx()),
+        SignatureOptions(SignaturePlacement(0, rect), signed_at=FIXED_TIME),
+        ENGINE,
+    )
+    assert_valid(signature_status(target))
+    assert_round_trip(target)
+    x0, y0, x1, y1 = (2 * v for v in (rect.x0, rect.y0, rect.x1, rect.y1))
+    for image in (render_rgb(target, 0), render_pdfium(target, 0)):  # both renderers
+        for band in (  # the rectangle's edges, 1 to 2 points inside: the old grey border was here
+            (x0 + 2, y0 + 2, x1 - 2, y0 + 4),
+            (x0 + 2, y1 - 4, x1 - 2, y1 - 2),
+            (x0 + 2, y0 + 2, x0 + 4, y1 - 2),
+            (x1 - 4, y0 + 2, x1 - 2, y1 - 2),
+        ):
+            assert image.crop(band).convert("L").getextrema()[0] > 200
+        inside = image.crop((x0, y0, x1, y1))
+        red, _, blue = inside.split()
+        assert ImageChops.subtract(blue, red).getextrema()[1] > 25  # the logo's blue
+        assert inside.convert("L").getextrema()[0] < 100  # the dark text
+    image = render_rgb(target, 0)
+    box = changed_box(render_rgb(source, 0), image)
+    assert box is not None and box[0] >= rect.x0 - 1 and box[2] <= rect.x1 + 1
+    assert box[1] >= rect.y0 - 1 and box[3] <= rect.y1 + 1
+
+
+def test_appearance_names_the_signer_and_lists_the_details() -> None:
+    from pdfeditor.services.signing._pdf import SignatureAppearance, appearance_pdf
+
+    appearance = SignatureAppearance(
+        "Иван Петров 山田",
+        ("Digitally signed by Иван Петров 山田", "Date: 2026.01.02 03:04:05 +00'00'", "Reason: x"),
+    )
+    page = appearance_pdf(ENGINE, 360, 90, appearance)
+    text = appearance_text(page)
+    assert "Digitally signed by" in text and "Иван Петров" in text and "山田" in text
+    # wide box: the name is in the left half, the details in the right half
+    assert char_box(page, "Иван")[2] <= char_box(page, "Digitally")[0]
+    assert char_box(page, "Digitally")[0] > 360 / 2 - 10
+
+
+def test_narrow_box_uses_one_column_with_the_name_above_the_details() -> None:
+    from pdfeditor.services.signing._pdf import SignatureAppearance, appearance_pdf
+
+    appearance = SignatureAppearance(
+        "Иван Петров 山田", ("Digitally signed by Иван Петров 山田", "Date: 2026.01.02")
+    )
+    page = appearance_pdf(ENGINE, 130, 200, appearance)
+    name, details = char_box(page, "Иван"), char_box(page, "Digitally")
+    assert name[1] >= details[3] - 1  # the name's bottom is above the details' top
+    assert name[0] < 130 / 2 and details[0] < 130 / 2  # both start in the single column
+    assert name[3] - name[1] >= details[3] - details[1]  # the name is never smaller
+
+
+def test_long_names_fit_and_a_tiny_box_is_refused() -> None:
+    from pdfeditor.services.signing._pdf import SignatureAppearance, appearance_pdf
+
+    long_name = "Александра-Мария Константиновна Ivanova-Rodriguez van der Berg 山田太郎"
+    for width, height in ((360, 90), (120, 200)):
+        appearance = SignatureAppearance(
+            long_name, (f"Digitally signed by {long_name}", "Reason: " + "very " * 20)
+        )
+        assert "Digitally signed by" in appearance_text(
+            appearance_pdf(ENGINE, width, height, appearance)
+        )
+    with pytest.raises(SigningError, match="too small"):
+        appearance_pdf(
+            ENGINE,
+            30,
+            12,
+            SignatureAppearance(
+                "Elanero Test Signer",
+                ("Digitally signed by Elanero Test Signer", "Date: 2026.01.02 03:04:05 +00'00'"),
+            ),
+        )
+
+
+def test_date_shows_the_utc_offset_the_pdf_way() -> None:
+    from pdfeditor.services.signing._pdf import _acrobat_date
+
+    plus_two = dt.timezone(dt.timedelta(hours=2))
+    assert _acrobat_date(dt.datetime(2026, 11, 5, 21, 25, 22, tzinfo=plus_two)) == (
+        "2026.11.05 21:25:22 +02'00'"
+    )
+    minus = dt.timezone(-dt.timedelta(hours=5, minutes=30))
+    assert _acrobat_date(dt.datetime(2026, 11, 5, 13, 55, 22, tzinfo=minus)) == (
+        "2026.11.05 13:55:22 -05'30'"
+    )
+
+
+def test_visible_appearance_adds_little_to_the_file(throwaway_pfx, tmp_path: Path) -> None:
+    source = blank_pdf(tmp_path / "blank.pdf")
+    key = key_for(throwaway_pfx())
+    invisible, visible = tmp_path / "invisible.pdf", tmp_path / "visible.pdf"
+    sign_file(source, invisible, key, SignatureOptions(signed_at=FIXED_TIME), ENGINE)
+    options = SignatureOptions(
+        SignaturePlacement(0, Rect(100, 300, 420, 380)), signed_at=FIXED_TIME
+    )
+    sign_file(source, visible, key, options, ENGINE)
+    assert visible.stat().st_size - invisible.stat().st_size < 150_000
