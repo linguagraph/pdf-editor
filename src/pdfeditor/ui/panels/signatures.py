@@ -14,7 +14,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHeaderView,
+    QLabel,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pdfeditor.core.commands import ChangeKind
 from pdfeditor.model.signing import SignatureReport, SignatureVerdict
@@ -71,7 +78,12 @@ class SignaturesPanel(ViewPanel):
         self.status.setVisible(False)
         self.tree = QTreeWidget(self)
         self.tree.setHeaderHidden(True)
-        self.tree.setWordWrap(True)
+        # The column is as wide as its longest row and the panel scrolls sideways: these sentences
+        # and certificate names mustn't be cut off with "...".
+        self.tree.header().setStretchLastSection(False)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setHorizontalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.NoSelection)
         self.tree.setVisible(False)
         self.tree.itemClicked.connect(self._clicked)

@@ -220,3 +220,30 @@ def test_view_this_version_opens_the_earlier_revision(
     assert earlier.verdict is SignatureVerdict.VALID
     assert earlier.revision == 1
     assert "revision 1" in target.name
+
+
+def test_long_rows_scroll_sideways_instead_of_being_cut_off(
+    fixture_pdf, throwaway_pfx, tmp_path: Path, qtbot
+) -> None:
+    signed = _signed_copy(fixture_pdf, throwaway_pfx(), tmp_path / "signed.pdf")
+    signatures = SignaturesPanel()
+    qtbot.addWidget(signatures)
+    signatures.resize(200, 400)
+    signatures.show()
+    qtbot.waitExposed(signatures)
+    signatures._show_reports(inspect_signatures(signed, None, []))
+    tree = signatures.tree
+    top = tree.topLevelItem(0)
+
+    def needed(parent: Any) -> int:
+        metrics = tree.fontMetrics()
+        return max(metrics.horizontalAdvance(_) for _ in _rows(parent))
+
+    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(top))
+    assert tree.horizontalScrollBar().maximum() > 0
+    # Expanding the details widens the column to fit them too.
+    details = next(
+        top.child(i) for i in range(top.childCount()) if top.child(i).text(0) == "Signature Details"
+    )
+    details.setExpanded(True)
+    qtbot.waitUntil(lambda: tree.columnWidth(0) >= needed(details))
