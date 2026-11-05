@@ -14,6 +14,8 @@ HEAVY = (
     "asn1crypto",
     "aiohttp",
     "lxml",
+    "pdfeditor.services.signing.inspect",  # the Signatures panel's checker: only when it's used
+    "pdfeditor.services.signing._pdf",
 )
 
 

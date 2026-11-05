@@ -37,6 +37,7 @@ PKCS_7_ASN_ENCODING = 0x10000
 ENCODING = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING
 CERT_STORE_PROV_SYSTEM_W = 10
 CERT_SYSTEM_STORE_CURRENT_USER = 0x00010000
+CERT_SYSTEM_STORE_LOCAL_MACHINE = 0x00020000
 CERT_STORE_READONLY_FLAG = 0x00008000
 CERT_KEY_PROV_INFO_PROP_ID = 2
 CERT_NCRYPT_KEY_HANDLE_PROP_ID = 78
@@ -571,6 +572,31 @@ def list_certificates() -> list[CertificateInfo]:
     finally:
         api.CertCloseStore(store, 0)
     found.sort(key=lambda i: (not i.non_repudiation, i.subject.lower(), i.not_after))
+    return found
+
+
+def root_certificates() -> list[bytes]:
+    """DER certificates in the CurrentUser and LocalMachine ROOT stores: the anchors Windows
+    trusts. Only certificate bytes are read; no key is opened, so no PIN prompt can appear."""
+    if not available():
+        return []
+    api = _api()
+    found: list[bytes] = []
+    for location in (CERT_SYSTEM_STORE_CURRENT_USER, CERT_SYSTEM_STORE_LOCAL_MACHINE):
+        store = api.CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W, 0, 0, location | CERT_STORE_READONLY_FLAG, "ROOT"
+        )
+        if not store:
+            log.info("couldn't open a Windows root store (error 0x%08X)", api.last_error())
+            continue
+        try:
+            context = api.CertEnumCertificatesInStore(store, None)
+            while context:
+                c = context.contents
+                found.append(string_at(c.pbCertEncoded, c.cbCertEncoded))
+                context = api.CertEnumCertificatesInStore(store, context)
+        finally:
+            api.CertCloseStore(store, 0)
     return found
 
 

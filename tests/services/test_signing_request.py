@@ -425,3 +425,37 @@ def test_invisible_empty_field_has_no_box_and_signs_without_an_appearance(
     key = PfxKey(throwaway_pfx(), "test")
     sign_file(source, target, key, SignatureOptions(field_name="Hidden"), get_engine())
     assert preflight(target).empty_fields == ()
+
+
+def test_panel_reads_a_prepared_file_signed_out_of_field_order(
+    fixture_pdf, throwaway_pfx, tmp_path: Path
+) -> None:
+    """The whole flow: the second field signed first. Revisions follow signing order, and the
+    first signer stays valid when the next one fills their own field."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    from pdfeditor.model.signing import SignatureVerdict
+    from pdfeditor.services.signing import inspect_signatures
+
+    prepared = tmp_path / "prepared.pdf"
+    requests = [
+        SignatureRequest("Ana", "", 0, Rect(50, 50, 300, 110)),
+        SignatureRequest("Ben", "", 0, Rect(50, 130, 300, 190)),
+    ]
+    prepare_for_signing(fixture_pdf("text_multipage"), prepared, requests, ENGINE)
+    assert inspect_signatures(prepared, None, []) == []
+    pfx = throwaway_pfx()
+    key = PfxKey(pfx, "test")
+    once = tmp_path / "once.pdf"
+    sign_file(prepared, once, key, SignatureOptions(field_name="SignatureRequest2"), ENGINE)
+    twice = tmp_path / "twice.pdf"
+    sign_file(once, twice, key, SignatureOptions(field_name="SignatureRequest1"), ENGINE)
+    _key, cert, _others = pkcs12.load_key_and_certificates(pfx.read_bytes(), b"test")
+    assert cert is not None
+    root = cert.public_bytes(serialization.Encoding.DER)
+    first, second = inspect_signatures(twice, None, [root])
+    assert (first.field_name, second.field_name) == ("SignatureRequest2", "SignatureRequest1")
+    assert first.modified_after and not second.modified_after
+    assert first.verdict is SignatureVerdict.VALID, first.summary
+    assert second.verdict is SignatureVerdict.VALID, second.summary

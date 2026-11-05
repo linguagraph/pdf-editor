@@ -463,8 +463,9 @@ Keys come from three routes behind one signer interface: the Windows certificate
 **Known limit:** closing the app during a PIN prompt closes the window at once, but the process ends only when that prompt is answered or dismissed: Windows or the middleware owns it, and nothing can interrupt it. Cancelling discards the result, so no file appears.
 
 - [x] Request signatures from recipients (issue #100). The sender places one named signature box per signer (Protect ▸ Sign ▸ Request Signatures), saves a `-for-signature.pdf` copy, and an email draft opens to every signer with the file to attach by hand. Each recipient signs their own field in Elanero (Sign Document ▸ Signature field) or Acrobat; the placeholder "Sign here" is replaced by the signature. Written atomically and verified: earlier signatures stay valid, and encrypted files stay encrypted. Certified documents are refused. _(Tested with pyHanko validation, pikepdf and pypdfium2, and UI tests; **not tested with Acrobat**: see checklist item 7.)_ **No server:** the app sends nothing, tracks nothing and sends no reminders. Code: `services/signing/request.py`, `ui/dialogs/request_signature.py`.
+- [ ] Signatures panel for files already signed (issue #98): one entry per signature with a validity sentence, whether the file changed after signing, signing-time source, long-term validation data present or absent, certificate details, "View this version", and go-to-page. Verdicts never overstate: VALID needs an intact signature that chains to a trusted root. Checks run offline, as a background job, while the panel is open and after a save. _(partial: tested with throwaway keys and fixtures only. Not yet checked on the owner's real signed files or against the owner's Windows trust store. Revocation is not checked, and the panel says so.)_
 
-**Left out for now:** RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA), showing and validating other people's signatures. Drawing a box in Sign Document always makes a new field; only an invisible signature can go into an existing empty field.
+**Left out for now:** RSA-PSS, adding revocation data for long-term validation (B-LT/B-LTA). Drawing a box in Sign Document always makes a new field; only an invisible signature can go into an existing empty field.
 
 **Manual checklist for the owner (needs real hardware):**
 1. *Minidriver/CSP token (most national tokens):* plug in, install the vendor's middleware, check that Windows lists the certificate (`certmgr.msc`). In Elanero: Protect ▸ Sign Document ▸ Windows certificate store. The certificate shows as "USB token or smart card" with the right expiry. Listing and opening the dialog don't ask for a PIN.
@@ -476,7 +477,7 @@ Keys come from three routes behind one signer interface: the Windows certificate
 7. *Request Signatures (not tested with Acrobat):* request two signatures in Elanero, open the `-for-signature.pdf` in Acrobat, sign one field, and check that its placeholder is replaced while the other field stays empty and both signatures validate.
 
 ### Later / not in current scope
-- AcroForm creation and editing, and a certificate validation panel (checking and showing signatures in other people's files). Rendering and keeping existing forms and signatures intact is covered above; creating signatures is Phase S.
+- AcroForm creation and editing. Rendering and keeping existing forms and signatures intact is covered above; creating and checking signatures is Phase S.
 - A permissive engine backend (pypdfium2 + pikepdf) implementing `engine/base.py`. The contract tests from Phase 1 are its acceptance suite.
 - Measurement tools, 3D/multimedia, batch "Action Wizard", cloud sync.
 

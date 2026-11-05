@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         KeyRef,
         PfxKey,
         SignatureOptions,
+        SignatureReport,
         SignatureRequest,
         SignResult,
     )
@@ -44,6 +45,8 @@ __all__ = [
     "TokenUnavailable",
     "WrongPassword",
     "WrongPin",
+    "extract_revision",
+    "inspect_signatures",
     "mailto_url",
     "pfx_certificate",
     "preflight",
@@ -56,6 +59,22 @@ def preflight(source: Path, password: str | None = None) -> Preflight:
     from pdfeditor.services.signing import _pdf
 
     return _pdf.preflight(source, password)
+
+
+def inspect_signatures(
+    source: Path, password: str | None, trust_roots: list[bytes] | None = None
+) -> list[SignatureReport]:
+    """Check the signatures already in ``source``, offline. See ``services/signing/inspect``."""
+    from pdfeditor.services.signing import inspect
+
+    return inspect.inspect_signatures(source, password, trust_roots)
+
+
+def extract_revision(source: Path, revision_end: int, target: Path) -> None:
+    """Write the file as it stood when a signature was applied (its first bytes)."""
+    from pdfeditor.services.signing import inspect
+
+    inspect.extract_revision(source, revision_end, target)
 
 
 def prepare_for_signing(

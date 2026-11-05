@@ -502,6 +502,13 @@ def _checks(workdir: Path) -> list[tuple[str, Check]]:
         with pikepdf.open(out) as pdf:
             if "/AP" not in pdf.Root.AcroForm.Fields[0]:
                 raise AssertionError("the signature has no appearance")
+        # the Signatures panel's checker: trusting the memory key's certificate gives VALID
+        from pdfeditor.model.signing import SignatureVerdict
+        from pdfeditor.services.signing import inspect_signatures
+
+        (checked,) = inspect_signatures(out, None, [cert.public_bytes(serialization.Encoding.DER)])
+        if checked.verdict is not SignatureVerdict.VALID:
+            raise AssertionError(f"signature check said {checked.verdict}: {checked.reason}")
         # Request Signatures: prepare an empty field, then sign into it (verified by sign_file)
         from pdfeditor.model.signing import SignatureRequest
         from pdfeditor.services.signing import prepare_for_signing
