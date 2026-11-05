@@ -43,6 +43,13 @@ Recognize text (OCR)
 • Turn scanned pages into searchable, selectable text, with automatic deskewing. English is
   built in; other languages are a free download.
 
+Sign documents digitally
+• Sign with a USB token or smart card through the Windows certificate store, a token's PKCS#11
+  module, or a certificate file, as a visible or invisible PAdES signature.
+• Ask others to sign: place a named signature box for each person and send them the file.
+• See every signature in a document in the Signatures panel: whether it's intact, who signed
+  and whether the file changed afterwards.
+
 Also included
 • Compare two versions of a document and see what changed.
 • An accessibility checker, tag editor and experimental auto-tagging.
@@ -52,7 +59,8 @@ Also included
 
 Private by design
 Elanero works offline. It has no account, no telemetry and no ads, and your documents never
-leave your computer. The only time it goes online is when you download an OCR language.
+leave your computer. It goes online only when you ask it to: to download an OCR language, or
+to add a timestamp to a signature from a timestamp server you choose.
 
 Open source
 Elanero is free software under the GNU AGPL-3.0-or-later. Its source code is at
@@ -60,7 +68,11 @@ https://github.com/linguagraph/pdf-editor.
 
 ## What's new in this version [up to 1,500 characters]
 
-First release in the Microsoft Store.
+• Digital signatures: sign PDFs with a USB token, smart card or certificate file, with an
+  optional trusted timestamp.
+• New Signatures panel: check the signatures in a document, offline.
+• Request signatures: place a named signature box for each signer and email them the file.
+• Starts much faster.
 
 ## Product features [up to 20, each up to 200 characters]
 
@@ -79,6 +91,8 @@ First release in the Microsoft Store.
 13. Light and dark themes, keyboard shortcuts and a command palette
 14. Works offline, with no account, no telemetry and no ads
 15. Free and open source (AGPL-3.0-or-later)
+16. Sign PDFs digitally with a USB token, smart card or certificate file
+17. Check a document's digital signatures, and request signatures from others
 
 ## Search terms [up to 7]
 
@@ -112,6 +126,9 @@ Elanero is a full-trust desktop PDF editor. It needs `runFullTrust` because it o
 files anywhere the user chooses, prints, starts additional windows of itself, and optionally
 starts LibreOffice, if installed, to convert Office files. It doesn't need an account or test
 credentials. To try it, open any PDF from File ▸ Open, or from Explorer with "Open with".
+Digital signing needs a certificate of the tester's own; any .pfx file works. A USB token's PIN
+prompt comes from Windows or the token's software. A timestamp connects only to a server the
+user enters, and that option is off by default.
 
 ## Restricted capability justification [Packages ▸ runFullTrust]
 
