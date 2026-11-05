@@ -83,7 +83,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'msstore reconfigure failed' }
           $msix = Get-ChildItem dist\Elanero-*-x64.msix | Select-Object -First 1
           # --noCommit leaves the submission as a draft: review it in Partner Center and submit.
-          msstore publish $msix.FullName --inputFile $msix.FullName --appId $env:MSSTORE_PRODUCT_ID --noCommit
+          msstore publish $msix.FullName --appId $env:MSSTORE_PRODUCT_ID --noCommit
           if ($LASTEXITCODE -ne 0) { throw 'msstore publish failed' }
       - name: Remove the identity from the runner
         if: always()
