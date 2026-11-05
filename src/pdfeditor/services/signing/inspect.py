@@ -25,7 +25,6 @@ from pdfeditor.core.safe_output import replaced_atomically
 from pdfeditor.model.geometry import Rect
 from pdfeditor.model.signing import (
     CertificateDetails,
-    PageBoxes,
     SignatureReport,
     SignatureVerdict,
 )
@@ -330,9 +329,7 @@ def _placement(reader: PdfFileReader, field: Any) -> tuple[int | None, Rect | No
         if index is None:
             return None, None, False
         boxes = page_boxes(reader, index)
-        ax, ay = _to_visible(boxes, x0, y0)
-        bx, by = _to_visible(boxes, x1, y1)
-        return index, Rect(min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)), False
+        return index, boxes.user_to_visible((x0, y0, x1, y1)), False
 
     return _safe(read, (None, None, False))
 
@@ -347,19 +344,3 @@ def _page_index(reader: PdfFileReader, field: Any) -> int | None:
         if page_ref.idnum == target.idnum:
             return index
     return None
-
-
-def _to_visible(boxes: PageBoxes, x: float, y: float) -> tuple[float, float]:
-    """A user-space point in visible space: the inverse of ``PageBoxes.visible_to_user``."""
-    x0, y0, x1, y1 = boxes.visible_box
-    unit = boxes.user_unit or 1.0
-    rotate = boxes.rotate % 360
-    if rotate == 90:
-        vx, vy = y - y0, x - x0
-    elif rotate == 180:
-        vx, vy = x1 - x, y - y0
-    elif rotate == 270:
-        vx, vy = y1 - y, x1 - x
-    else:
-        vx, vy = x - x0, y1 - y
-    return vx * unit, vy * unit

@@ -50,6 +50,7 @@ from pdfeditor.model.objects import TextStyle
 from pdfeditor.model.pages import ImageStamp
 from pdfeditor.model.signing import (
     CertificateInfo,
+    EmptySignatureField,
     KeyRef,
     PageBoxes,
     PfxKey,
@@ -97,6 +98,7 @@ class Preflight:
     certified: bool = False  # by an author signature that allows further signatures
     signatures: int = 0
     encrypted: bool = False
+    empty_fields: tuple[EmptySignatureField, ...] = ()  # signature fields nothing has signed
 
 
 # -- reading the document ------------------------------------------------------------------------
@@ -149,8 +151,9 @@ def _authenticate(writer: IncrementalPdfFileWriter, password: str | None) -> boo
     return True
 
 
-def _check_not_locked(reader: PdfFileReader) -> None:
-    """A certification (DocMDP) that forbids all changes also forbids signing."""
+def _check_not_locked(reader: PdfFileReader, field_name: str) -> None:
+    """A certification (DocMDP) that forbids all changes also forbids signing, and so does a
+    field lock (FieldMDP) that covers the field being signed."""
     message = (
         "This document was certified by its author with a signature that forbids any further "
         "change, including new signatures. Signing it would invalidate that certification."
@@ -158,12 +161,11 @@ def _check_not_locked(reader: PdfFileReader) -> None:
     data = read_certification_data(reader)
     if data is not None and data.permission == MDPPerm.NO_CHANGES:
         raise SigningRefused(message)
-    new_field = _new_field_name(reader)
     for signature in reader.embedded_signatures:
         if signature.docmdp_level == MDPPerm.NO_CHANGES:
             raise SigningRefused(message)
         locks = signature.fieldmdp
-        if locks is not None and locks.is_locked(new_field):
+        if locks is not None and locks.is_locked(field_name):
             raise SigningRefused(
                 f"The signature “{signature.field_name}” locks this document's form fields, "
                 "which rules out adding a new signature: it would invalidate that signature."
@@ -178,11 +180,12 @@ def preflight(source: Path, password: str | None = None) -> Preflight:
             encrypted = bool(writer.prev.encrypted)
             if not _authenticate(writer, password):
                 return Preflight(needs_password=True, encrypted=True)
-            _check_not_locked(writer.prev)
+            _check_not_locked(writer.prev, _new_field_name(writer.prev))
             return Preflight(
                 certified=read_certification_data(writer.prev) is not None,
                 signatures=len(writer.prev.embedded_signatures),
                 encrypted=encrypted,
+                empty_fields=empty_signature_fields(writer.prev),
             )
     except OSError as exc:
         raise SigningError(f"Couldn't read {source.name}: {exc}") from exc
@@ -202,7 +205,14 @@ def _inherited(page: Any, key: str) -> Any:
     return None
 
 
+def _resolved(value: Any) -> Any:
+    """``value`` itself, or the object it refers to: an encrypted file's values come back as
+    proxies that only resolve through get_object()."""
+    return value.get_object() if hasattr(value, "get_object") else value
+
+
 def _box(value: Any) -> tuple[float, float, float, float] | None:
+    value = _resolved(value)
     if value is None:
         return None
     x0, y0, x1, y1 = (float(v) for v in value)
@@ -229,6 +239,66 @@ def _new_field_name(reader: PdfFileReader) -> str:
     while f"{FIELD_PREFIX}{n}" in used:
         n += 1
     return f"{FIELD_PREFIX}{n}"
+
+
+def _page_index_of(reader: PdfFileReader, widget_idnum: int) -> int | None:
+    """The page whose /Annots holds the widget with this object number, if any."""
+    count = int(reader.root["/Pages"]["/Count"])
+    for index in range(count):
+        page_ref, _resources = reader.find_page_for_modification(index)
+        annots = page_ref.get_object().get("/Annots")
+        if annots is None:
+            continue
+        if hasattr(annots, "get_object"):
+            annots = annots.get_object()
+        for annot in annots:
+            if getattr(annot, "idnum", None) == widget_idnum:
+                return index
+    return None
+
+
+def _field_placement(reader: PdfFileReader, ref: Any) -> tuple[int, Rect | None, dict[str, Any]]:
+    """Where a signature field is: its page, its box in visible space (None without a box),
+    and the dictionary holding its /TU. A field merged with its widget has both in one place."""
+    field_dict = ref.get_object()
+    widget = field_dict
+    if "/Rect" not in field_dict and "/Kids" in field_dict:
+        kids = field_dict["/Kids"]
+        if kids:
+            widget = kids[0].get_object()
+    page = _page_index_of(reader, getattr(ref, "idnum", -1))
+    if page is None and widget is not field_dict:
+        page = _page_index_of(reader, getattr(widget, "idnum", -1))  # a separate widget
+    if page is None:
+        page = 0
+    box = _box(widget.get("/Rect"))
+    if box is None or box[0] == box[2] or box[1] == box[3]:  # an invisible field has an empty /Rect
+        return page, None, field_dict
+    return page, page_boxes(reader, page).user_to_visible(box), field_dict
+
+
+def empty_signature_fields(reader: PdfFileReader) -> tuple[EmptySignatureField, ...]:
+    """The signature fields that nothing has signed, with their labels and placement."""
+    found: list[EmptySignatureField] = []
+    for name, _value, ref in enumerate_sig_fields(reader, filled_status=False):
+        page, rect, field_dict = _field_placement(reader, ref)
+        label = _resolved(field_dict.get("/TU"))
+        found.append(
+            EmptySignatureField(
+                name=name, label=str(label) if label is not None else name, page=page, rect=rect
+            )
+        )
+    return tuple(found)
+
+
+def _existing_field(reader: PdfFileReader, name: str) -> EmptySignatureField:
+    """The empty signature field ``name``; refuses a missing or already signed one."""
+    for empty in empty_signature_fields(reader):
+        if empty.name == name:
+            return empty
+    if any(n == name for n, _value, _ref in enumerate_sig_fields(reader, filled_status=True)):
+        raise SigningRefused(f"The signature field “{name}” is already signed.")
+    raise SigningRefused(f"This document has no signature field named “{name}”.")
 
 
 # -- the appearance of a visible signature -------------------------------------------------------
@@ -673,7 +743,11 @@ def _sign_open_file(
     if not _authenticate(writer, password):
         raise WrongPassword("This document needs its password to be signed.")
     reader = writer.prev
-    _check_not_locked(reader)
+    if options.field_name is not None and options.placement is not None:
+        raise SigningRefused("Sign into an existing field or draw a new box, not both.")
+    existing = None if options.field_name is None else _existing_field(reader, options.field_name)
+    field_name = existing.name if existing is not None else _new_field_name(reader)
+    _check_not_locked(reader, field_name)
     if options.placement is not None and read_certification_data(reader) is not None:
         raise SigningRefused(VISIBLE_AFTER_CERTIFICATION)
     token.check()
@@ -688,8 +762,9 @@ def _sign_open_file(
     if timestamper is not None:
         report("Contacting the timestamp server…")
         asyncio.run(timestamper.async_dummy_response(digest))  # reused to size the signature
-    field_name = _new_field_name(reader)
-    spec = SigFieldSpec(field_name, on_page=0)
+    # A new field is created by the signer; an existing one (see _existing_field) is filled in,
+    # and its own box decides the appearance, so no field spec is passed for it.
+    spec: SigFieldSpec | None = SigFieldSpec(field_name, on_page=0)
     style: BaseStampStyle | None = None
     if options.placement is not None:
         boxes = page_boxes(reader, options.placement.page)
@@ -699,6 +774,12 @@ def _sign_open_file(
             on_page=options.placement.page,
             box=boxes.visible_to_user(rect),  # type: ignore[arg-type]  # floats work
         )
+    elif existing is not None:
+        spec = None
+        if existing.rect is not None:
+            boxes = page_boxes(reader, existing.page)
+            rect = existing.rect
+    if options.placement is not None or (existing is not None and existing.rect is not None):
         when = options.signed_at or datetime.now().astimezone()
         appearance = _appearance(info.subject, options, when)
         style = _PageStampStyle(

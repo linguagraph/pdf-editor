@@ -31,7 +31,7 @@ from pdfeditor.services.signing import (
     inspect_signatures,
     sign_file,
 )
-from pdfeditor.services.signing.inspect import _placement, _time_source, _to_visible
+from pdfeditor.services.signing.inspect import _placement, _time_source
 from tests.services import test_signing as signing_tests
 
 local_tsa = signing_tests.local_tsa  # the pytest fixture, borrowed from the signing tests
@@ -222,7 +222,7 @@ def test_visible_rect_is_converted_for_a_rotated_page() -> None:
     boxes = PageBoxes(media=(0, 0, 200, 300), rotate=90)
     # Rotated 90 degrees, the user point (10, 20) sits at visible x = 20 (its y) and visible
     # y = 10 (its x), measured from the top-left corner.
-    assert _to_visible(boxes, 10, 20) == (20, 10)
+    assert boxes.user_to_visible((10, 20, 30, 50)) == Rect(20, 10, 50, 30)
 
 
 def test_damaged_signature_dictionary_is_a_clear_error(signed: Path) -> None:
