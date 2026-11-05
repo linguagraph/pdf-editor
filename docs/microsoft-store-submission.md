@@ -55,7 +55,7 @@ git status                      # must show no modified files
 ```
 
 Set the version in `src\pdfeditor\__init__.py` (`__version__`) and in `pyproject.toml`
-(`version`). It is currently `0.1.1` (0.1.0 was the first, rejected upload). The Store
+(`version`). It is currently `0.2.0` (0.1.0 was the first, rejected upload). The Store
 needs a final `X.Y.Z` version (no `rc`/`b`/`dev`), and every upload must be higher than
 the last.
 
