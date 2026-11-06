@@ -138,23 +138,31 @@ def _keep(entry):
 a.binaries = [e for e in a.binaries if _keep(e)]
 a.datas = [e for e in a.datas if _keep(e)]
 pyz = PYZ(a.pure)
-# PDFEDITOR_ONEDIR=1 (build_exe.py --onedir / --msix / --installer) builds the same app as a
-# folder, dist/Elanero/Elanero.exe + _internal/, for the MSIX package and the installer: it
-# starts without unpacking 150 MB to %TEMP% first. The default is the portable one-file
+# PDFEDITOR_ONEDIR=1 (build_exe.py --onedir / --msix) builds the same app as a folder,
+# dist/Elanero/Elanero.exe + _internal/, for the MSIX package and the installer: it starts
+# without unpacking 150 MB to %TEMP% first. =both (--all / --installer) writes both from this
+# one analysis, so they hold the same build. The default is the portable one-file
 # dist/Elanero.exe.
-ONEDIR = os.environ.get("PDFEDITOR_ONEDIR") == "1"
-exe = EXE(
-    pyz,
-    a.scripts,
-    *([] if ONEDIR else [a.binaries, a.datas]),
-    [],
-    exclude_binaries=ONEDIR,
-    name="Elanero",
-    icon=str(ICON),
-    version=str(VERSION_FILE),
-    console=False,
-    upx=False,  # UPX-packed Qt DLLs trigger antivirus false positives and slow startup
-    runtime_tmpdir=None,
-)
-if ONEDIR:
-    coll = COLLECT(exe, a.binaries, a.datas, name="Elanero", upx=False)
+MODE = os.environ.get("PDFEDITOR_ONEDIR")
+
+
+def make_exe(onedir):
+    return EXE(
+        pyz,
+        a.scripts,
+        *([] if onedir else [a.binaries, a.datas]),
+        [],
+        exclude_binaries=onedir,
+        name="Elanero",
+        icon=str(ICON),
+        version=str(VERSION_FILE),
+        console=False,
+        upx=False,  # UPX-packed Qt DLLs trigger antivirus false positives and slow startup
+        runtime_tmpdir=None,
+    )
+
+
+if MODE != "1":
+    make_exe(False)
+if MODE in ("1", "both"):
+    COLLECT(make_exe(True), a.binaries, a.datas, name="Elanero", upx=False)

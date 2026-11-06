@@ -46,10 +46,13 @@ The portable exe and the installer are unsigned until we have a code-signing cer
 
 Pushing the tag (step 3) starts `.github/workflows/release.yml`:
 
-- **GitHub release:** builds and self-tests `Elanero.exe` and the installer and attaches them
-  to a release for the tag (step 8).
+- **Tests and build:** runs the whole of CI: every test on Windows and Linux, the performance
+  budgets and the install tests. CI doesn't run after a merge, so this is what proves the commit.
+  It also makes the release's only build of the app, and every package comes from that build.
+- **GitHub release:** attaches that `Elanero.exe` and installer to a release for the tag (step 8).
+  If this or the Store job fails, re-run just the failed job: nothing is built or tested again.
 - **Microsoft Store:** waits for your approval in Actions (the `microsoft-store` environment),
-  then builds the MSIX with the Partner Center identity and uploads it as a **draft**
+  then packs that build as an MSIX with the Partner Center identity and uploads it as a **draft**
   submission. Review the draft in Partner Center and submit it; don't edit an API-created
   draft and then rerun the job. This only works for updates: the API can't create the first
   submission, and it fails while another submission is in certification.
@@ -62,8 +65,8 @@ Its secrets live only in that environment: `MSIX_IDENTITY_JSON` (the content of
 
 1. **Version.** Set `__version__` in `src/pdfeditor/__init__.py` (and `pyproject.toml`). The
    Store version is `X.Y.Z.0`, and each upload must be higher than the last.
-2. **Checks.** `ruff check`, `ruff format --check`, `lint-imports`, `mypy` and `pytest` all
-   pass, and CI is green on `main`.
+2. **Checks.** The PR's CI is green. The last nightly run on `main` should be too: it runs what
+   pull requests skip, and it tests the merged code together.
 3. **Tag.** Tag the release commit and push the tag, so every shipped build has public source
    (AGPL):
 
@@ -74,8 +77,8 @@ Its secrets live only in that environment: `MSIX_IDENTITY_JSON` (the content of
 4. **Build** from the tagged commit:
 
    ```sh
-   uv run python scripts/build_exe.py --test --clean-env           # dist/Elanero.exe
-   uv run python scripts/build_exe.py --msix --test --clean-env    # dist/Elanero-X.Y.Z-x64.msix
+   uv run python scripts/build_exe.py --all --clean-env            # dist/Elanero.exe, dist/Elanero/
+   uv run python scripts/build_exe.py --skip-build --msix          # dist/Elanero-X.Y.Z-x64.msix
    ```
 
    The MSIX step checks that every file made it into the package (makeappx sometimes skips
