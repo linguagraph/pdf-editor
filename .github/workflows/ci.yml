@@ -112,6 +112,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the upgrade test reads the old installer script from history
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
