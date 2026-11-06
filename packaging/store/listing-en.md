@@ -1,7 +1,9 @@
 # Microsoft Store listing (English)
 
-Paste each section into Partner Center ▸ Elanero ▸ Store listings ▸ English. Field limits are
-noted in brackets; check them against Partner Center when submitting.
+A release sends the short description, description, What's New, features, search terms and
+certification notes to the Store (`scripts/store_listing.py`, which also checks the limits in
+brackets). The other sections are for pasting into Partner Center by hand. Text is wrapped for
+reading: a wrapped line shows as one line on the Store.
 
 ## Product name
 

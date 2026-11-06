@@ -4,9 +4,10 @@ name: Release
 # full CI run here is what proves it, and it makes the only build of the app:
 # - ci: every test, one build, the install tests.
 # - github-release: that portable exe and installer, attached to a GitHub release.
-# - microsoft-store: that app folder packed as an MSIX with the Partner Center identity, uploaded
-#   as a *draft* Store submission. It runs in the protected `microsoft-store` environment, so it
-#   waits for the owner's approval, and its secrets (identity and API credentials) exist only there.
+# - microsoft-store: that app folder packed as an MSIX with the Partner Center identity, uploaded,
+#   given the listing from the repo and submitted to Microsoft. It runs in the protected
+#   `microsoft-store` environment, so it waits for the owner's approval, the only human check before
+#   certification, and its secrets (identity and API credentials) exist only there.
 # A failed publishing job can be re-run alone: nothing is built or tested again.
 
 on:
@@ -25,12 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the last tag, to compare What's New with
       - name: Tag matches the app version
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/pdfeditor/__init__.py)
           if [ "v$version" != "${{ github.ref_name }}" ]; then
             echo "tag ${{ github.ref_name }} but __version__ is $version"; exit 1
           fi
+      # Before anything is built: a section missing, over a Store limit, or an old What's New.
+      - name: The Store listing is complete and current
+        run: python3 scripts/store_listing.py --tag "${{ github.ref_name }}"
 
   ci:
     needs: version
@@ -91,7 +97,7 @@ jobs:
       # otherwise), and this only packs that build, self-testing it first.
       - run: uv run python scripts/build_exe.py --skip-build --msix
       - uses: microsoft/microsoft-store-apppublisher@v1.1
-      - name: Upload as a draft Store submission
+      - name: Upload the package to a new draft submission
         env:
           MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
           MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
@@ -105,9 +111,19 @@ jobs:
               --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
           if ($LASTEXITCODE -ne 0) { throw 'msstore reconfigure failed' }
           $msix = Get-ChildItem dist\Elanero-*-x64.msix | Select-Object -First 1
-          # --noCommit leaves the submission as a draft: review it in Partner Center and submit.
+          # --noCommit: the next step commits, after the listing is on the draft. Only a commit
+          # makes the Store process the package, so a draft still shows the previous one.
           msstore publish $msix.FullName --appId $env:MSSTORE_PRODUCT_ID --noCommit
           if ($LASTEXITCODE -ne 0) { throw 'msstore publish failed' }
+      - name: Send the listing and submit
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          MSSTORE_PRODUCT_ID: ${{ secrets.MSSTORE_PRODUCT_ID }}
+          PYTHONUTF8: "1"
+        # The repository variable STORE_SUBMIT=false stops at the draft, to check the listing there.
+        run: uv run python scripts/store_submit.py ${{ vars.STORE_SUBMIT == 'false' && '--no-commit' || '' }}
       - name: Remove the identity from the runner
         if: always()
         shell: pwsh
