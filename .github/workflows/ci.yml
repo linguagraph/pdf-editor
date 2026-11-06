@@ -33,8 +33,7 @@ jobs:
         run: python3 scripts/ci_changes.py
 
   checks:
-    # About a minute, so a simple mistake fails before the slow jobs start. The app ships only for
-    # Windows, but mypy reads Windows-only Qt and ctypes calls differently on Linux, so both.
+    # Under a minute, so a simple mistake fails before the slow jobs start.
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
@@ -52,7 +51,6 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run lint-imports
       - run: uv run mypy
-      - run: uv run mypy --platform win32
 
   test-windows:
     needs: [changes, checks]
@@ -70,6 +68,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: uv venv && uv pip install -e ".[dev]"
+      # Again here: Windows-only Qt calls exist only in the stubs installed on Windows.
+      - run: uv run mypy
       - run: uv run python scripts/make_fixtures.py
       - run: uv run python scripts/fetch_tessdata.py
       # A busy runner fails the performance budgets by itself (#104), so pull requests leave them
@@ -112,6 +112,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the upgrade test reads the old installer script from history
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
