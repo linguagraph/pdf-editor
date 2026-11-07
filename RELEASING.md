@@ -52,10 +52,23 @@ Pushing the tag (step 3) starts `.github/workflows/release.yml`:
 - **GitHub release:** attaches that `Elanero.exe` and installer to a release for the tag (step 8).
   If this or the Store job fails, re-run just the failed job: nothing is built or tested again.
 - **Microsoft Store:** waits for your approval in Actions (the `microsoft-store` environment),
-  then packs that build as an MSIX with the Partner Center identity and uploads it as a **draft**
-  submission. Review the draft in Partner Center and submit it; don't edit an API-created
-  draft and then rerun the job. This only works for updates: the API can't create the first
-  submission, and it fails while another submission is in certification.
+  then packs that build as an MSIX with the Partner Center identity, uploads it, sends the listing
+  from `packaging/store/listing-en.md` and submits it for certification. No visit to Partner
+  Center is needed. Your approval is the last human check, so look at the What's New text before
+  approving. This only works for updates: the API can't create the first submission, and it fails
+  while another submission is in certification.
+
+**Listing:** a release checks the listing before building anything. It stops if a section is
+missing, a Store limit is exceeded, or **What's new in this version** is the same as in the last
+tag. Update that section in the same PR that raises the version. For a release with no user-facing
+changes, put `[same-whats-new]` in the tag's message. Images, pricing, age ratings and other
+Partner Center settings aren't sent, and stay as they are.
+
+**To stop at the draft,** for example to check a changed listing, set the repository variable
+`STORE_SUBMIT` to `false`. The job then stops before committing. A draft made this way still shows
+the previous package, because only the commit makes the Store process the new one, so submitting
+it from Partner Center could ship the old package. Delete it there and release again with the
+variable removed, or follow the manual steps below.
 
 Its secrets live only in that environment: `MSIX_IDENTITY_JSON` (the content of
 `identity.json`) and the Partner Center API credentials `MSSTORE_TENANT_ID`,
@@ -105,10 +118,11 @@ Its secrets live only in that environment: `MSIX_IDENTITY_JSON` (the content of
    submission: the optional "Blocked executables" test fails on text such as `cmd` and `reg`
    inside the Python, Qt and MuPDF libraries, and "High-DPI support" warns because Qt sets
    PerMonitorV2 at run time rather than in the exe's manifest.
-7. **Upload.** In Partner Center ▸ Elanero, start a submission:
+7. **Upload.** Only for the first submission, or if the workflow can't be used. In Partner
+   Center ▸ Elanero, start a submission:
    - **Packages:** upload the unsigned `.msix` from step 4 (build without `--sign-test`).
-   - **Store listings:** paste from `packaging/store/listing-en.md`, and add the screenshots
-     and images.
+   - **Store listings:** paste from `packaging/store/listing-en.md` (its wrapped lines are one
+     line each on the Store), and add the screenshots and images.
    - **Pricing:** free.
    - **Properties:** category Productivity; privacy URL from the listing file.
    - **Age ratings:** the IARC questionnaire; there's no user-generated content shared online.

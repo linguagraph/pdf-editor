@@ -14,6 +14,8 @@ from fnmatch import fnmatch
 
 # Nothing in the app, its tests or its packages reads these.
 DOCS = ("*.md", "docs/*", "LICENSE", ".gitignore", ".gitattributes", ".github/CODEOWNERS")
+# Not documentation, whatever it looks like: a release sends it to the Store, and a test checks it.
+STORE_LISTING = "packaging/store/*"
 # These can break the installer or the MSIX package without any test noticing, so changing them
 # also runs the install tests of both.
 PACKAGING = (
@@ -38,8 +40,12 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     changed = [path.replace("\\", "/") for path in paths if path.strip()]
     if not changed:
         return {"app": True, "packaging": True}
-    code = [path for path in changed if not _matches(path, DOCS)]
-    return {"app": bool(code), "packaging": any(_matches(path, PACKAGING) for path in code)}
+    listing = [path for path in changed if fnmatch(path, STORE_LISTING)]
+    code = [path for path in changed if not _matches(path, DOCS) and path not in listing]
+    return {
+        "app": bool(code or listing),
+        "packaging": any(_matches(path, PACKAGING) for path in code),
+    }
 
 
 def changed_paths() -> list[str]:

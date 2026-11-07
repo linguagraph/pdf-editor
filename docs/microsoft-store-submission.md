@@ -321,10 +321,11 @@ Editor** ▸ **Start your submission**. The submission page lists sections; each
    - Leave everything else unless it changed, then **Submit to the Store**.
 4. Users get the update automatically from the Store, usually within a day of publishing.
 
-Pushing the tag also runs the Release workflow (RELEASING.md). After you approve the
-`microsoft-store` deployment in GitHub ▸ Actions, it builds the package and uploads it as a
-draft submission, so step 2 and the package upload in step 3 are done for you. Open the draft
-in Partner Center, update **What's new**, and submit.
+Normally you don't do steps 2 and 3 by hand. Pushing the tag runs the Release workflow
+(RELEASING.md): after you approve the `microsoft-store` deployment in GitHub ▸ Actions, it packs
+the package, sends the listing from `packaging/store/listing-en.md` and submits it. Update
+**What's new in this version** in that file before tagging. The steps above are for when the
+workflow can't be used.
 
 ---
 

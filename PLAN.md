@@ -449,6 +449,7 @@ Nothing can embed a font from the system.
 
 - [x] One CI run per PR, nothing repeated after the merge. Fast checks first, then the Windows tests and one build. Docs-only PRs run nothing (`scripts/ci_changes.py`); the install tests run only when packaging changed. The nightly run and releases run everything, including Linux and the performance budgets.
 - [x] One build of the app per pipeline. `build_exe.py --all` writes the portable exe and the app folder in one PyInstaller run, and the installer and MSIX are made from that build. A release used to build the app three times, and each CI run four times. _(The release path runs only on a pushed tag, so the next release is its first real test.)_
+- [x] The Store release needs no Partner Center visit (#110). After the owner approves the `microsoft-store` deployment, the workflow uploads the package, sends the listing from `packaging/store/listing-en.md` (`scripts/store_submit.py`) and commits. A missing section, a text over a Store limit or an old What's New stops the release before anything is built. _(Tested against a fake API only: the next release is its first real run. `STORE_SUBMIT=false` stops at the draft.)_
 
 ### Phase S: Digital signing (M–L), issue #94
 Goal: sign PDFs digitally, above all with USB tokens and smart cards (national qualified e-signature tokens), from the self-contained exe. PAdES B-B, optionally B-T, always an incremental update.
