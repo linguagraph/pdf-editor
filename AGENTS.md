@@ -38,6 +38,10 @@ uv pip install -e ".[build]" && uv run python scripts/build_exe.py --test  # dis
 Before calling a task done, run: `ruff check`, `ruff format --check`, `lint-imports`, `mypy`,
 and `pytest`. All must pass.
 
+CI runs once per PR, and not again after the merge: `scripts/ci_changes.py` skips what a PR can't
+affect (docs-only PRs run nothing), and PRs run only the Windows tests, without the performance
+budgets. The nightly run and every release run everything.
+
 ## Architecture rules (enforced)
 
 Layers, top to bottom. A layer may import only from layers below it (import-linter contract
@@ -87,7 +91,9 @@ No feature may need Python, an installer or an external tool at runtime.
 - Extend `pdfeditor/selftest.py` when you add a subsystem that could break only when frozen
   (new native library, bundled data, plugin).
 - `uv run python scripts/build_exe.py --test` builds the exe and runs `--self-test`. CI does the
-  same on every PR (size budget: 150 MB).
+  same on PRs that change code (size budget: 150 MB), in one run that also writes the app folder
+  (`--all`). Every package is made from that one build (`--skip-build --msix`, `--skip-build
+  --installer`), so a pipeline only builds the app once.
 - External programs (LibreOffice, Ghostscript, veraPDF) may only power optional extras, detected
   at runtime, with a clear message when they're missing.
 

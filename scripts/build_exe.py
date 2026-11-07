@@ -99,7 +99,9 @@ def check_launcher(require: bool) -> None:
     print(f"warning: {problem}; antivirus may flag the exe. {advice}", file=sys.stderr)
 
 
-def build(onedir: bool = False, require_local_launcher: bool = False) -> Path:
+def build(onedir: bool = False, require_local_launcher: bool = False, both: bool = False) -> Path:
+    """Run PyInstaller once. With ``both``, that one run writes the one-file exe and the folder,
+    so every package of a release holds the same build. Returns the one asked for by ``onedir``."""
     check_launcher(require_local_launcher)
     subprocess.run(  # bundle English OCR data (not committed)
         [sys.executable, str(ROOT / "scripts" / "fetch_tessdata.py"), "eng"], cwd=ROOT, check=True
@@ -107,20 +109,23 @@ def build(onedir: bool = False, require_local_launcher: bool = False) -> Path:
     write_notices()
     shutil.rmtree(ROOT / "build" / "pdfeditor", ignore_errors=True)
     start = time.perf_counter()
-    env = dict(os.environ, PDFEDITOR_ONEDIR="1" if onedir else "0")  # read by the spec
+    mode = "both" if both else "1" if onedir else "0"
+    env = dict(os.environ, PDFEDITOR_ONEDIR=mode)  # read by the spec
     subprocess.run(
         [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)],
         cwd=ROOT,
         check=True,
         env=env,
     )
-    exe = exe_path(onedir)
-    size_mb = build_size_mb(exe, onedir)
-    print(f"built {exe} ({size_mb:.1f} MB) in {time.perf_counter() - start:.0f}s")
-    budget = ONEDIR_BUDGET_MB if onedir else SIZE_BUDGET_MB
-    if size_mb > budget:
-        raise SystemExit(f"the build is {size_mb:.1f} MB, over the {budget} MB budget")
-    return exe
+    seconds = time.perf_counter() - start
+    for folder in (False, True) if both else (onedir,):
+        exe = exe_path(folder)
+        size_mb = build_size_mb(exe, folder)
+        print(f"built {exe} ({size_mb:.1f} MB) in {seconds:.0f}s")
+        budget = ONEDIR_BUDGET_MB if folder else SIZE_BUDGET_MB
+        if size_mb > budget:
+            raise SystemExit(f"the build is {size_mb:.1f} MB, over the {budget} MB budget")
+    return exe_path(onedir)
 
 
 def self_test(exe: Path, env: dict[str, str] | None = None) -> int:
@@ -279,6 +284,11 @@ def build_installer(app_dir: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test", action="store_true", help="run --self-test on the build")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="one PyInstaller run for both dist/Elanero.exe and dist/Elanero/ (needs our launcher)",
+    )
     parser.add_argument("--skip-build", action="store_true", help="only test the existing exe")
     parser.add_argument("--clean-env", action="store_true", help="test in a clean environment")
     parser.add_argument(
@@ -300,15 +310,27 @@ def main() -> int:
     args = parser.parse_args()
     onedir = args.onedir or args.msix
     if args.installer and onedir:
-        parser.error("--installer builds the folder itself: use it without --onedir/--msix")
-    exe = exe_path(onedir) if args.skip_build else build(onedir, args.msix)
+        parser.error("--installer tests both builds: use it without --onedir/--msix")
+    both = args.all or args.installer  # the portable exe and the folder the installer packs
+    # --all makes what CI and releases package, MSIX included, so its launcher must be ours.
+    exe = exe_path(onedir) if args.skip_build else build(onedir, args.msix or args.all, both)
     if args.sign:
         sign(exe)
-    code = 0
-    if args.test or (args.skip_build and not args.clean_env):
-        code = self_test(exe)
-    if code == 0 and args.clean_env:
-        code = clean_env_smoke(exe, window_check=not args.no_window_check, onedir=onedir)
+
+    def check(target: Path, folder: bool) -> int:
+        code = 0
+        if args.test or (args.skip_build and not args.clean_env):
+            code = self_test(target)
+        if code == 0 and args.clean_env:
+            code = clean_env_smoke(target, window_check=not args.no_window_check, onedir=folder)
+        return code
+
+    code = check(exe, onedir)
+    app = exe_path(onedir=True)
+    if code == 0 and both:
+        if args.sign:
+            sign(app)
+        code = check(app, True)
     if code == 0 and args.msix:
         sys.path.insert(0, str(ROOT / "scripts"))
         from msix_package import build_msix
@@ -318,18 +340,9 @@ def main() -> int:
         if size_mb > SIZE_BUDGET_MB:
             raise SystemExit(f"the MSIX is {size_mb:.1f} MB, over the {SIZE_BUDGET_MB} MB budget")
     if code == 0 and args.installer:
-        # The portable exe above is one release asset; the installer packs the folder build.
-        app = exe_path(onedir=True) if args.skip_build else build(onedir=True)
+        setup = build_installer(app.parent)
         if args.sign:
-            sign(app)
-        if args.test or (args.skip_build and not args.clean_env):
-            code = self_test(app)
-        if code == 0 and args.clean_env:
-            code = clean_env_smoke(app, window_check=not args.no_window_check, onedir=True)
-        if code == 0:
-            setup = build_installer(app.parent)
-            if args.sign:
-                sign(setup)
+            sign(setup)
     return code
 
 

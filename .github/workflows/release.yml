@@ -1,10 +1,13 @@
 name: Release
 
-# A pushed tag vX.Y.Z (RELEASING.md) builds the release from that commit:
-# - github-release: the portable exe and the Inno Setup installer, attached to a GitHub release.
-# - microsoft-store: the MSIX with the Partner Center identity, uploaded as a *draft* Store
-#   submission. It runs in the protected `microsoft-store` environment, so it waits for the
-#   owner's approval, and its secrets (identity and API credentials) exist only there.
+# A pushed tag vX.Y.Z (RELEASING.md) releases that commit. CI doesn't run after a merge, so the
+# full CI run here is what proves it, and it makes the only build of the app:
+# - ci: every test, one build, the install tests.
+# - github-release: that portable exe and installer, attached to a GitHub release.
+# - microsoft-store: that app folder packed as an MSIX with the Partner Center identity, uploaded
+#   as a *draft* Store submission. It runs in the protected `microsoft-store` environment, so it
+#   waits for the owner's approval, and its secrets (identity and API credentials) exist only there.
+# A failed publishing job can be re-run alone: nothing is built or tested again.
 
 on:
   push:
@@ -14,37 +17,50 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  github-release:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+  version:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - name: Tag matches the app version
-        shell: pwsh
         run: |
-          $version = (Select-String -Path src\pdfeditor\__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
-          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but __version__ is $version" }
-      - run: uv venv && uv pip install -e ".[build]"
-      # Our own launcher: the prebuilt one is flagged by antivirus (#90). MSVC is on the image.
-      - run: uv run python scripts/build_bootloader.py
-      - name: Install Inno Setup if the image lacks it
-        shell: pwsh
-        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-      - run: uv run python scripts/build_exe.py --installer --test --clean-env --no-window-check
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/pdfeditor/__init__.py)
+          if [ "v$version" != "${{ github.ref_name }}" ]; then
+            echo "tag ${{ github.ref_name }} but __version__ is $version"; exit 1
+          fi
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  github-release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: elanero-exe
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: elanero-installer
+          path: assets
+      - name: Remove a draft left by a failed attempt
+        # GitHub can fail mid-way and leave one, and a second release with this tag couldn't publish.
+        run: |
+          gh api "repos/$GH_REPO/releases" --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" |
+            while read -r id; do gh api -X DELETE "repos/$GH_REPO/releases/$id"; done
       - name: Create the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem dist\pdfeditor-*-setup.exe | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" dist\Elanero.exe $setup.FullName `
-              --verify-tag --generate-notes --title "Elanero ${{ github.ref_name }}"
+        run: gh release create "$TAG" assets/* --verify-tag --generate-notes --title "Elanero $TAG"
 
   microsoft-store:
     needs: github-release
@@ -53,11 +69,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: uv venv && uv pip install -e ".[build]"
-      - run: uv run python scripts/build_bootloader.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: elanero-folder
+          path: dist/Elanero
       - name: Store identity (git-ignored; only on this runner)
         env:
           MSIX_IDENTITY_JSON: ${{ secrets.MSIX_IDENTITY_JSON }}
@@ -65,8 +87,9 @@ jobs:
         run: |
           Set-Content -Path packaging\msix\identity.json -Value $env:MSIX_IDENTITY_JSON -Encoding utf8NoBOM
           uv run python -c "import sys; sys.path.insert(0, 'scripts'); import msix_package; sys.exit(0 if msix_package.load_identity().reserved else 'identity.json is not the reserved Store identity')"
-      # Unsigned: the Store signs the package. The build fails rather than pack the stock launcher.
-      - run: uv run python scripts/build_exe.py --msix --test --clean-env --no-window-check
+      # Unsigned: the Store signs the package. CI built the app with our own launcher (--all fails
+      # otherwise), and this only packs that build, self-testing it first.
+      - run: uv run python scripts/build_exe.py --skip-build --msix
       - uses: microsoft/microsoft-store-apppublisher@v1.1
       - name: Upload as a draft Store submission
         env:

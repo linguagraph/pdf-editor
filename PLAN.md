@@ -445,6 +445,11 @@ Nothing can embed a font from the system.
 - Restricted fonts are clearly unavailable.
 - All checks, round-trip tests and `build_exe.py --test` pass.
 
+### CI and release speed, issue #109
+
+- [x] One CI run per PR, nothing repeated after the merge. Fast checks first, then the Windows tests and one build. Docs-only PRs run nothing (`scripts/ci_changes.py`); the install tests run only when packaging changed. The nightly run and releases run everything, including Linux and the performance budgets.
+- [x] One build of the app per pipeline. `build_exe.py --all` writes the portable exe and the app folder in one PyInstaller run, and the installer and MSIX are made from that build. A release used to build the app three times, and each CI run four times. _(The release path runs only on a pushed tag, so the next release is its first real test.)_
+
 ### Phase S: Digital signing (M–L), issue #94
 Goal: sign PDFs digitally, above all with USB tokens and smart cards (national qualified e-signature tokens), from the self-contained exe. PAdES B-B, optionally B-T, always an incremental update.
 
