@@ -132,19 +132,6 @@ Digital signing needs a certificate of the tester's own; any .pfx file works. A 
 prompt comes from Windows or the token's software. A timestamp connects only to a server the
 user enters, and that option is off by default.
 
-## Restricted capability justification [Packages ▸ runFullTrust]
-
-Elanero is a traditional Win32 desktop application (Python and Qt) packaged as MSIX with the
-Desktop Bridge, so it needs runFullTrust to run at all. It's a full PDF editor. Users open,
-edit and save PDF files in any folder they choose, including network drives and removable
-media. It prints through the standard Windows print dialog, opens .pdf files from Explorer
-through its file type association, and can start more windows of itself (File ▸ New Window).
-As an optional extra, it converts Office documents to PDF by starting LibreOffice, only if the
-user has installed it. It runs as a standard user: it doesn't need administrator rights,
-install drivers or services, or change system settings. It collects no data. The only network
-access is downloading OCR language files from GitHub when the user asks for one. Source code:
-https://github.com/linguagraph/pdf-editor
-
 ## Images
 
 Generate them with `uv run python scripts/make_store_images.py`. It writes to `dist/store/`:
@@ -156,8 +143,7 @@ Generate them with `uv run python scripts/make_store_images.py`. It writes to `d
   "Reorder, rotate and combine pages", "Headers, footers and page numbers", "Comments panel
   with authors and replies", "Light and dark themes".
 - **Store logos ▸ 1:1 app icon:** `store-logo-300.png` (300×300).
-- **Store logos ▸ 1:1 box art:** `box-art-1x1-2160.png` (2160×2160) or `box-art-1x1-1080.png`
-  (1080×1080).
+- **Store logos ▸ 1:1 box art:** `box-art-1x1-2160.png` (2160×2160).
 - **Store logos ▸ 2:3 poster art:** `poster-2x3-1440x2160.png` (or the 720×1080 copy).
 
 The sample documents in the screenshots are fictional and made by the script.
