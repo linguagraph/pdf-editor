@@ -42,9 +42,9 @@ interface Harness {
 
 function harness(overrides: Partial<CommentsDeps> = {}): Harness {
   const call = vi.fn(async () => reply([ANA, CARL]));
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(pages: readonly number[]) => void>();
   const scheduler = {
-    subscribeRevisions: (listener: () => void) => {
+    subscribeRevisions: (listener: (pages: readonly number[]) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
@@ -61,7 +61,7 @@ function harness(overrides: Partial<CommentsDeps> = {}): Harness {
     call,
     stop,
     revisionChanged: () => {
-      for (const listener of [...listeners]) listener();
+      for (const listener of [...listeners]) listener([]);
     },
     subscribers: () => listeners.size,
   };

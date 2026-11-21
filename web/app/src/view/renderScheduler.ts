@@ -58,7 +58,7 @@ export class RenderScheduler {
   private readonly listeners = new Set<() => void>();
   // Told only when a change moved a revision (noteRevisions), not on every reply: the redaction
   // list reloads on these, and a render reply must not start one.
-  private readonly revisionListeners = new Set<() => void>();
+  private readonly revisionListeners = new Set<(pages: readonly number[]) => void>();
   private inFlight = 0;
   // Resolves once, when the first page (not a thumbnail) is drawn into the cache. The job worker
   // warm-up waits for it (W3.1 slice 2). It never rejects.
@@ -84,8 +84,9 @@ export class RenderScheduler {
     };
   }
 
-  // Called when noteRevisions moves a page's revision: a change to the document, not a render.
-  subscribeRevisions(listener: () => void): () => void {
+  // Called when noteRevisions moves a page's revision: a change to the document, not a render. The
+  // listener gets the pages whose revision moved, so a selection can check only those (W5.4).
+  subscribeRevisions(listener: (pages: readonly number[]) => void): () => void {
     this.revisionListeners.add(listener);
     return () => {
       this.revisionListeners.delete(listener);
@@ -99,16 +100,16 @@ export class RenderScheduler {
   // Records the revisions a change reported (W1.2 section 7), so the changed pages are drawn again.
   // The keys are page indexes as strings, as the JSON carries them.
   noteRevisions(revisions: Readonly<Record<string, number>>): void {
-    let moved = false;
+    const moved: number[] = [];
     for (const [key, revision] of Object.entries(revisions)) {
       const page = Number(key);
       if (this.revisions.get(page) === revision) continue;
       this.revisions.set(page, revision);
-      moved = true;
+      moved.push(page);
     }
-    if (!moved) return;
+    if (moved.length === 0) return;
     this.notify();
-    for (const listener of [...this.revisionListeners]) listener();
+    for (const listener of [...this.revisionListeners]) listener(moved);
   }
 
   // The cache key a page, a tile of a page or a thumbnail is drawn from, at the revision the

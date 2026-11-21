@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createToastStore } from '../feedback/toasts';
+import { EN } from '../i18n/en';
 import { t, tp } from '../i18n/t';
 import type { PageArea } from '../text/textLayer';
 import { domSelectionAreas, type ModelRead } from '../text/selection';
@@ -155,6 +156,26 @@ describe('markSelectedText on the model selection (W5.4)', () => {
     await markSelectedText(deps({ controller, model }));
     expect(model).not.toHaveBeenCalled();
     expect(controller.markAreas).not.toHaveBeenCalled();
+  });
+
+  it('refuses a selection over more than 300 pages, with a message, and marks nothing (W5.4 section 6)', async () => {
+    const store = createToastStore();
+    const controller = fakeController(false, 1);
+    const loadPages = vi.fn(async () => undefined);
+    const model = vi.fn(() => ready([AREA]));
+    await markSelectedText(deps({ controller, store, loadPages, model, pageSpan: () => 301 }));
+    expect(store.getState().visible.map((toast) => toast.text)).toContain(
+      EN['redact.selectionTooLarge'],
+    );
+    expect(loadPages).not.toHaveBeenCalled();
+    expect(model).not.toHaveBeenCalled();
+    expect(controller.markAreas).not.toHaveBeenCalled();
+  });
+
+  it('marks a selection of exactly 300 pages', async () => {
+    const controller = fakeController(false, 1);
+    await markSelectedText(deps({ controller, model: () => ready([AREA]), pageSpan: () => 300 }));
+    expect(controller.markAreas).toHaveBeenCalledWith([AREA]);
   });
 });
 

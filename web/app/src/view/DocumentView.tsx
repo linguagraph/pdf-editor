@@ -17,7 +17,7 @@ import {
   useState,
 } from 'react';
 import type { PageRpc } from '../engine/engineConnection';
-import { t } from '../i18n/t';
+import { t, tp } from '../i18n/t';
 import {
   onPreferencesChanged,
   readPreferences,
@@ -48,10 +48,12 @@ import {
 import { PageMarks } from '../search/PageMarks';
 import { marksOnPage, type SearchMarks } from '../search/search';
 import {
+  type CopyPlan,
+  planCopy,
   readModelIndexes,
-  readModelText,
   selectPageText as selectPageTextLayer,
 } from '../text/copy';
+import { toasts } from '../feedback/toasts';
 import { MODEL_OFF, type ModelRead, modelSelectionAreas } from '../text/selection';
 import type { PageArea } from '../text/textLayer';
 import { TextSelection } from '../text/textSelection';
@@ -112,6 +114,41 @@ import './documentView.css';
 
 export { MAX_RENDER_ATTEMPTS } from './renderScheduler';
 
+// A change the view reports to the copies it has started: pages moved (null: the page count did), or
+// the view closed.
+type CopyEvent =
+  | { readonly kind: 'changed'; readonly pages: readonly number[] | null }
+  | { readonly kind: 'closed' };
+
+function notifyCopies(watchers: Set<(event: CopyEvent) => void>, event: CopyEvent): void {
+  for (const watcher of [...watchers]) watcher(event);
+}
+
+// Whether one of the pages lies in from..to, both included.
+function anyInRange(pages: readonly number[], from: number, to: number): boolean {
+  for (const page of pages) {
+    if (from <= page && page <= to) return true;
+  }
+  return false;
+}
+
+// Hears the changes that touch the pages from..to (a copy's range), or any change to the count.
+function watchRange(
+  watchers: Set<(event: CopyEvent) => void>,
+  from: number,
+  to: number,
+  listener: (reason: 'changed' | 'closed') => void,
+): () => void {
+  const watcher = (event: CopyEvent): void => {
+    if (event.kind === 'closed') listener('closed');
+    else if (event.pages === null || anyInRange(event.pages, from, to)) listener('changed');
+  };
+  watchers.add(watcher);
+  return () => {
+    watchers.delete(watcher);
+  };
+}
+
 // The page layouts the toolbar offers: the continuous single column, or two-page spreads.
 
 // What the parent can ask the view to do: the ribbon's View and Home commands and the shortcuts reach
@@ -140,13 +177,16 @@ export interface DocumentViewHandle {
   setCommentTool(tool: CommentToolId | null): void;
   // Turns the redaction mark tool on or off, as the toolbar's Mark button does (W4.3a S7).
   setRedacting(on: boolean): void;
-  // Selects the text of the page at the top of the view, for Select All (W5.4 S4): the model's
-  // selection of the whole page once its index has arrived. Under Hand, a DOM range over the page's
-  // text layer, which the browser's own selection then holds.
-  selectPageText(): void;
-  // The text of the model's selection (Copy reads it first). `off` when the model is not in charge
-  // (the Hand tool), so the browser's selection is read instead.
-  selectedText(): ModelRead<string>;
+  // Selects the text of the whole document, for Select All (W5.4 section 2): the model's selection
+  // from the first caret to the last page's end, once the last page's length has arrived; it says
+  // so with a toast. Under Hand, a DOM range over the page at the top, which the browser holds.
+  selectAll(): void;
+  // How Copy reads the model's selection (W5.4 section 3.1). `off` when the model is not in charge
+  // (the Hand tool), so the browser's selection is copied instead.
+  copyPlan(): CopyPlan;
+  // The number of pages the model's selection covers (0 when none, or under Hand). Mark Text
+  // refuses more than MAX_TEXT_LAYERS (W5.4 section 6).
+  selectedPageSpan(): number;
   // The areas of the model's selection, one per page (Mark Text). `off` as selectedText.
   selectedAreas(): ModelRead<PageArea[]>;
   // Clears the model's selection (Mark Text does so once it has marked the selection).
@@ -591,46 +631,48 @@ export function DocumentView({
     enabled: selecting,
   });
   const selectModel = textSelection.select;
-  // The model's selection as of the last render, read by Copy (selectedText) outside the render. It
+  // The model's selection as of the last render, read by Copy (copyPlan) outside the render. It
   // counts only while the Select tool is on (`selecting`): once Hand or an armed comment or redaction
   // tool takes over, a stale selection must not override the browser's native one.
   const modelSelection = useRef<TextSelection | null>(null);
   const selectingNow = useRef(false);
-  // The revisions of the pages the model's selection covers, as of the last render. A change to one
-  // of them (Undo, Redo, an edit) makes the selection's offsets stale, so the selection is dropped.
-  const coveredRevisions = useRef<Map<number, number> | null>(null);
+  // Select All while the last page's length is loading (W5.4 section 2.3). Any change or press drops it.
+  const selectAllPending = useRef<{ readonly page: number; readonly revision: number } | null>(
+    null,
+  );
+  // The copies that read a range of this view (W5.4 section 3.3). Each one hears a change to a page
+  // in its range, or a page-count change (pages null), and stops; a closed view stops them quietly.
+  const copyWatchers = useRef(new Set<(event: CopyEvent) => void>());
   useEffect(() => {
     selectingNow.current = selecting;
     modelSelection.current = selecting ? textSelection.selection : null;
-    const sel = modelSelection.current;
-    if (sel === null || sel.isEmpty) {
-      coveredRevisions.current = null;
-      return;
-    }
-    const revisions = new Map<number, number>();
-    for (let page = sel.start.page; page <= sel.end.page; page += 1) {
-      revisions.set(page, scheduler.revisionOf(page));
-    }
-    coveredRevisions.current = revisions;
   });
-  useEffect(
-    () =>
-      scheduler.subscribeRevisions(() => {
-        const covered = coveredRevisions.current;
-        if (covered === null) return;
-        for (const [page, revision] of covered) {
-          if (scheduler.revisionOf(page) === revision) continue;
-          modelSelection.current = null;
-          coveredRevisions.current = null;
-          selectModel(null);
-          return;
-        }
-      }),
-    [scheduler, selectModel],
-  );
+  // A change to a covered page (Undo, Redo, an edit) makes the selection's offsets stale, so it is dropped.
+  useEffect(() => {
+    return scheduler.subscribeRevisions((pages) => {
+      const sel = modelSelection.current;
+      const covered =
+        sel !== null && !sel.isEmpty && anyInRange(pages, sel.start.page, sel.end.page);
+      // A change to any page makes a pending Select All stale (its length may be of the old text).
+      selectAllPending.current = null;
+      if (covered) {
+        modelSelection.current = null;
+        selectModel(null);
+      }
+      notifyCopies(copyWatchers.current, { kind: 'changed', pages });
+    });
+  }, [scheduler, selectModel]);
+  // A closed view (its tab shut or the document replaced) stops its copies quietly.
+  useEffect(() => {
+    const watchers = copyWatchers.current;
+    return () => notifyCopies(watchers, { kind: 'closed' });
+  }, []);
   // Leaving Select clears the model's selection, so it is neither drawn nor copied later.
   useEffect(() => {
-    if (!selecting) selectModel(null);
+    if (!selecting) {
+      selectAllPending.current = null;
+      selectModel(null);
+    }
   }, [selecting, selectModel]);
   const pan = useHandPan(
     tool === 'hand' || selecting,
@@ -918,6 +960,17 @@ export function DocumentView({
     topPage.current = currentPage - 1;
   }, [currentPage]);
   const pageCount = sizes?.length ?? 0;
+  // A change to the page count (insert, delete, reorder) makes every page number name another page,
+  // so the selection and the copies in progress are dropped (W5.4 section 4).
+  const lastPageCount = useRef(pageCount);
+  useEffect(() => {
+    if (lastPageCount.current === pageCount) return;
+    lastPageCount.current = pageCount;
+    selectAllPending.current = null;
+    modelSelection.current = null;
+    selectModel(null);
+    notifyCopies(copyWatchers.current, { kind: 'changed', pages: null });
+  }, [pageCount, selectModel]);
   useEffect(() => {
     onViewChange?.({
       page: currentPage,
@@ -1000,38 +1053,64 @@ export function DocumentView({
       cachedLines: (page) => textLayers.ready(page, scheduler.revisionOf(page)),
       setCommentTool: chooseCommentTool,
       setRedacting: chooseRedacting,
-      selectPageText: () => {
-        const page = topPage.current;
+      selectAll: () => {
+        const last = pageCount - 1;
+        if (last < 0) return;
         if (!selectingNow.current) {
-          // Under Hand the browser's own selection holds the page (the layer is not the model's).
+          // Under Hand the browser's own selection holds the top page (the layer is not the model's).
+          const page = topPage.current;
           selectPageTextLayer(
             window.getSelection(),
             scrollRef.current?.querySelector(`[data-page="${page}"] .page-text-layer`) ?? null,
           );
           return;
         }
-        const index = textLayers.readyIndex(page, scheduler.revisionOf(page));
+        // The whole document, from its first caret to the end of the last page (the desktop's
+        // DocumentView.select_all). It needs only the last page's length (W5.4 section 2.2).
+        const selectWhole = (length: number): void => {
+          selectModel(new TextSelection({ page: 0, index: 0 }, { page: last, index: length }));
+          toasts.push('info', tp('text.selectedAll', pageCount));
+        };
+        selectAllPending.current = null;
+        const revision = scheduler.revisionOf(last);
+        const index = textLayers.readyIndex(last, revision);
         if (index !== undefined) {
-          selectModel(TextSelection.ofPage(page, index.length));
+          selectWhole(index.length);
           return;
         }
-        // The index is still loading: the whole page is selected once it arrives, if the user still
-        // has the Select tool on and the page is still at the top.
-        void textLayers.index(page, scheduler.revisionOf(page)).then(
+        // The last page's length is still loading. The selection is set when it arrives, unless the
+        // user has dragged, cleared or changed the document in the meantime (the pending ref changes).
+        const pending = { page: last, revision };
+        selectAllPending.current = pending;
+        void textLayers.index(last, revision).then(
           (loaded) => {
-            if (selectingNow.current && topPage.current === page) {
-              selectModel(TextSelection.ofPage(page, loaded.length));
-            }
+            if (selectAllPending.current !== pending) return;
+            selectAllPending.current = null;
+            if (selectingNow.current) selectWhole(loaded.length);
           },
-          () => undefined,
+          () => {
+            if (selectAllPending.current !== pending) return;
+            selectAllPending.current = null;
+            toasts.push('info', t('text.stillLoading'));
+          },
         );
       },
-      selectedText: (): ModelRead<string> =>
-        selectingNow.current
-          ? readModelText(modelSelection.current, (page) =>
-              textLayers.readyIndex(page, scheduler.revisionOf(page)),
-            )
-          : MODEL_OFF,
+      copyPlan: (): CopyPlan => {
+        const sel = modelSelection.current;
+        const from = sel?.start.page ?? 0;
+        const to = sel?.end.page ?? -1;
+        return planCopy(
+          selectingNow.current,
+          sel,
+          (page) => textLayers.readyIndex(page, scheduler.revisionOf(page)),
+          selectAllPending.current !== null,
+          (listener) => watchRange(copyWatchers.current, from, to, listener),
+        );
+      },
+      selectedPageSpan: (): number => {
+        const sel = selectingNow.current ? modelSelection.current : null;
+        return sel === null || sel.isEmpty ? 0 : sel.end.page - sel.start.page + 1;
+      },
       selectedAreas: (): ModelRead<PageArea[]> => {
         if (!selectingNow.current) return MODEL_OFF;
         const sel = modelSelection.current;
@@ -1043,8 +1122,8 @@ export function DocumentView({
         return { state: 'ready', value: modelSelectionAreas(sel, read.value) };
       },
       clearTextSelection: () => {
+        selectAllPending.current = null;
         modelSelection.current = null;
-        coveredRevisions.current = null;
         selectModel(null);
       },
       loadTextPages: (pages) =>
@@ -1071,6 +1150,7 @@ export function DocumentView({
       changeLayout,
       chooseNight,
       selectModel,
+      pageCount,
     ],
   );
 
@@ -1191,6 +1271,8 @@ export function DocumentView({
           }}
           onPointerDown={(event) => {
             linkPress.current = linkPressAt(event);
+            // A press starts a new selection (or pans): a Select All still waiting for its length is dropped.
+            selectAllPending.current = null;
             if (!textSelection.startPress(event)) pan.onPointerDown(event);
           }}
           onPointerMove={pan.onPointerMove}

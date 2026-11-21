@@ -5,6 +5,7 @@ import type { PageRpc } from '../engine/engineConnection';
 import type { ToastStore } from '../feedback/toasts';
 import { EN } from '../i18n/en';
 import { copySelectedText } from '../text/copy';
+import { toasts } from '../feedback/toasts';
 import { PREFS_STORAGE_KEY } from '../prefs/store';
 import { DocumentView, type DocumentViewHandle } from './DocumentView';
 import { RenderScheduler } from './renderScheduler';
@@ -136,21 +137,35 @@ function nativeSelect(from: number, to: number): Selection {
   return selection;
 }
 
-// Copy as App wires it: the model's read first (selectedText), then the browser's selection when the
-// model is off, and the pages a loading read names are asked for.
-function copy(): { writeText: ReturnType<typeof vi.fn>; push: ReturnType<typeof vi.fn> } {
+// Copy as App wires it: the view's plan first (copyPlan), then the browser's selection when the model
+// is off. A large selection goes to the engine, which this file does not run: its plan is recorded.
+function copy(): {
+  writeText: ReturnType<typeof vi.fn>;
+  push: ReturnType<typeof vi.fn>;
+  large: ReturnType<typeof vi.fn>;
+} {
   const writeText = vi.fn(() => Promise.resolve());
   const push = vi.fn();
+  const large = vi.fn();
   const store = { push } as unknown as ToastStore;
   copySelectedText({
     selection: window.getSelection(),
     lookup: (page) => handle.current?.cachedLines(page),
     clipboard: { writeText },
     store,
-    model: () => handle.current?.selectedText() ?? { state: 'off' },
-    loadPages: (pages) => handle.current?.loadTextPages(pages) ?? Promise.resolve(),
+    plan: () => handle.current?.copyPlan() ?? { kind: 'off' },
+    large,
   });
-  return { writeText, push };
+  return { writeText, push, large };
+}
+
+// A promise the test settles by hand (a page whose text layer answers when the test says so).
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 // A drag from the start of page 0's first line to the end of the last line of page `last`.
@@ -166,11 +181,11 @@ describe('DocumentView copy with the Select tool (W5.4)', () => {
   it('copies a drag made under Select, then the native selection once Hand is chosen', async () => {
     // A press on "a" (10, 20 pt) and a drag to the end of "d" (31, 52 pt), 4/3 CSS px per point.
     dragTo(0, 52 * (4 / 3));
-    expect(handle.current?.selectedText()).toEqual({ state: 'ready', value: 'ab\ncd' });
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'local', text: 'ab\ncd' });
 
     render('hand');
     await flush();
-    expect(handle.current?.selectedText()).toEqual({ state: 'off' });
+    expect(handle.current?.copyPlan()).toEqual({ kind: 'off' });
     nativeSelect(0, 0);
     expect(copy().writeText).toHaveBeenCalledWith('ab');
   });
@@ -186,12 +201,13 @@ describe('DocumentView copy with the Select tool (W5.4)', () => {
 
   it('copies the native selection, not a Select All left over after the tool changed', async () => {
     pageZero();
-    act(() => handle.current?.selectPageText());
-    expect(handle.current?.selectedText()).toEqual({ state: 'ready', value: 'ab\ncd' });
+    act(() => handle.current?.selectAll());
+    await flush();
+    expect(handle.current?.selectedPageSpan()).toBe(3);
 
     render('hand');
     await flush();
-    expect(handle.current?.selectedText()).toEqual({ state: 'off' });
+    expect(handle.current?.copyPlan()).toEqual({ kind: 'off' });
     nativeSelect(1, 1);
     expect(copy().writeText).toHaveBeenCalledWith('cd');
   });
@@ -199,37 +215,55 @@ describe('DocumentView copy with the Select tool (W5.4)', () => {
   it('Select All under Hand selects the page as a DOM range, and no model selection shows on return', async () => {
     render('hand');
     await flush();
-    act(() => handle.current?.selectPageText());
+    act(() => handle.current?.selectAll());
     expect(copy().writeText).toHaveBeenCalledWith('ab\ncd');
 
     render('select');
     await flush();
-    expect(handle.current?.selectedText()).toEqual({ state: 'ready', value: '' });
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'local', text: '' });
+    expect(handle.current?.selectedPageSpan()).toBe(0);
   });
 
-  it('says the text is still loading for a selection over a page whose text has not arrived', async () => {
-    // A drag from page 0 onto page 1, whose index is then dropped: a new RPC gives a new text layer
-    // cache, so the selection stays but page 1's text has to come again, and this RPC holds it.
-    dragTo(1, 1000 + 52 * (4 / 3));
+  it('Select All under Select covers the whole document, and says so', async () => {
+    act(() => handle.current?.selectAll());
     await flush();
-    let release = (): void => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    render('select', fakeRpc({ page: 1, release: gate }));
+    expect(handle.current?.selectedPageSpan()).toBe(3);
+    expect(toasts.getState().visible.map((toast) => toast.text)).toContain(
+      'Selected the text of all 3 pages.',
+    );
+  });
+
+  it('a drag made while Select All waits for the last page wins, and the late length is dropped', async () => {
+    const gate = deferred();
+    render('select', fakeRpc({ page: 2, release: gate.promise }));
     await flush();
-    await flush();
-    expect(handle.current?.selectedText()).toEqual({ state: 'loading', pages: [1] });
+    act(() => handle.current?.selectAll());
+    expect(handle.current?.copyPlan()).toEqual(expect.objectContaining({ kind: 'pending' }));
 
     const first = copy();
     expect(first.writeText).not.toHaveBeenCalled();
     expect(first.push).toHaveBeenCalledWith('info', EN['text.stillLoading']);
 
-    release();
+    dragTo(0, 52 * (4 / 3));
+    gate.resolve();
     await flush();
     await flush();
-    const second = copy();
-    expect(second.writeText).toHaveBeenCalledWith('ab\ncd\nab\ncd');
+    expect(handle.current?.selectedPageSpan()).toBe(1);
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'local', text: 'ab\ncd' });
+  });
+
+  it('hands a selection with an unloaded page to the engine, not to the clipboard', async () => {
+    // A selection over pages 0 to 2 right after the view mounts: the pages whose text has not
+    // arrived are copied by the engine in slices, so the view's copy plan names the engine.
+    dragTo(1, 1000 + 52 * (4 / 3));
+    await flush();
+    render('select', fakeRpc({ page: 1, release: deferred().promise }));
+    await flush();
+    await flush();
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'engine', pages: 2 });
+    const first = copy();
+    expect(first.large).toHaveBeenCalledTimes(1);
+    expect(first.writeText).not.toHaveBeenCalled();
   });
 
   it('drops a model selection when a page it covers changes revision (Undo, Redo, an edit)', async () => {
@@ -248,12 +282,55 @@ describe('DocumentView copy with the Select tool (W5.4)', () => {
     await flush();
 
     dragTo(0, 52 * (4 / 3));
-    expect(handle.current?.selectedText()).toEqual({ state: 'ready', value: 'ab\ncd' });
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'local', text: 'ab\ncd' });
 
     act(() => {
       scheduler.noteRevisions({ '0': 2 });
     });
-    expect(handle.current?.selectedText()).toEqual({ state: 'ready', value: '' });
+    expect(handle.current?.copyPlan()).toMatchObject({ kind: 'local', text: '' });
     expect(handle.current?.selectedAreas()).toEqual({ state: 'ready', value: [] });
+  });
+
+  it('clears a whole-document selection when a page of it changes (the last one here)', async () => {
+    const rpc = fakeRpc();
+    const scheduler = new RenderScheduler(rpc, 'h');
+    act(() => root.unmount());
+    root = createRoot(host);
+    act(() => {
+      root.render(
+        <DocumentView ref={handle} rpc={rpc} handle="h" tool="select" scheduler={scheduler} />,
+      );
+    });
+    await flush();
+    await flush();
+
+    act(() => handle.current?.selectAll());
+    await flush();
+    expect(handle.current?.selectedPageSpan()).toBe(3);
+    act(() => {
+      scheduler.noteRevisions({ '2': 5 });
+    });
+    expect(handle.current?.selectedPageSpan()).toBe(0);
+  });
+
+  it('clears the selection when the page count changes', async () => {
+    dragTo(0, 52 * (4 / 3));
+    expect(handle.current?.selectedPageSpan()).toBe(1);
+    // A document of two pages instead of three: page numbers now name other pages.
+    const twoPages: PageRpc = {
+      call: vi.fn((method: string) => {
+        if (method === 'session.pages') {
+          return Promise.resolve({
+            pages: Array.from({ length: 2 }, () => ({ width: 612, height: 792, rotation: 0 })),
+            labels: [],
+          });
+        }
+        return new Promise(() => {});
+      }),
+    } as unknown as PageRpc;
+    render('select', twoPages);
+    await flush();
+    await flush();
+    expect(handle.current?.selectedPageSpan()).toBe(0);
   });
 });

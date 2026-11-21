@@ -5,10 +5,14 @@
 import { toasts, type ToastStore } from '../feedback/toasts';
 import { t, tp } from '../i18n/t';
 import { domSelectionAreas, type ModelRead, type TextLineLookup } from '../text/selection';
+import { MAX_TEXT_LAYERS } from '../text/textLayerCache';
 import type { RedactionSnapshot } from './controller';
 import type { PageArea } from '../text/textLayer';
 
 export interface MarkTextDeps {
+  // The number of pages the model's selection covers (0 when there is none). Mark Text works on at
+  // most MAX_TEXT_LAYERS pages, since it needs each covered page's areas (W5.4 section 6).
+  readonly pageSpan?: () => number;
   readonly controller: {
     getSnapshot(): Pick<RedactionSnapshot, 'busy'>;
     markAreas(areas: readonly PageArea[]): Promise<number>;
@@ -33,6 +37,10 @@ export interface MarkTextDeps {
 export async function markSelectedText(deps: MarkTextDeps): Promise<void> {
   const store = deps.store ?? toasts;
   if (deps.controller.getSnapshot().busy) return;
+  if ((deps.pageSpan?.() ?? 0) > MAX_TEXT_LAYERS) {
+    store.push('info', t('redact.selectionTooLarge'));
+    return;
+  }
   let read = deps.model();
   if (read.state === 'loading') {
     await deps.loadPages(read.pages);

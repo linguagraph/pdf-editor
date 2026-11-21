@@ -129,10 +129,15 @@ is reloaded until you press it.
 - **Copy and Select All.** Drag over the text of a page to select it, then choose **Copy** in the
   Home tab's Tools group or press **Ctrl+C**: the selected text goes to the clipboard, with a line
   break where each line ends and between pages. **Select All** (Ctrl+A, also in the Home tab) selects
-  the text of the page at the top of the view. Copy says so when nothing is selected, and when the
-  selection is too large to copy at once (about 50 MB of text). A scanned page has no text to copy.
-  Copy can also say that the text of a selected page is still loading: try again in a moment. With
-  **Hand** chosen, Copy and Select All use the browser's own selection instead.
+  the text of the whole document, as on the desktop, and says how many pages it selected. Copy then
+  copies all of it. When the text is long, the web version reads it in steps: a progress bar shows
+  how far it has got, and **Cancel** stops it without changing the clipboard. If you change the
+  document while it copies, Copy stops and asks you to copy again. If your browser can't copy the
+  text in one step, Copy tells you when the text is ready: press **Copy** again. Copy says so when
+  nothing is selected, and when the selection is too large to copy at once (about 50 MB of text). A
+  scanned page has no text to copy. Copy can also say that the text of a selected page is still
+  loading: try again in a moment. With **Hand** chosen, Copy and Select All use the browser's own
+  selection instead, and Select All selects only the page at the top.
 - **Keyboard shortcuts.** A few web keys work so far: **Ctrl+C** (Copy) and **Ctrl+A** (Select All), **Alt+Left** and **Alt+Right** go back and
   forward through the pages you have visited, **Alt+G** (Go to Page) moves the cursor to the page
   box in the status bar, and **Alt+PgDn** and **Alt+PgUp** switch to the next and previous open
@@ -215,7 +220,7 @@ is reloaded until you press it.
   includes the marks already in the file. Marks are added with **Mark areas** on the document toolbar.
 - **Mark Text.** On the **Protect** tab, **Mark Text** marks the text you selected with the Select tool
   (a drag, or Select All) as redaction marks: one mark per page the selection covers, all in one undo
-  step. It only marks. Nothing is
+  step. It works on a selection of up to 300 pages. It only marks. Nothing is
   removed until you apply the marks, from the Redactions panel or the toolbar's **Apply**. With no text
   selected, the command asks you to select some first. A mark keeps the selected text in its note until
   the mark is applied, and applying the marks removes that text from the file.

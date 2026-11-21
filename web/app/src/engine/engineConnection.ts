@@ -257,8 +257,8 @@ export interface PageRpc {
     method: M,
     params: Methods[M]['params'],
   ): Promise<CallValue<M>>;
-  // Each slice of a chunked call (text.search, W5.4), as RpcClient.chunked gives them.
-  chunked<M extends 'text.search'>(
+  // Each slice of a chunked call (text.search, text.extract: W5.4), as RpcClient.chunked gives them.
+  chunked<M extends 'text.search' | 'text.extract'>(
     method: M,
     params: Omit<Methods[M]['params'], 'cursor'>,
     options?: CallOptions,

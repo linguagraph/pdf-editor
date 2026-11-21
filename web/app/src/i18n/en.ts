@@ -487,7 +487,18 @@ export const EN = {
   'copy.tooLarge':
     'The selection is too large to copy at once (about 50 MB of text). Select fewer pages.',
   'copy.failed': 'The browser did not copy the text. Click the page and try again.',
+  'copy.progress': 'Copying text',
+  'copy.changed': 'The document changed while the text was being copied. Copy again.',
+  'copy.busy': 'Another task is running. Copy again when it has finished.',
+  'copy.ready': 'The text is ready. Press Copy to put it on the clipboard.',
+  'copy.readyAction': 'Copy',
   'text.stillLoading': 'The text of the selected pages is still loading. Try again in a moment.',
+  'text.selectedAll': {
+    one: 'Selected the text of the page.',
+    other: 'Selected the text of all {count} pages.',
+  },
+  'redact.selectionTooLarge':
+    'Mark Text works on up to 300 pages at a time. Select fewer pages, or use Mark Pages.',
   'redact.selectTextFirst': 'Select some text on a page first, then press Mark Text.',
   'redact.notReady': 'The document is not ready yet. Press Mark Text again in a moment.',
   'redact.markedText': {

@@ -1,17 +1,27 @@
 // Copy and Select All over the page text (W5.4 S4, W1.4 section 10). The model's selection (a drag,
 // or Select All) is read first: its chars are the text copied, the chars of each page in reading
 // order, lines joined by a line break, as the desktop copies. Pages are joined the same way. The
-// browser's selection is read only when the model is off (the Hand tool, see DocumentView). Nothing
-// here changes the document.
+// browser's selection is read only when the model is off (the Hand tool, see DocumentView). A
+// selection whose pages are not all loaded is copied by the engine in slices (W5.4, largeCopy.ts).
+// Nothing here changes the document.
 import { toasts, type ToastStore } from '../feedback/toasts';
 import { t } from '../i18n/t';
 import { LINE_SEP, type PageTextIndex } from './pageTextIndex';
-import { domSelectionAreas, MODEL_OFF, type ModelRead, type TextLineLookup } from './selection';
+import { type EnginePlan, MAX_COPY_CHARS } from './largeCopy';
+import { domSelectionAreas, type ModelRead, type TextLineLookup } from './selection';
 import { type PageIndexes, type TextSelection } from './textSelection';
 
-// The most text one copy takes (W1.4 section 10, decision D4): a larger selection is refused with a
-// message, never cut short, so the clipboard never gets part of what was selected.
-export const MAX_COPY_CHARS = 50 * 1024 * 1024;
+export { MAX_COPY_CHARS } from './largeCopy';
+
+// What Copy does with the model's selection (W5.4 section 3.1). `off`: Hand or no view, so the
+// browser's selection is copied. `pending`: Select All still waits for the last page's length.
+// `local`: every covered index is loaded, so the text is built here ('' for nothing selected).
+// `engine`: some are not, so the engine copies the text in slices.
+export type CopyPlan =
+  | { readonly kind: 'off' }
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'local'; readonly text: string }
+  | ({ readonly kind: 'engine' } & EnginePlan);
 
 export interface CopyDeps {
   // The window's selection, or null when there is none to read.
@@ -20,12 +30,34 @@ export interface CopyDeps {
   readonly lookup: TextLineLookup;
   readonly clipboard: Pick<Clipboard, 'writeText'> | undefined;
   readonly store?: Pick<ToastStore, 'push'>;
-  // The model's selection text (readModelText through the view). Its `off` state reads the browser's
-  // selection instead; a `ready` one is copied as it is, even when empty (no browser fallback).
-  readonly model?: () => ModelRead<string>;
-  // Asks for the index of the pages a `loading` read names. Copy cannot wait for them (the clipboard
-  // write must stay in the keypress), so the next press finds them.
-  readonly loadPages?: (pages: readonly number[]) => Promise<void>;
+  // What the view's selection needs (DocumentView.copyPlan). Absent: the browser's selection.
+  readonly plan?: () => CopyPlan;
+  // Copies an `engine` plan in slices (largeCopy.copyLarge). It runs before copySelectedText returns,
+  // so the clipboard call is still in the keypress.
+  readonly large?: (plan: EnginePlan) => void;
+}
+
+// The copy plan of the model's selection. Pure: the view passes what it knows. `selecting` is false
+// under Hand (or another tool that takes the drag), where the browser's selection is copied.
+export function planCopy(
+  selecting: boolean,
+  selection: TextSelection | null,
+  indexOf: (page: number) => PageTextIndex | undefined,
+  pending: boolean,
+  changes: EnginePlan['changes'],
+): CopyPlan {
+  if (!selecting) return { kind: 'off' };
+  if (pending) return { kind: 'pending' };
+  if (selection === null || selection.isEmpty) return { kind: 'local', text: '' };
+  const read = readModelIndexes(selection, indexOf);
+  if (read.state === 'ready') return { kind: 'local', text: selection.text(read.value) };
+  return {
+    kind: 'engine',
+    start: selection.start,
+    end: selection.end,
+    pages: selection.end.page - selection.start.page + 1,
+    changes,
+  };
 }
 
 // The selected text, or '' when nothing selected has text. Each page's selected lines are joined by
@@ -78,13 +110,17 @@ export function readModelText(
 // browser still counts it as the user's keypress or click (Firefox and Safari require that).
 export function copySelectedText(deps: CopyDeps): void {
   const store = deps.store ?? toasts;
-  const read = deps.model?.() ?? MODEL_OFF;
-  if (read.state === 'loading') {
-    void deps.loadPages?.(read.pages);
+  const plan: CopyPlan = deps.plan?.() ?? { kind: 'off' };
+  if (plan.kind === 'pending') {
     store.push('info', t('text.stillLoading'));
     return;
   }
-  const text = read.state === 'ready' ? read.value : selectedText(deps.selection, deps.lookup);
+  if (plan.kind === 'engine') {
+    if (deps.large === undefined) store.push('error', t('copy.failed'));
+    else deps.large(plan);
+    return;
+  }
+  const text = plan.kind === 'local' ? plan.text : selectedText(deps.selection, deps.lookup);
   if (text === '') {
     store.push('info', t('copy.nothingSelected'));
     return;

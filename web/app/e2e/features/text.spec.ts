@@ -24,6 +24,11 @@ async function captureClipboard(page: Page): Promise<void> {
           copied.push(text);
           return Promise.resolve();
         },
+        // A large copy writes a ClipboardItem whose data is a promise (largeCopy.ts): read it back.
+        write: async (items: ClipboardItems) => {
+          const blob = await items[0]?.getType('text/plain');
+          if (blob !== undefined) copied.push(await blob.text());
+        },
       },
     });
   });
@@ -78,23 +83,34 @@ test.describe('engine staged', () => {
     expect(problems, 'CSP or page errors').toEqual([]);
   });
 
-  test('Select All then Copy: the page text is copied in reading order', async ({ page }) => {
+  test('Select All then Copy: the text of every page is copied in reading order', async ({
+    page,
+  }) => {
     const problems = watchPage(page);
     await captureClipboard(page);
     await openApp(page);
     await openPdf(page, 'text_multipage.pdf', fixture('text_multipage.pdf'));
 
-    // Ctrl+A selects the text of the page in view (page 1), and Ctrl+C copies it.
-    const expected = await lineTexts(pageLines(page, 0));
-    expect(expected[0]).toBe('Page 1 heading');
+    // Ctrl+A selects the text of the whole document (W5.4), and Ctrl+C copies it in slices. The
+    // pages are not all mounted, so the check is on the order of their headings, not on every line.
+    expect(await lineTexts(pageLines(page, 0))).toContain('Page 1 heading');
     await page.locator('[data-page="0"]').click({ position: { x: 5, y: 5 } });
     await page.keyboard.press('Control+A');
+    // Select All reads the last page's text before it reports, so Copy waits for that toast.
+    await expect(
+      page.getByText('Selected the text of all 5 pages.', { exact: true }),
+    ).toBeVisible();
     await page.keyboard.press('Control+C');
 
     await expect(page.getByText('Copied to clipboard.', { exact: true })).toBeVisible();
     const written = await copied(page);
     expect(written).toHaveLength(1);
-    expect(written[0]).toBe(expected.join('\n'));
+    let at = -1;
+    for (let index = 1; index <= 5; index += 1) {
+      const next = written[0]?.indexOf(`Page ${index} heading`, at + 1) ?? -1;
+      expect(next, `Page ${index} heading after the previous page`).toBeGreaterThan(at);
+      at = next;
+    }
 
     expect(problems, 'CSP or page errors').toEqual([]);
   });

@@ -5,7 +5,7 @@ import { COMMANDS, REGISTRY } from '../commands/catalog';
 import { commandForEvent } from '../commands/shortcuts';
 import { commandDisabledReason, runCommand, type CommandHandlers } from '../commands/run';
 import type { CommandState } from '../commands/registry';
-import { copySelectedText, readModelText, selectPageText, selectedText } from './copy';
+import { copySelectedText, planCopy, readModelText, selectPageText, selectedText } from './copy';
 import { PageTextIndex } from './pageTextIndex';
 import { type TextLineLookup, domSelectionAreas } from './selection';
 import { decodeTextLayer, type TextLine } from './textLayer';
@@ -173,6 +173,44 @@ const MODEL_INDEX = new PageTextIndex({
   lineNumbers: [0, 0, 0, 1, 1],
 });
 const indexOf = (page: number) => (page === 0 ? MODEL_INDEX : undefined);
+// A change listener that never hears anything (a plan that is not run in these tests).
+const noChanges = () => () => {};
+
+describe('planCopy (W5.4 section 3.1)', () => {
+  const two = new TextSelection({ page: 0, index: 0 }, { page: 1, index: 2 });
+
+  it('is off when the model is not selecting (Hand)', () => {
+    expect(planCopy(false, two, indexOf, false, noChanges)).toEqual({ kind: 'off' });
+  });
+
+  it('is pending while Select All waits for the last page', () => {
+    expect(planCopy(true, two, indexOf, true, noChanges)).toEqual({ kind: 'pending' });
+  });
+
+  it('is local with an empty text for no selection or an empty one', () => {
+    expect(planCopy(true, null, indexOf, false, noChanges)).toEqual({ kind: 'local', text: '' });
+    const empty = new TextSelection({ page: 0, index: 1 }, { page: 0, index: 1 });
+    expect(planCopy(true, empty, indexOf, false, noChanges)).toEqual({ kind: 'local', text: '' });
+  });
+
+  it('is local with the text when every covered index is loaded', () => {
+    const one = new TextSelection({ page: 0, index: 0 }, { page: 0, index: 5 });
+    expect(planCopy(true, one, indexOf, false, noChanges)).toEqual({
+      kind: 'local',
+      text: 'ab\ncd',
+    });
+  });
+
+  it('is engine, with the ends and the page count, when a covered index is not loaded', () => {
+    const plan = planCopy(true, two, indexOf, false, noChanges);
+    expect(plan).toMatchObject({
+      kind: 'engine',
+      start: { page: 0, index: 0 },
+      end: { page: 1, index: 2 },
+      pages: 2,
+    });
+  });
+});
 
 describe('model selection read (W5.4: a drag or Select All)', () => {
   it('reads the model selection of two lines as "ab\\ncd"', () => {
@@ -199,7 +237,7 @@ describe('model selection read (W5.4: a drag or Select All)', () => {
       lookup,
       clipboard: { writeText },
       store: fakeStore(),
-      model: () => readModelText(selection, indexOf),
+      plan: () => planCopy(true, selection, indexOf, false, noChanges),
     });
     expect(writeText).toHaveBeenCalledWith('ab\ncd');
   });
@@ -212,12 +250,12 @@ describe('model selection read (W5.4: a drag or Select All)', () => {
       lookup,
       clipboard: { writeText },
       store: fakeStore(),
-      model: () => ({ state: 'off' }),
+      plan: () => ({ kind: 'off' }),
     });
     expect(writeText).toHaveBeenCalledWith('ab');
   });
 
-  it('does not fall back to the browser when the model is ready and empty', () => {
+  it('does not fall back to the browser when the model is local and empty', () => {
     const page = mountPage(0, LINES_0);
     const writeText = vi.fn(() => Promise.resolve());
     const store = fakeStore();
@@ -226,27 +264,46 @@ describe('model selection read (W5.4: a drag or Select All)', () => {
       lookup,
       clipboard: { writeText },
       store,
-      model: () => ({ state: 'ready', value: '' }),
+      plan: () => ({ kind: 'local', text: '' }),
     });
     expect(writeText).not.toHaveBeenCalled();
     expect(store.push).toHaveBeenCalledWith('info', EN['copy.nothingSelected']);
   });
 
-  it('says the text is still loading and asks for the pages, without a clipboard call', () => {
+  it('says the text is still loading while Select All waits, without a clipboard call', () => {
     const writeText = vi.fn(() => Promise.resolve());
     const store = fakeStore();
-    const loadPages = vi.fn(() => Promise.resolve());
     copySelectedText({
       selection: null,
       lookup,
       clipboard: { writeText },
       store,
-      model: () => ({ state: 'loading', pages: [1] }),
-      loadPages,
+      plan: () => ({ kind: 'pending' }),
     });
     expect(writeText).not.toHaveBeenCalled();
-    expect(loadPages).toHaveBeenCalledWith([1]);
     expect(store.push).toHaveBeenCalledWith('info', EN['text.stillLoading']);
+  });
+
+  it('hands an engine plan to the large copy, before it returns', () => {
+    const large = vi.fn();
+    const plan = {
+      kind: 'engine' as const,
+      start: { page: 0, index: 0 },
+      end: { page: 2, index: 1 },
+      pages: 3,
+      changes: noChanges,
+    };
+    const writeText = vi.fn(() => Promise.resolve());
+    copySelectedText({
+      selection: null,
+      lookup,
+      clipboard: { writeText },
+      store: fakeStore(),
+      plan: () => plan,
+      large,
+    });
+    expect(large).toHaveBeenCalledWith(plan);
+    expect(writeText).not.toHaveBeenCalled();
   });
 
   it('Select All selects the whole page in the model, and Copy yields it', () => {

@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from pdfeditor.model import platform as model_platform
-from pdfeditor.services.text import LINE_SEP
+from pdfeditor.services.text import LINE_SEP, TextIndexCache, TextPos, TextSelection
 from pdfeditor.webapi import dispatch, limits
 from pdfeditor.webapi.errors import INVALID_ARGS, NO_DOCUMENT, STALE_CURSOR
 from pdfeditor.webapi.platform import configure_web
@@ -265,6 +265,30 @@ def test_chunked_extract_equals_one_call(
     # A slice with no text is empty; the caller joins the non-empty slices.
     assert LINE_SEP.join(p for p in pieces if p) == full["text"]
     assert part["done"] is True and part["pages_done"] == 5
+
+
+def test_chunked_whole_document_copy_equals_the_desktop_selection(
+    web: None, fixture_pdf: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # W5.4: a whole-document Copy joins its slices (largeCopy.ts) as the desktop's
+    # TextSelection.text joins the pages, so the web copy and the desktop copy give the same string.
+    handle = open_bytes(fixture_pdf, "text_multipage")
+    session = REGISTRY.get(handle)
+    cache = TextIndexCache(session)
+    last = session.document.page_count - 1
+    end = pos(last, len(cache.get(last)))
+    desktop = TextSelection(TextPos(0, 0), TextPos(last, len(cache.get(last)))).text(cache)
+    assert desktop
+    monkeypatch.setattr(limits, "TEXT_PAGES_PER_SLICE", 1)
+    pieces: list[str] = []
+    cursor = None
+    while True:
+        part = extract(handle, pos(0, 0), end, cursor=cursor)
+        pieces.append(part["text"])
+        cursor = part["cursor"]
+        if cursor is None:
+            break
+    assert LINE_SEP.join(p for p in pieces if p) == desktop
 
 
 # -- search ------------------------------------------------------------------------------------

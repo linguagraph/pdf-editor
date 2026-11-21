@@ -62,6 +62,7 @@ import { RedactionController } from './redaction/controller';
 import { MarkPagesDialog } from './redaction/MarkPagesDialog';
 import { markSelectedText } from './redaction/markText';
 import { copySelectedText } from './text/copy';
+import { copyLarge } from './text/largeCopy';
 import { RedactionsPanel } from './redaction/RedactionsPanel';
 import { RedactionPropertiesDialog } from './redaction/RedactionPropertiesDialog';
 import { useRedactionState } from './redaction/useRedaction';
@@ -292,14 +293,26 @@ export function App({
     'export-comments': () => setCommentsExportOpen(true),
     'import-comments': () => setCommentsImportOpen(true),
     // Copy (Ctrl+C) copies the selection over the page text, as the desktop does (W5.4 S4): the
-    // model's (a drag or Select All), or the browser's under Hand.
+    // model's (a drag or Select All), or the browser's under Hand. A large selection is copied in
+    // slices by the engine of the active tab (W5.4, largeCopy.ts).
     copy: () =>
       copySelectedText({
         selection: window.getSelection(),
         lookup: (page) => viewRef.current?.cachedLines(page),
         clipboard: navigator.clipboard,
-        model: () => viewRef.current?.selectedText() ?? { state: 'off' },
-        loadPages: (pages) => viewRef.current?.loadTextPages(pages) ?? Promise.resolve(),
+        plan: () => viewRef.current?.copyPlan() ?? { kind: 'off' },
+        large: (plan) => {
+          if (session === null) return;
+          copyLarge(
+            {
+              rpc: session.rpc,
+              handle: session.handle,
+              clipboard: navigator.clipboard,
+              store: toasts,
+            },
+            plan,
+          );
+        },
       }),
     // Ctrl+F: the search panel, on the left, with focus in its query box (also when it is open).
     find: () => {
@@ -586,7 +599,8 @@ export function App({
       ? {
           // Go to Page (W4.3b) focuses the canvas pill's page field.
           'go-to-page': () => viewRef.current?.focusPageField(),
-          'select-all': () => viewRef.current?.selectPageText(),
+          // Select All (W5.4 section 2) selects the text of the whole document under Select.
+          'select-all': () => viewRef.current?.selectAll(),
           // Mark Pages (W4.13) opens the dialog that marks whole pages; nothing is applied.
           'mark-whole-pages': () => {
             if (redaction === null) {
@@ -605,6 +619,7 @@ export function App({
             }
             void markSelectedText({
               controller: redaction,
+              pageSpan: () => view.selectedPageSpan(),
               model: () => view.selectedAreas(),
               clearModel: () => view.clearTextSelection(),
               loadPages: (pages) => view.loadTextPages(pages),

@@ -57,8 +57,10 @@ describe('RenderScheduler', () => {
     await Promise.resolve();
     expect(revisions).not.toHaveBeenCalled();
 
-    scheduler.noteRevisions({ '0': 3 });
+    scheduler.noteRevisions({ '0': 3, '4': 1 });
     expect(revisions).toHaveBeenCalledTimes(1);
+    // The listener is told which pages moved (only those, so a selection checks just them).
+    expect(revisions).toHaveBeenCalledWith([0, 4]);
     scheduler.noteRevisions({ '0': 3 });
     expect(revisions).toHaveBeenCalledTimes(1);
 
