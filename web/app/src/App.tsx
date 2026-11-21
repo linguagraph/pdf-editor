@@ -1085,6 +1085,7 @@ export function App({
         isOpen={combineOpen}
         onClose={() => setCombineOpen(false)}
         startWorker={jobs.acquire}
+        engine={engine}
       />
       {documentShown && session !== null ? (
         <PropertiesDialog

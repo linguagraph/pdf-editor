@@ -19,6 +19,7 @@ from pdfeditor.core.session import DocumentSession
 from pdfeditor.webapi import (
     actions,
     attachments,
+    combine,
     content,
     dto,
     fonts,
@@ -83,6 +84,7 @@ METHODS: dict[str, Method] = {
     "comments.flattenable": Method(dto.HandleParams, actions.flattenable),
     "comments.xfdf_preview": Method(dto.XfdfPreviewParams, actions.xfdf_preview),
     "fonts.validate": Method(dto.FontValidateParams, fonts.validate),
+    "combine.probe": Method(dto.CombineProbeParams, combine.probe),
     "content.objects": Method(dto.PageParams, content.list_objects),
     "content.preview_font": Method(dto.PreviewFontParams, content.preview_font),
     "attachments.list": Method(dto.HandleParams, attachments.list_attachments),

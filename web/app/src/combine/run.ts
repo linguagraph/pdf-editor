@@ -4,9 +4,10 @@
 import { MAX_FILE_BYTES } from '../documents/openFile';
 import type { WorkerClient } from '../engine/start';
 import { RpcError } from '../rpc/client';
-import { t } from '../i18n/t';
+import { t, tp } from '../i18n/t';
 import type { JobProgressStore } from '../feedback/jobRun';
 import { parsePageRanges, type PageRangeKind } from '../pages/pageRanges';
+import type { ProbeState } from './probe';
 import { runMergeJob } from './merge';
 import { isImageSourceName, MIN_SOURCES, type SourceItem } from './sources';
 
@@ -30,7 +31,11 @@ export interface CombineDeps {
   readonly store: JobProgressStore;
   // A new job worker for this job. The flow terminates it when the job ends.
   readonly startWorker: () => WorkerClient;
+  // The rows' page counts, from the probe. A counted row's Pages text is checked in full mode.
+  readonly probes?: ReadonlyMap<number, ProbeState>;
 }
+
+const NO_PROBES: ReadonlyMap<number, ProbeState> = new Map();
 
 let nextToken = 1;
 
@@ -41,24 +46,56 @@ function asRpcError(error: unknown): RpcError {
   return new RpcError('INTERNAL', `the files could not be combined: ${message}`);
 }
 
-// The checks that come before any job starts: at least two sources, and no file above the same
-// 1 GiB limit that opening uses. A refusal returns the message to show, and starts nothing.
-export function checkSources(items: readonly SourceItem[]): string | null {
+// The checks that come before any job starts: at least two sources, no file above the same 1 GiB
+// limit that opening uses, and no row the probe could not read (a password-protected or unreadable
+// file cannot be combined yet). A refusal returns the message to show, and starts nothing.
+export function checkSources(
+  items: readonly SourceItem[],
+  probes: ReadonlyMap<number, ProbeState> = NO_PROBES,
+): string | null {
   if (items.length < MIN_SOURCES) return t('combine.needTwo');
   const big = items.find((item) => item.file.size > MAX_FILE_BYTES);
   if (big !== undefined) return t('combine.tooLarge', { name: big.name });
+  const locked = countOf(items, probes, 'locked');
+  if (locked > 0) return tp('combine.blocked.locked', locked);
+  const unreadable = countOf(items, probes, 'unreadable');
+  if (unreadable > 0) return tp('combine.blocked.unreadable', unreadable);
+  // A row still counting may turn out locked or unreadable: the job would fail with a generic
+  // message, so Combine waits for the count instead.
+  if (countOf(items, probes, 'pending') > 0) return t('combine.blocked.pending');
   return null;
 }
 
-// Every PDF row whose Pages text is not blank and does not fit the page-range rule, checked in
-// syntax mode (the page count is not known until the job opens the file). Empty when all fit.
-export function rangeProblems(items: readonly SourceItem[]): readonly RangeProblem[] {
+// How many rows the probe put in the given state.
+function countOf(
+  items: readonly SourceItem[],
+  probes: ReadonlyMap<number, ProbeState>,
+  kind: ProbeState['kind'],
+): number {
+  return items.filter((item) => probes.get(item.id)?.kind === kind).length;
+}
+
+// Every PDF row whose Pages text is not blank and does not fit the page-range rule. A row whose page
+// count is known is checked in full mode, so a page past the end is found here; the others in syntax
+// mode, and the job stays the authority for them. Empty when all fit.
+export function rangeProblems(
+  items: readonly SourceItem[],
+  probes: ReadonlyMap<number, ProbeState> = NO_PROBES,
+): readonly RangeProblem[] {
   const problems: RangeProblem[] = [];
   items.forEach((item, index) => {
     if (isImageSourceName(item.name) || item.pages.trim() === '') return;
-    const result = parsePageRanges(item.pages, null);
+    const state = probes.get(item.id);
+    const count = state?.kind === 'counted' ? state.pages : null;
+    const result = parsePageRanges(item.pages, count);
     if (!result.ok) {
-      problems.push({ index, kind: result.error.kind, item: result.error.item, count: null });
+      const outOfRange = result.error.kind === 'out_of_range';
+      problems.push({
+        index,
+        kind: result.error.kind,
+        item: result.error.item,
+        count: outOfRange ? count : null,
+      });
     }
   });
   return problems;
@@ -89,9 +126,10 @@ export async function runCombine(
   items: readonly SourceItem[],
   deps: CombineDeps,
 ): Promise<CombineOutcome> {
-  const refusal = checkSources(items);
+  const probes = deps.probes ?? NO_PROBES;
+  const refusal = checkSources(items, probes);
   if (refusal !== null) return { status: 'refused', message: refusal };
-  const [first] = rangeProblems(items);
+  const [first] = rangeProblems(items, probes);
   if (first !== undefined) return { status: 'rangeError', problem: first };
 
   const worker = deps.startWorker();

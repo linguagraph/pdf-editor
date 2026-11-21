@@ -46,6 +46,11 @@ SNAPSHOT_BUDGET_BYTES = 512 * 1024 * 1024
 # 1 GiB document ceiling. 50 MiB takes every single-weight font in common use, CJK included.
 MAX_FONT_BYTES = 50 * 1024**2
 
+# The Combine probe (W6.3b): combine.probe counts a PDF's pages from its bytes. The bytes stay in
+# the engine worker's heap for the length of the call, and that heap only grows, so a larger file
+# is left to the merge job, which has its own heap and is discarded when it ends.
+MAX_PROBE_BYTES = 64 * 1024**2
+
 # The engine heap (W1.1 section 7): the front end warns once the wasm linear memory passes this.
 # Linear memory only grows, so this is a high-water mark, and a warning is never an error.
 HEAP_WARN_BYTES = 1536 * 1024**2  # 1.5 GiB

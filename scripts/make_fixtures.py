@@ -217,6 +217,22 @@ def encrypted() -> None:
     )
 
 
+def encrypted_owner_only() -> None:
+    """Encrypted, but with an empty user password: it opens with no password, and only the owner
+    password (which nobody types to read it) is set."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((72, 72), "Open content", fontsize=14)
+    _save(
+        doc,
+        "encrypted_owner_only.pdf",
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        user_pw="",
+        owner_pw="owner",
+        permissions=pymupdf.PDF_PERM_PRINT,
+    )
+
+
 def hybrid_xref() -> None:
     """A hybrid-reference file (ISO 32000 7.5.8.4), as some office suites write: a classic xref
     table with /XRefStm, and the page tree node only reachable through that stream."""
@@ -1313,6 +1329,7 @@ GENERATORS: dict[str, Callable[[], None]] = {
     "outline_unsorted": outline_unsorted,
     "page_labels": page_labels,
     "encrypted": encrypted,
+    "encrypted_owner_only": encrypted_owner_only,
     "hybrid_xref": hybrid_xref,
     "rotated_pages": rotated_pages,
     "links_rotated": links_rotated,

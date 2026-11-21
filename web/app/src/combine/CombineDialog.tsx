@@ -5,12 +5,15 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Button } from 'react-aria-components';
 import { startJobWorker, type WorkerClient } from '../engine/start';
+import type { EngineConnection } from '../engine/engineConnection';
 import { jobWorkerBootOptions } from '../engine/bootOptions';
 import { t, tp } from '../i18n/t';
 import { jobProgress, type JobProgressStore } from '../feedback/jobRun';
 import { downloadBytes } from '../files/downloads';
 import { Overlay } from '../layout/Overlay';
 import { parsePageRanges, type PageRangeKind } from '../pages/pageRanges';
+import { mergePreview, type MergePreview, type PreviewRow } from './preview';
+import { ProbeQueue, type ProbeState } from './probe';
 import { rangeProblems, runCombine, type RangeProblem } from './run';
 import {
   ACCEPT,
@@ -28,6 +31,9 @@ import './combine.css';
 export interface CombineDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  // The engine, for each PDF's page count (combine.probe). Without it no row is counted, and
+  // Combine is not blocked by that.
+  engine?: Pick<EngineConnection, 'whenReady'>;
   // The app's job store. Tests pass their own.
   store?: JobProgressStore;
   // A new job worker per run. The default starts the built job worker.
@@ -48,6 +54,43 @@ interface RowError {
   readonly kind: PageRangeKind;
   readonly item: string;
   readonly count: number | null;
+}
+
+// The note under a row's name: its page count and, when known, where its pages land in the result.
+// Null for an image or a row with nothing to say yet.
+function rowNote(state: ProbeState | undefined, placed: PreviewRow | undefined): string | null {
+  if (state === undefined) return null;
+  switch (state.kind) {
+    case 'pending':
+      return t('combine.row.counting');
+    case 'counted': {
+      const pages = tp('combine.row.pages', state.pages);
+      if (placed === undefined || placed.first === null || placed.last === null) return pages;
+      const where =
+        placed.first === placed.last
+          ? t('combine.row.placedOne', { first: placed.first })
+          : t('combine.row.placed', { first: placed.first, last: placed.last });
+      return `${pages}, ${where}`;
+    }
+    case 'locked':
+      return t('combine.row.locked');
+    case 'unreadable':
+      return t('combine.row.unreadable');
+    case 'unchecked':
+      return t(
+        state.reason === 'large' ? 'combine.row.unchecked.large' : 'combine.row.unchecked.engine',
+      );
+  }
+}
+
+// The summary under the list: the result's page count when every file is counted, else the pages
+// counted so far. Null when there is nothing to say (a Pages box alone can say it on its row).
+function previewText(preview: MergePreview): string | null {
+  if (preview.total !== null) return tp('combine.preview.total', preview.total);
+  if (preview.unknown > 0) {
+    return tp('combine.preview.partial', preview.unknown, { pages: preview.known });
+  }
+  return null;
 }
 
 function rangeMessage(error: RowError, name: string): string {
@@ -97,6 +140,7 @@ export function CombineDialog({
   store = jobProgress,
   startWorker = () => startJobWorker(jobWorkerBootOptions()),
   download = downloadBytes,
+  engine,
 }: CombineDialogProps) {
   const [items, setItems] = useState<readonly SourceItem[]>([]);
   const [outputName, setOutputName] = useState(DEFAULT_OUTPUT_NAME);
@@ -104,10 +148,45 @@ export function CombineDialog({
   const [phase, setPhase] = useState<Phase>('editing');
   const [result, setResult] = useState<Result | null>(null);
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<number, RowError>>(new Map());
+  const [probes, setProbes] = useState<ReadonlyMap<number, ProbeState>>(new Map());
   const nextId = useRef(1);
   const inputRef = useRef<HTMLInputElement>(null);
   const fieldRefs = useRef(new Map<number, HTMLInputElement>());
   const focusId = useRef<number | null>(null);
+  const probing = useRef<ProbeQueue | null>(null);
+  // The rows that were still counting when the engine changed: the next queue counts them again.
+  const countAgain = useRef<readonly SourceItem[]>([]);
+
+  // One queue for the engine. Its replies only set a row's state: ids are never reused, so a reply
+  // for a removed row leaves an entry nothing reads. A removed row is forgotten (see removeRow), so
+  // it is not probed. Closing the engine link drops what is still waiting, and hands back the rows
+  // still counting, which a new engine counts again.
+  useEffect(() => {
+    if (engine === undefined) {
+      // No engine to count with. The rows that were still counting are unchecked, not pending: a
+      // pending row blocks Combine, and nothing would ever finish it. They stay in countAgain, so
+      // a new engine counts them again.
+      const waiting = countAgain.current;
+      if (waiting.length > 0) {
+        setProbes((current) => {
+          const next = new Map(current);
+          for (const item of waiting) next.set(item.id, { kind: 'unchecked', reason: 'engine' });
+          return next;
+        });
+      }
+      return undefined;
+    }
+    const queue = new ProbeQueue(engine, (id, state) => {
+      setProbes((current) => new Map(current).set(id, state));
+    });
+    probing.current = queue;
+    for (const item of countAgain.current) queue.add(item);
+    countAgain.current = [];
+    return () => {
+      countAgain.current = queue.close();
+      probing.current = null;
+    };
+  }, [engine]);
 
   // Focus moves after the render that enables the field: a disabled box cannot take it.
   useEffect(() => {
@@ -116,16 +195,33 @@ export function CombineDialog({
     focusId.current = null;
   });
 
+  // The page count of a row, once the probe has given it; null while it is not known.
+  const pageCountOf = (id: number): number | null => {
+    const state = probes.get(id);
+    return state?.kind === 'counted' ? state.pages : null;
+  };
+
   const addFiles = (files: readonly File[]): void => {
     if (files.length === 0) return;
     const added = addSources(items, files, nextId.current);
     nextId.current += files.length;
     setItems(added.items);
+    for (const item of added.items.slice(items.length)) probing.current?.add(item);
     setMessage(
       added.rejected.length > 0
         ? t('combine.unsupported', { name: added.rejected.join(', ') })
         : null,
     );
+  };
+
+  // Removes a row, and stops its probe if it has not run yet (or drops its reply if it is running).
+  const removeRow = (index: number): void => {
+    const removed = items[index];
+    if (removed !== undefined) {
+      probing.current?.forget(removed.id);
+      countAgain.current = countAgain.current.filter((item) => item.id !== removed.id);
+    }
+    setItems(removeSource(items, index));
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>): void => {
@@ -146,21 +242,24 @@ export function CombineDialog({
   // The Pages box of one row is checked when it loses focus, not on every key (3-2 on the way
   // to 3-20 must not flash an error).
   const checkField = (id: number, text: string): void => {
-    const checked = parsePageRanges(text, null);
-    const error = checked.ok ? null : { ...checked.error, count: null };
+    const count = pageCountOf(id);
+    const checked = parsePageRanges(text, count);
+    const error = checked.ok
+      ? null
+      : { ...checked.error, count: checked.error.kind === 'out_of_range' ? count : null };
     setRowErrors((errors) => withError(errors, id, error));
   };
 
   const combine = async (): Promise<void> => {
     if (phase === 'working') return;
     setMessage(null);
-    const problems = rangeProblems(items);
+    const problems = rangeProblems(items, probes);
     if (problems.length > 0) {
       showProblems(problems);
       return;
     }
     setPhase('working');
-    const outcome = await runCombine(items, { store, startWorker });
+    const outcome = await runCombine(items, { store, startWorker, probes });
     if (outcome.status === 'done') {
       setResult({ name: outcome.name, bytes: outcome.bytes });
       setPhase('done');
@@ -170,6 +269,8 @@ export function CombineDialog({
     if (outcome.status === 'refused') setMessage(outcome.message);
     setPhase('editing');
   };
+
+  const preview = mergePreview(items, probes);
 
   // A job that is running keeps the dialog open: its result is shown here, so closing would lose it.
   const requestClose = (): void => {
@@ -210,6 +311,7 @@ export function CombineDialog({
             {items.map((item, index) => {
               const error = rowErrors.get(item.id);
               const errorId = `combine-pages-error-${item.id}`;
+              const note = rowNote(probes.get(item.id), preview.rows[index]);
               return (
                 <li
                   key={item.id}
@@ -263,10 +365,11 @@ export function CombineDialog({
                   <Button
                     className="combine-button"
                     isDisabled={phase === 'working'}
-                    onPress={() => setItems(removeSource(items, index))}
+                    onPress={() => removeRow(index)}
                   >
                     {t('combine.remove')}
                   </Button>
+                  {note === null ? null : <p className="combine-row-note">{note}</p>}
                   {error === undefined ? null : (
                     <p id={errorId} className="combine-pages-error">
                       {rangeMessage(error, item.name)}
@@ -307,6 +410,11 @@ export function CombineDialog({
             </Button>
           </div>
         ) : null}
+        {items.length === 0 ? null : (
+          <p className="combine-preview" role="status">
+            {previewText(preview) ?? ''}
+          </p>
+        )}
         <div className="combine-actions">
           <Button
             className="combine-button combine-primary"

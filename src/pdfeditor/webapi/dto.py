@@ -719,6 +719,20 @@ class FontValidateResult:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class CombineProbeParams:
+    name: str  # the file name with .pdf, for the suffix check and messages; never a path
+    data: bytes  # the whole file, one $bin buffer (at most limits.MAX_PROBE_BYTES)
+    password: str | None = None  # this call only; never echoed, logged or kept
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CombineProbeResult:
+    page_count: int  # at least 1
+    encrypted: bool  # an /Encrypt dictionary is present, with or without a user password
+    needed_password: bool  # it opened only with the password sent
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class JobPrepareParams:
     handle: str
     job: str  # a job type name (W1.2 section 13), such as "action" or "reduce_size"

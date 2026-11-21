@@ -59,7 +59,10 @@ takes pages 1 to 4. `all`, or an empty box, takes every page, and `;` works like
 keep their order in the document, whatever order you type them in, so `5, 1` gives page 1 then
 page 5. A page number above the file's last page is refused, and the row says how many pages the
 file has. A bookmark of a page you leave out is dropped, and its sub-bookmarks move up one level.
-The web version takes the same ranges.
+The web version takes the same ranges. Each PDF row there shows its page count and where its pages
+land in the combined file (for example "pages 4–6 of the result"), and a total under the list says how
+many pages the combined file will have. A PDF larger than 64 MB is counted when you combine it. A
+password-protected PDF cannot be combined on the web yet: remove it from the list.
 
 The **Quick actions** on the start page also start this panel, as **Combine files**.
 

@@ -61,6 +61,7 @@ DEADLINE_CLASS: dict[str, str] = {
     "content.objects": "render",
     "content.preview_font": "render",
     "fonts.validate": "action",  # reads a whole font file (up to MAX_FONT_BYTES) under Pyodide
+    "combine.probe": "action",  # opens a whole PDF (up to MAX_PROBE_BYTES) under Pyodide (W6.3b)
     "actions.redo": "edit",
     "actions.run": "action",
     "actions.undo": "edit",

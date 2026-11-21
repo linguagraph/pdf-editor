@@ -182,6 +182,24 @@ export interface ColorDto {
   a: number;
 }
 
+export interface CombineProbeParams {
+  /** the file name with .pdf, for the suffix check and messages; never a path */
+  name: string;
+  /** the whole file, one $bin buffer (at most limits.MAX_PROBE_BYTES) */
+  data: ArrayBuffer;
+  /** this call only; never echoed, logged or kept */
+  password: string | null;
+}
+
+export interface CombineProbeResult {
+  /** at least 1 */
+  page_count: number;
+  /** an /Encrypt dictionary is present, with or without a user password */
+  encrypted: boolean;
+  /** it opened only with the password sent */
+  needed_password: boolean;
+}
+
 /**
  * One comment or reply (W7.1b S1). ``name`` is the /NM or the engine's synthetic name, which
  * the annotation actions take as ``AnnotRef.name``. Dates are ISO 8601 strings, or null.
@@ -891,6 +909,7 @@ export interface Methods {
   'actions.undo': { params: UndoParams; result: HistoryResult; deadline: 'edit' };
   'attachments.get': { params: AttachmentParams; result: AttachmentData; deadline: 'io' };
   'attachments.list': { params: HandleParams; result: AttachmentsResult; deadline: 'instant' };
+  'combine.probe': { params: CombineProbeParams; result: CombineProbeResult; deadline: 'action' };
   'comments.flattenable': { params: HandleParams; result: FlattenableResult; deadline: 'instant' };
   'comments.list': { params: HandleParams; result: CommentListResult; deadline: 'instant' };
   'comments.xfdf_preview': { params: XfdfPreviewParams; result: XfdfPreviewResult; deadline: 'action' };
@@ -935,6 +954,7 @@ export const METHOD_DEADLINE: { readonly [M in MethodName]: DeadlineClass } = {
   'actions.undo': 'edit',
   'attachments.get': 'io',
   'attachments.list': 'instant',
+  'combine.probe': 'action',
   'comments.flattenable': 'instant',
   'comments.list': 'instant',
   'comments.xfdf_preview': 'action',
@@ -984,6 +1004,7 @@ export const RESULT_DECODERS: {
   'actions.undo': decodeHistoryResult,
   'attachments.get': decodeAttachmentData,
   'attachments.list': decodeAttachmentsResult,
+  'combine.probe': decodeCombineProbeResult,
   'comments.flattenable': decodeFlattenableResult,
   'comments.list': decodeCommentListResult,
   'comments.xfdf_preview': decodeXfdfPreviewResult,
@@ -1214,6 +1235,34 @@ export function decodeColorDto(
     g: expectNumber(field(o, 'g', path), `${path}.g`),
     b: expectNumber(field(o, 'b', path), `${path}.b`),
     a: expectNumber(field(o, 'a', path), `${path}.a`),
+  };
+}
+
+export function decodeCombineProbeParams(
+  value: unknown,
+  ctx: DecodeContext,
+  path: string,
+): CombineProbeParams {
+  const o = expectObject(value, path);
+  checkKeys(o, ['name', 'data', 'password'], path);
+  return {
+    name: expectString(field(o, 'name', path), `${path}.name`),
+    data: takeBinary(field(o, 'data', path), ctx, `${path}.data`),
+    password: orNull(field(o, 'password', path), `${path}.password`, (v1, p1) => expectString(v1, p1)),
+  };
+}
+
+export function decodeCombineProbeResult(
+  value: unknown,
+  ctx: DecodeContext,
+  path: string,
+): CombineProbeResult {
+  const o = expectObject(value, path);
+  checkKeys(o, ['page_count', 'encrypted', 'needed_password'], path);
+  return {
+    page_count: expectInteger(field(o, 'page_count', path), `${path}.page_count`),
+    encrypted: expectBoolean(field(o, 'encrypted', path), `${path}.encrypted`),
+    needed_password: expectBoolean(field(o, 'needed_password', path), `${path}.needed_password`),
   };
 }
 

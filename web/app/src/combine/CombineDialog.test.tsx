@@ -1,11 +1,13 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EngineClient, EngineConnection } from '../engine/engineConnection';
 import type { CallResult, Notice } from '../engine/loader';
 import type { WorkerClient } from '../engine/start';
 import { createJobProgressStore } from '../feedback/jobRun';
 import { createToastStore } from '../feedback/toasts';
 import { t, tp } from '../i18n/t';
+import { RpcError } from '../rpc/client';
 import { CombineDialog } from './CombineDialog';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -116,9 +118,17 @@ function rowNames(): string[] {
   );
 }
 
+// The row list item of the named file.
+function rowNamed(name: string): Element | undefined {
+  return [...document.querySelectorAll('.combine-row')].find(
+    (row) => row.querySelector('.combine-name')?.textContent === name,
+  );
+}
+
 function render(props: {
   startWorker?: () => WorkerClient;
   download?: (name: string, bytes: ArrayBuffer) => void;
+  engine?: Pick<EngineConnection, 'whenReady'>;
 }) {
   const store = createJobProgressStore({ toasts: createToastStore() });
   act(() => {
@@ -129,10 +139,32 @@ function render(props: {
         store={store}
         startWorker={props.startWorker ?? (() => mergingWorker(new ArrayBuffer(0)))}
         download={props.download ?? (() => undefined)}
+        engine={props.engine}
       />,
     );
   });
   return store;
+}
+
+// An engine whose combine.probe answers each file by its name: a page count, or an RpcError.
+function probingEngine(answer: (name: string) => { pages: number } | RpcError) {
+  const client = {
+    call: (_method: string, params: { name: string }): Promise<unknown> => {
+      const reply = answer(params.name);
+      if (reply instanceof RpcError) return Promise.reject(reply);
+      return Promise.resolve({ page_count: reply.pages, encrypted: false, needed_password: false });
+    },
+  };
+  return { whenReady: () => Promise.resolve(client as unknown as EngineClient) };
+}
+
+// Lets the probe queue run to the end: each probe is a few awaits, so a few turns are enough.
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
 }
 
 describe('CombineDialog', () => {
@@ -369,3 +401,143 @@ describe('CombineDialog page ranges', () => {
     expect(rowOf('b.pdf')?.textContent).toContain(message);
   });
 });
+
+describe('CombineDialog page counts', () => {
+  it('shows each file its pages and where they land, and the total of the result', async () => {
+    render({ engine: probingEngine((name) => ({ pages: name === 'a.pdf' ? 3 : 2 })) });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+
+    expect(rowNamed('a.pdf')?.textContent).toContain(tp('combine.row.pages', 3));
+    expect(rowNamed('a.pdf')?.textContent).toContain(
+      t('combine.row.placed', { first: 1, last: 3 }),
+    );
+    expect(rowNamed('b.pdf')?.textContent).toContain(
+      t('combine.row.placed', { first: 4, last: 5 }),
+    );
+    expect(document.querySelector('.combine-preview')?.textContent).toBe(
+      tp('combine.preview.total', 5),
+    );
+  });
+
+  it('refuses Combine with the locked message when a file is password protected', async () => {
+    const startWorker = vi.fn(() => mergingWorker(new ArrayBuffer(0)));
+    render({
+      startWorker,
+      engine: probingEngine((name) =>
+        name === 'a.pdf' ? new RpcError('PASSWORD_REQUIRED', 'protected') : { pages: 2 },
+      ),
+    });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+
+    expect(rowNamed('a.pdf')?.textContent).toContain(t('combine.row.locked'));
+    act(() => {
+      buttonNamed(t('combine.button')).click();
+    });
+    await settle();
+
+    expect(startWorker).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+      tp('combine.blocked.locked', 1),
+    );
+  });
+
+  it('marks a Pages box past the end of a counted file on its row, before Combine', async () => {
+    const startWorker = vi.fn(() => mergingWorker(new ArrayBuffer(0)));
+    render({ startWorker, engine: probingEngine(() => ({ pages: 2 })) });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+
+    const box = pagesBoxes()[0];
+    if (box === undefined) throw new Error('no Pages box');
+    typeInto(box, '9');
+    act(() => {
+      box.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+
+    const error = document.getElementById(box.getAttribute('aria-describedby') ?? '');
+    expect(error?.textContent).toBe(
+      tp('combine.error.ranges.outOfRange', 2, { item: '9', name: 'a.pdf' }),
+    );
+    act(() => {
+      buttonNamed(t('combine.button')).click();
+    });
+    await settle();
+    expect(startWorker).not.toHaveBeenCalled();
+  });
+
+  it('does not probe a row that was removed before its probe ran', async () => {
+    const engine = manualProbeEngine();
+    render({ engine: engine.engine });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+
+    act(() => {
+      rowNamed('b.pdf')?.querySelectorAll('button')[2]?.click(); // remove b.pdf while a.pdf counts
+    });
+    engine.answer('a.pdf', { pages: 3 });
+    await settle();
+
+    expect(engine.names()).toEqual(['a.pdf']);
+  });
+
+  it('counts the rows still pending again when the engine changes', async () => {
+    const startWorker = vi.fn(() => mergingWorker(new ArrayBuffer(0)));
+    const stalled = manualProbeEngine();
+    render({ startWorker, engine: stalled.engine });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+
+    render({ startWorker, engine: probingEngine(() => ({ pages: 2 })) });
+    await settle();
+    await act(async () => {
+      buttonNamed(t('combine.button')).click();
+    });
+
+    expect(stalled.names()).toEqual(['a.pdf']);
+    expect(startWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refuse Combine for a row still counting when the engine goes away', async () => {
+    const startWorker = vi.fn(() => mergingWorker(new ArrayBuffer(0)));
+    const stalled = manualProbeEngine();
+    render({ startWorker, engine: stalled.engine });
+    pick('a.pdf', 'b.pdf');
+    await settle();
+    expect(rowNamed('a.pdf')?.textContent).toContain(t('combine.row.counting'));
+
+    render({ startWorker, engine: undefined });
+    await settle();
+    expect(rowNamed('a.pdf')?.textContent).not.toContain(t('combine.row.counting'));
+
+    await act(async () => {
+      buttonNamed(t('combine.button')).click();
+    });
+    await settle();
+
+    expect(document.querySelector('[role="alert"]')?.textContent).not.toBe(
+      t('combine.blocked.pending'),
+    );
+    expect(startWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+// An engine that holds each probe until the test answers it, and names the probes it was asked.
+function manualProbeEngine() {
+  const calls: { name: string; resolve: (value: unknown) => void }[] = [];
+  const client = {
+    call: (_method: string, params: { name: string }): Promise<unknown> =>
+      new Promise<unknown>((resolve) => {
+        calls.push({ name: params.name, resolve });
+      }),
+  };
+  return {
+    engine: { whenReady: () => Promise.resolve(client as unknown as EngineClient) },
+    names: (): string[] => calls.map((call) => call.name),
+    answer: (name: string, reply: { pages: number }): void => {
+      const call = calls.find((candidate) => candidate.name === name);
+      call?.resolve({ page_count: reply.pages, encrypted: false, needed_password: false });
+    },
+  };
+}

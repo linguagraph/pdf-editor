@@ -670,6 +670,32 @@ export const EN = {
   },
   'combine.error.ranges.summary':
     "Some page ranges can't be used. Fix the ones marked, then combine again.",
+  'combine.row.pages': { one: '{count} page', other: '{count} pages' },
+  'combine.row.placed': 'pages {first}–{last} of the result',
+  'combine.row.placedOne': 'page {first} of the result',
+  'combine.row.counting': 'Counting pages…',
+  'combine.row.unchecked.large': 'Large file: pages are counted when you combine.',
+  'combine.row.unchecked.engine': 'Pages are counted when you combine.',
+  'combine.row.unreadable': "This file can't be read. Remove it to combine.",
+  'combine.row.locked':
+    'This file is password protected, so it cannot be combined yet. Remove it to combine.',
+  'combine.preview.total': {
+    one: 'The combined file will have {count} page.',
+    other: 'The combined file will have {count} pages.',
+  },
+  'combine.preview.partial': {
+    one: 'Pages counted so far: {pages}. 1 file is counted when you combine.',
+    other: 'Pages counted so far: {pages}. {count} files are counted when you combine.',
+  },
+  'combine.blocked.locked': {
+    one: 'Remove the password-protected file to combine.',
+    other: 'Remove the {count} password-protected files to combine.',
+  },
+  'combine.blocked.unreadable': {
+    one: "Remove the file that can't be read to combine.",
+    other: "Remove the {count} files that can't be read to combine.",
+  },
+  'combine.blocked.pending': 'Wait for the page counts to finish, then combine.',
 
   // Print dialog (W6.5, W1.6 section 5).
   'print.title': 'Print',

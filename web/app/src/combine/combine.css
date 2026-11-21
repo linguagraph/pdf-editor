@@ -43,6 +43,18 @@
   color: var(--color-text-muted);
 }
 
+.combine-row-note {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--color-text-muted);
+}
+
+.combine-preview {
+  margin: 0;
+  font-weight: 600;
+}
+
 .combine-row--error .combine-pages input {
   border-color: var(--color-danger);
 }
